@@ -20,6 +20,7 @@ import httpx
 from pydantic import ValidationError
 from qdrant_client import AsyncQdrantClient, models
 
+from ledger_rag.chunking import contextual_text
 from ledger_rag.config import Settings
 from ledger_rag.models import Chunk, Hit, Principal, QueryRequest
 from ledger_rag.providers import _endpoint
@@ -62,7 +63,8 @@ class QdrantRetriever:
         self._operation_lock = asyncio.Lock()
         self._write_uncertain = False
         self._identity = {
-            "ledger_schema": 1,
+            "ledger_schema": 2,
+            "chunk_text": "title-header-v1",
             "embedding_model": settings.embedding_model,
             "embedding_endpoint": settings.embedding_base_url.rstrip("/"),
             "embedding_dimensions": settings.embedding_dimensions,
@@ -183,7 +185,7 @@ class QdrantRetriever:
                 or point.payload.get("document_id") != owner.document_id
             ):
                 raise RetrievalError("Chunk ID is owned by a different tenant or document")
-        embeddings = await self._embed([chunk.text for chunk in chunks])
+        embeddings = await self._embed([contextual_text(chunk) for chunk in chunks])
         points = []
         documents: dict[tuple[str, str], list[str]] = defaultdict(list)
         for chunk, point_id, dense in zip(chunks, ids, embeddings, strict=True):
@@ -193,7 +195,10 @@ class QdrantRetriever:
                 models.PointStruct(
                     id=point_id,
                     payload=payload,
-                    vector={"dense": dense, "sparse": _sparse(chunk.text, document=True)},
+                    vector={
+                        "dense": dense,
+                        "sparse": _sparse(contextual_text(chunk), document=True),
+                    },
                 )
             )
             documents[(chunk.tenant_id, chunk.document_id)].append(point_id)
@@ -253,18 +258,24 @@ class QdrantRetriever:
 
     async def _search(self, query: QueryRequest, principal: Principal) -> list[Hit]:
         await self._ensure_collection(create=False)
-        dense = (await self._embed([query.question]))[0]
+        fusion = self._settings.retrieval_fusion
         query_filter = self._filter(query, principal)
         limit = max(query.top_k * 4, 20)
-        prefetch = [
-            models.Prefetch(query=dense, using="dense", filter=query_filter, limit=limit),
-            models.Prefetch(
-                query=_sparse(query.question, document=False),
-                using="sparse",
-                filter=query_filter,
-                limit=limit,
-            ),
-        ]
+        prefetch: list[models.Prefetch] = []
+        if fusion in {"hybrid", "dense"}:
+            dense = (await self._embed([self._settings.embedding_query_prefix + query.question]))[0]
+            prefetch.append(
+                models.Prefetch(query=dense, using="dense", filter=query_filter, limit=limit)
+            )
+        if fusion in {"hybrid", "sparse"}:
+            prefetch.append(
+                models.Prefetch(
+                    query=_sparse(query.question, document=False),
+                    using="sparse",
+                    filter=query_filter,
+                    limit=limit,
+                )
+            )
         result = await self._client.query_points(
             self._collection,
             prefetch=prefetch,

@@ -418,3 +418,29 @@ async def test_cancelled_remote_write_quarantines_instance() -> None:
         )
     client.delete.assert_not_called()
     await retriever.close()
+
+
+@pytest.mark.parametrize(
+    "fusion,expected",
+    [("hybrid", {"dense", "sparse"}), ("dense", {"dense"}), ("sparse", {"sparse"})],
+)
+async def test_fusion_modes_and_query_prefix(fusion: str, expected: set[str]) -> None:
+    retriever, client, requests = await store()
+    retriever._settings = retriever._settings.model_copy(
+        update={"retrieval_fusion": fusion, "embedding_query_prefix": "query: "}
+    )
+    principal = Principal(subject="u", tenant_id="tenant")
+    await retriever.search(QueryRequest(question="revenue growth"), principal)
+    prefetch = client.query_points.call_args.kwargs["prefetch"]
+    assert {item.using for item in prefetch} == expected
+    if "dense" in expected:
+        assert json.loads(requests[-1].content)["input"] == ["query: revenue growth"]
+    else:
+        assert requests == []
+
+
+async def test_documents_are_embedded_with_contextual_title_header() -> None:
+    retriever, client, requests = await store()
+    await retriever.upsert([chunk()])
+    assert json.loads(requests[-1].content)["input"] == ["Results\nRevenue increased."]
+    assert retriever._identity["chunk_text"] == "title-header-v1"

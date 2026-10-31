@@ -31,9 +31,13 @@ class Settings(BaseSettings):
     embedding_api_key: SecretStr | None = None
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = Field(default=1536, ge=32, le=8192)
+    # Instruction prefix some embedding models expect on queries only (e.g. BGE, E5, Arctic).
+    embedding_query_prefix: str = Field(default="", max_length=200)
+    retrieval_fusion: Literal["hybrid", "dense", "sparse"] = "hybrid"
     reranker_url: str = ""
     reranker_api_key: SecretStr | None = None
-    reranker_timeout_seconds: float = Field(default=3, gt=0, le=10)
+    reranker_timeout_seconds: float = Field(default=3, gt=0, le=60)
+    rerank_candidates: int = Field(default=20, ge=1, le=100)
     retrieval_backend: Literal["memory", "qdrant"] = "memory"
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: SecretStr | None = None

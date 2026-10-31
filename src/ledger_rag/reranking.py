@@ -3,6 +3,7 @@ import math
 import httpx
 from opentelemetry import trace
 
+from ledger_rag.chunking import contextual_text
 from ledger_rag.config import Settings
 from ledger_rag.contracts import Retriever
 from ledger_rag.models import Chunk, Hit, Principal, Profile, QueryRequest
@@ -15,6 +16,7 @@ class RerankingRetriever:
     def __init__(self, inner: Retriever, settings: Settings) -> None:
         self.inner = inner
         self.url = settings.reranker_url.rstrip("/")
+        self.candidates = settings.rerank_candidates
         headers = (
             {"Authorization": f"Bearer {settings.reranker_api_key.get_secret_value()}"}
             if settings.reranker_api_key
@@ -27,7 +29,9 @@ class RerankingRetriever:
     async def search(self, query: QueryRequest, principal: Principal) -> list[Hit]:
         if query.profile == Profile.VOICE:
             return await self.inner.search(query, principal)
-        candidates = await self.inner.search(query.model_copy(update={"top_k": 10}), principal)
+        candidates = await self.inner.search(
+            query.model_copy(update={"top_k": max(self.candidates, query.top_k)}), principal
+        )
         if any(not authorized(hit.chunk, principal, query) for hit in candidates):
             raise RuntimeError("Unauthorized reranking candidates")
         if not candidates:
@@ -37,7 +41,8 @@ class RerankingRetriever:
                 f"{self.url}/rerank",
                 json={
                     "query": query.question,
-                    "texts": [hit.chunk.text for hit in candidates],
+                    "texts": [contextual_text(hit.chunk) for hit in candidates],
+                    "truncate": True,
                     "raw_scores": False,
                     "return_text": False,
                 },
