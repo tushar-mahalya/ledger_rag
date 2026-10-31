@@ -440,12 +440,13 @@ def main(
     seed: int = 13,
     contexts_run: str = "",
 ) -> None:
-    """``--command retrieval|answers|all``; answers = GPU contexts stage then CPU LLM stage.
+    """``--command retrieval|contexts|answers|all``.
 
+    answers = GPU contexts stage then CPU LLM stage; contexts = the GPU stage only.
     ``--contexts-run <run_id>`` reuses saved contexts and skips the GPU stage.
     """
-    if command not in {"retrieval", "answers", "all"}:
-        raise SystemExit("--command must be retrieval, answers or all")
+    if command not in {"retrieval", "contexts", "answers", "all"}:
+        raise SystemExit("--command must be retrieval, contexts, answers or all")
     if split == "test" and not unseal_test:
         raise SystemExit("the test split is sealed; pass --unseal-test after configuration freeze")
     options: dict[str, Any] = {
@@ -468,7 +469,7 @@ def main(
     gpu_commands = []
     if command in {"retrieval", "all"}:
         gpu_commands.append("retrieval")
-    if command in {"answers", "all"} and not contexts_run:
+    if command == "contexts" or (command in {"answers", "all"} and not contexts_run):
         gpu_commands.append("contexts")
     contexts_path = f"/data/evaluation/{contexts_run}.json" if contexts_run else ""
     if gpu_commands:
