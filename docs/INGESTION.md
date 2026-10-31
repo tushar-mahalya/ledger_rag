@@ -180,9 +180,15 @@ endpoint, and `LEDGER_QDRANT_COLLECTION`. The production Compose overlay accepts
 the external `LEDGER_QDRANT_URL`; its bundled Qdrant dependency remains part of
 that reference stack. Deploy the API independently for a cloud-database-only setup.
 
-For the existing Modal query endpoint, set `LEDGER_EMBED_MODEL` and
-`LEDGER_EMBED_REVISION` when deploying
-[inference](../compute/inference.py); an explicit revision also pins float16.
+The Modal query endpoints in [inference](../compute/inference.py) default to
+pinned commits (`gte-modernbert-base@e7f32e3c…`, `gte-reranker-modernbert-base@f7481e60…`),
+always serve float16, and reject branch or tag revisions at import. Override with
+`LEDGER_EMBED_MODEL`/`LEDGER_EMBED_REVISION` and
+`LEDGER_RERANK_MODEL`/`LEDGER_RERANK_REVISION` (40-character commits), then print
+the matching identity with
+`uv run --group compute modal run compute/inference.py::space_id`; it uses the
+same format as the ingestion report. Volume models (`/models/...`) take no
+revision and need an explicitly reviewed label.
 That endpoint separately needs `ledger-tei` for caller authentication.
 Do not label CPU INT8, different weights, pooling or rendering as the same space
 without an explicit compatibility evaluation. The ID is an operator contract,
