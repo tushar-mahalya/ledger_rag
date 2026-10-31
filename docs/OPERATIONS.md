@@ -262,6 +262,17 @@ dedicated KV field. The supplied template does not require this optional secret.
 Validate provider/model compatibility and capacity independently; this deployment
 does not ship or benchmark a TEI service, OCR pipeline, ASR, or TTS.
 
+Query planning is on by default and uses no network unless configured. Follow-up
+rewriting calls the configured LLM provider (not with `LEDGER_PROVIDER=extractive`)
+with a `LEDGER_PLANNER_REWRITE_TIMEOUT_SECONDS=1.5` deadline. The optional Laya
+decision tier is enabled with `LEDGER_DECISION_BACKEND=laya`, an HTTPS
+`LEDGER_DECISION_URL` (the `ledger-decisions` Modal endpoint) and a
+`LEDGER_DECISION_API_KEY` file rendered from the same Vault field as the
+`ledger-tei` Modal secret. Client deadlines are capped at 400 ms (chat) and 150 ms
+(voice), after which heuristics decide. See
+[query planning](ARCHITECTURE.md#query-planning) for the measured latency and the
+deploy command.
+
 ## Telemetry and diagnostics
 
 `LEDGER_OTLP_ENDPOINT` is an OTLP/HTTP base URL; the application appends

@@ -28,6 +28,7 @@ async def activity(
             label = "Checking tool request"
     else:
         labels: dict[ActivityStage, ActivityLabel] = {
+            "planning": "Planning query",
             "retrieval": "Retrieving evidence",
             "generation": "Generating answer",
             "validation": "Validating citations",

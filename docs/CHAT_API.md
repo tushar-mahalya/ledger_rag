@@ -32,8 +32,13 @@ There is no conversation/session database, conversation cache, or resume API.
   system messages or trusted assistant claims. The current question/profile and
   current retrieval evidence are a separate final user message. Historical
   citation IDs do not establish support for the current answer.
-- Initial retrieval uses the current question, not an automatic history rewrite.
-  Chat can request a bounded corrective search. That search changes only the
+- With `LEDGER_PLANNER_ENABLED=true` (default), chat follow-ups that are not
+  self-contained are rewritten into a standalone **retrieval** query (see
+  [query planning](ARCHITECTURE.md#query-planning)). The rewrite reads only
+  history JSON as untrusted data, may not add periods or URLs, and changes only
+  the search text; filters still come from the principal. The model still
+  receives the original question. Voice and `planner_enabled=false` retrieve with
+  the current question only. Chat can request a bounded corrective search. That search changes only the
   question and retains the authenticated principal, ACLs, `as_of`, and `top_k`.
   `as_of` limits **publication date**, not financial reporting period.
 - The caller supplies any history on each request. Nothing is saved globally.
@@ -60,7 +65,7 @@ The public schema is:
 
 ```text
 {
-  stage: "retrieval" | "generation" | "tool" | "validation",
+  stage: "retrieval" | "planning" | "generation" | "tool" | "validation",
   status: "started" | "completed",
   label: <fixed label below>,
   tool?: "calculator" | "search_evidence"
@@ -70,6 +75,7 @@ The public schema is:
 | Stage / operation | Fixed label | Optional `tool` |
 | --- | --- | --- |
 | retrieval | `Retrieving evidence` | absent |
+| planning | `Planning query` | absent |
 | generation | `Generating answer` | absent |
 | calculator | `Calculating` | `calculator` |
 | corrective search | `Searching evidence` | `search_evidence` |
@@ -87,12 +93,15 @@ Likewise, completed citation validation can produce an abstention.
 parse. It only appears when the optional model verifier is enabled and the
 deterministic checks already passed.
 
-Typical ordering is retrieval started/completed, `evidence`, generation
+Typical ordering is retrieval started/completed, `evidence`, planning
+started/completed (chat graph entry; absent when the planner is disabled), generation
 started/completed, validation started/completed, `answer`, `done`. Each executed
 tool adds its own started/completed pair followed by another model operation.
 `search_evidence` contains a nested retrieval lifecycle. Over-budget tool batches
 are not executed and do not create tool activity. With no evidence and no search
 authority, direct service callers skip generation and only validate abstention.
+A confident out-of-scope plan (for example prompt-injection or investment-advice
+requests) skips both retrieval and generation and abstains after validation.
 
 Activities contain no questions, history, prompts, tool arguments, tool call IDs,
 raw tool results, provider hidden-reasoning fields, or exception messages.
@@ -334,8 +343,12 @@ voice entry points enforce their existing deadlines.
   retrieval; corrective searches are part of `generation_ms`. Generation
   includes graph/tool/validation overhead. Callback/backpressure time can be
   included in phase timings; these are not model-only latency measurements.
-- Native OTEL spans include `rag.retrieve`, `rag.generate`, `rag.chat.model`,
-  `rag.chat.tools`, `rag.chat.validation`, and per-tool `rag.tool`.
+- Native OTEL spans include `rag.retrieve`, `rag.plan` (inside retrieval),
+  `rag.generate`, `rag.chat.plan`, `rag.chat.model`, `rag.chat.tools`,
+  `rag.chat.validation`, and per-tool `rag.tool`. Plan spans carry only enum,
+  count, boolean and timing `rag.plan.*` attributes (route, decision source and
+  confidence, operation, rewrite method, sub-query/company/year/metric counts),
+  never the question, history, rewritten query or entity values.
   They retain nesting and timing, with fixed stage/tool identifiers, model name,
   counts, profile, and abstention metadata. New spans and the HTTP root record
   error status without capturing exception text, stack traces, or input/output.
@@ -362,7 +375,8 @@ The checked-in `deploy/otel-collector.yaml` retains `http.request.method`,
 `http.response.status_code`, `http.route`, and `error.type`, plus these safe
 fixed-enum, count, and boolean span attributes:
 `rag.stage`, `rag.tool`, `rag.profile`, `rag.tool_calls`, `rag.abstained`,
-`rag.citation_count`, and `retrieval.hit_count`. Collector-routed traces therefore
+`rag.citation_count`, `retrieval.hit_count`, and the `rag.plan.*` keys listed
+above. Collector-routed traces therefore
 retain this metadata alongside span structure, timing, and status.
 `gen_ai.request.model` remains excluded because configured model strings are not
 sanitized. Queries, prompts, history, tool arguments, and raw tool results are not

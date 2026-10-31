@@ -113,10 +113,10 @@ def create_app(
             )
             yield
         finally:
-            await store.close()
-            await backend.close()
             if service is not None:
                 await service.close()
+            await store.close()
+            await backend.close()
             if voice is not None:
                 await voice.close()
             if telemetry:
