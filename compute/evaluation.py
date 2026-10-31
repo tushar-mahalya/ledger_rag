@@ -35,8 +35,9 @@ RERANKER_REVISION = "f7481e6055501a30fb19d090657df9ec1f79ab2c"
 CORPUS_SHA256 = "9b455b1b21167b4fee7592f9cc2a68e5d12a336473156137b5ef0692e442ae9d"
 EXPECTED_CHUNKS = 8611
 EMBED_PORT, RERANK_PORT = 8000, 8001
-# L4 preferred; fall back when L4 capacity is unavailable. The actual device is recorded.
-GPU = ["L4", "A10G", "L40S"]
+# The TEI ``89-*`` image needs compute capability 8.9: L4 preferred, L40S when L4
+# capacity is unavailable. The actual device is recorded in the report.
+GPU = ["L4", "L40S"]
 COMMANDS = ("retrieval", "answers")
 SECRET_ENV = {
     "LEDGER_QDRANT_URL",
@@ -310,13 +311,11 @@ async def evaluate(commands: list[str], options: dict[str, Any]) -> dict[str, An
             parsed[command] = args
         async with AsyncExitStack() as stack:
             tei_started = time.perf_counter()
-            await asyncio.gather(
-                stack.enter_async_context(
-                    tei_server(EMBEDDING_MODEL, EMBEDDING_REVISION, EMBED_PORT, key)
-                ),
-                stack.enter_async_context(
-                    tei_server(RERANKER_MODEL, RERANKER_REVISION, RERANK_PORT, key)
-                ),
+            await stack.enter_async_context(
+                tei_server(EMBEDDING_MODEL, EMBEDDING_REVISION, EMBED_PORT, key)
+            )
+            await stack.enter_async_context(
+                tei_server(RERANKER_MODEL, RERANKER_REVISION, RERANK_PORT, key)
             )
             report["tei_startup_seconds"] = round(time.perf_counter() - tei_started, 1)
             store = QdrantRetriever(bench_settings(next(iter(parsed.values()))))
