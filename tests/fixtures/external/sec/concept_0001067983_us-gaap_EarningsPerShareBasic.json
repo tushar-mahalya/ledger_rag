@@ -1,0 +1,14 @@
+{
+ "cik": 1067983,
+ "taxonomy": "us-gaap",
+ "tag": "EarningsPerShareBasic",
+ "label": "Earnings Per Share, Basic",
+ "description": "Synthetic fixture: one filing reports one value per share class without dimensions.",
+ "entityName": "BERKSHIRE HATHAWAY INC",
+ "units": {
+  "USD/shares": [
+   {"start": "2023-01-01", "end": "2023-12-31", "val": 66412, "accn": "0000950170-24-021942", "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-26"},
+   {"start": "2023-01-01", "end": "2023-12-31", "val": 44.27, "accn": "0000950170-24-021942", "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-26"}
+  ]
+ }
+}

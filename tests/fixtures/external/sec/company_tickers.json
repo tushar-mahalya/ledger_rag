@@ -1,0 +1,62 @@
+{
+ "0": {
+  "cik_str": 320193,
+  "ticker": "AAPL",
+  "title": "Apple Inc."
+ },
+ "1": {
+  "cik_str": 1652044,
+  "ticker": "GOOGL",
+  "title": "Alphabet Inc."
+ },
+ "2": {
+  "cik_str": 1067983,
+  "ticker": "BRK-B",
+  "title": "BERKSHIRE HATHAWAY INC"
+ },
+ "3": {
+  "cik_str": 21344,
+  "ticker": "KO",
+  "title": "COCA COLA CO"
+ },
+ "4": {
+  "cik_str": 1306965,
+  "ticker": "SHEL",
+  "title": "Shell plc"
+ },
+ "5": {
+  "cik_str": 1114448,
+  "ticker": "NVS",
+  "title": "NOVARTIS AG"
+ },
+ "6": {
+  "cik_str": 1652044,
+  "ticker": "GOOG",
+  "title": "Alphabet Inc."
+ },
+ "7": {
+  "cik_str": 1067983,
+  "ticker": "BRK-A",
+  "title": "BERKSHIRE HATHAWAY INC"
+ },
+ "8": {
+  "cik_str": 1306965,
+  "ticker": "RYDAF",
+  "title": "Shell plc"
+ },
+ "9": {
+  "cik_str": 1114448,
+  "ticker": "NVSEF",
+  "title": "NOVARTIS AG"
+ },
+ "10": {
+  "cik_str": 1652044,
+  "ticker": "GOOGN",
+  "title": "Alphabet Inc."
+ },
+ "11": {
+  "cik_str": 1652044,
+  "ticker": "GOOGM",
+  "title": "Alphabet Inc."
+ }
+}

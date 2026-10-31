@@ -59,3 +59,6 @@ mypy_path = "src"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = [
+    "live: calls real SEC EDGAR / FRED APIs; skipped unless LEDGER_LIVE_TESTS=1",
+]
