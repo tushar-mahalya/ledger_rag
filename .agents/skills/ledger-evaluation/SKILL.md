@@ -12,7 +12,7 @@ Implementation: [FinQA](../../../src/ledger_rag/evaluation/benchmarks/finqa.py),
 ## Run and compare
 
 1. Freeze corpus/split, models, candidate counts, ACL scope and hardware before
-   comparing arms. Use dev for selection; test is reporting-only.
+   comparing arms. Use FinQA `--split dev` for selection; test is reporting-only.
 2. Inspect existing jobs/results before ingestion. Verify pinned data checksums,
    completed ingestion and exact point counts before accepting a baseline.
 3. Use identical cases for sparse/dense/hybrid/hybrid:rerank. Report company and
@@ -22,7 +22,7 @@ Implementation: [FinQA](../../../src/ledger_rag/evaluation/benchmarks/finqa.py),
 
 ## Non-obvious harness limits
 
-- FinQA `--limit` takes the first N evaluation cases; it does not limit ingestion.
+- FinQA `--limit` takes the first N selected-split cases; it does not limit ingestion.
   There is no ingest resume flag. Restarting re-embeds the full corpus.
 - [Collection cloning](../../../scripts/clone_qdrant_benchmark.py) reuses vectors
   for quantization ablations. The source must be quiescent; the destination must

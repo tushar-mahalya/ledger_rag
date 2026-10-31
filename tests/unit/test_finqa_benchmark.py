@@ -1,5 +1,8 @@
+import json
+import sys
 from argparse import Namespace
 from datetime import date
+from pathlib import Path
 
 import pytest
 from pydantic import SecretStr
@@ -9,6 +12,7 @@ from ledger_rag.evaluation.benchmarks.finqa import (
     Case,
     answer_correct,
     bench_settings,
+    main,
     numbers,
     page_document,
     page_metrics,
@@ -161,3 +165,44 @@ def test_benchmark_settings_match_quantized_collection(mode: str, oversampling: 
     assert settings.qdrant_collection == args.collection
     assert settings.embedding_api_key == SecretStr("test-key")
     assert settings.embedding_space_id == "test-space-v1"
+
+
+@pytest.mark.parametrize("selected_split", [None, "train", "dev", "test"])
+def test_cli_split_selects_questions_but_preserves_full_corpus(
+    selected_split: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sizes = {"train": 1, "dev": 2, "test": 3}
+    for page, (split, count) in enumerate(sizes.items(), 1):
+        rows = [
+            {
+                **EXAMPLE,
+                "filename": f"ACME/2020/page_{page}.pdf",
+                "id": f"{split}-{i}",
+                "qa": {"question": f"Question {split} {i}?", "exe_ans": 1, "gold_inds": {}},
+            }
+            for i in range(count)
+        ]
+        (tmp_path / f"{split}.json").write_text(json.dumps(rows))
+    output = tmp_path / "report.json"
+    argv = ["finqa", "stats", "--data", str(tmp_path), "--output", str(output), "--limit", "1"]
+    if selected_split is not None:
+        argv.extend(["--split", selected_split])
+    monkeypatch.setattr(sys, "argv", argv)
+    main()
+    dataset = json.loads(output.read_text())["dataset"]
+    effective_split = selected_split or "test"
+    assert dataset["corpus_pages"] == 3
+    assert dataset["question_split"] == effective_split
+    assert dataset["split_questions"] == sizes[effective_split]
+    assert dataset["selected_questions"] == 1
+    if effective_split == "test":
+        assert dataset["test_questions"] == 1
+    else:
+        assert "test_questions" not in dataset
+
+
+def test_cli_rejects_negative_case_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["finqa", "stats", "--limit", "-1"])
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2

@@ -6,6 +6,25 @@ deterministic lexical retriever and extractive provider. It exists to exercise
 contracts without keys, network traffic, model downloads, or benchmark redistribution.
 Do not relabel its scores as FinanceBench, FinQA, or TAT-QA results.
 
+## Decision and release workflow
+
+```mermaid
+flowchart LR
+    Source["Pin source, rights and corpus identity"] --> Splits["Keep train / dev / test roles separate"]
+    Splits --> Train["Train only on training examples"]
+    Train --> Dev["Compare baselines and one-variable ablations on dev"]
+    Dev --> Freeze["Freeze model, prompts, retrieval and thresholds"]
+    Freeze --> Test["Held-out test: final reporting only"]
+    Test --> Evidence["Metrics, failures, lineage, latency and cost"]
+    Evidence --> Review["Human review of safety and quality gates"]
+    Review --> Release["Explicit release or no-go decision"]
+```
+
+This is the evaluation methodology, not an automated deployment orchestrator.
+Use `--split dev` for FinQA comparisons; selecting a question split never removes
+other splits' report pages from the retrieval corpus. A test-set failure must not
+become another round of test-driven tuning while retaining a held-out claim.
+
 ## 1. Executable evaluation contract
 
 Run from the repository root:
@@ -16,7 +35,7 @@ uv run python -m ledger_rag.evaluation.harness \
   --corpus data/examples.jsonl --cases data/eval.jsonl \
   --repeats 3 --top-k 5 --seed 42 --bootstrap-samples 2000 \
   --output evaluation.json
-uv run python -m pytest tests/test_evaluation.py -q
+uv run python -m pytest tests/unit/test_evaluation.py -q
 ```
 
 The default CLI reports measurements; it does **not** demand perfection.
@@ -405,9 +424,9 @@ uv run --locked python scripts/clone_qdrant_benchmark.py \
   --qdrant-url http://127.0.0.1:16333 --source finqa_bench \
   --destination finqa_bench_binary --quantization binary
 
-# Run the same full test split, scopes and retrieval arms for each index.
+# Compare the same dev split, scopes and retrieval arms for each index.
 uv run --locked python -m ledger_rag.evaluation.benchmarks.finqa retrieval \
-  --data data/finqa --qdrant-url http://127.0.0.1:16333 \
+  --data data/finqa --split dev --qdrant-url http://127.0.0.1:16333 \
   --collection finqa_bench --quantization none --oversampling 2 \
   --embedding-url http://127.0.0.1:18080/v1 --embedding-key local \
   --embedding-model Alibaba-NLP/gte-modernbert-base --embedding-dimensions 768 \
@@ -417,15 +436,23 @@ uv run --locked python -m ledger_rag.evaluation.benchmarks.finqa retrieval \
 ```
 
 Repeat the retrieval command with destination/quantization pairs
-`finqa_bench_scalar`/`scalar` and `finqa_bench_binary`/`binary`. Keep the test
+`finqa_bench_scalar`/`scalar` and `finqa_bench_binary`/`binary`. Keep the selected
 split, model, `--configs`, scopes, top-k and hardware identical; record the
 ingest/copy manifests and actual invocation. Collections are separate so search
 never mutates the full-precision baseline. Vector copying preserves payloads and
 original vectors; the helper refuses an existing destination, verifies the source
 schema and exact point counts, and never deletes either collection.
 
-The CLI default evaluates the full 1,147 test questions. `--limit N` selects the
-first N rows (not a randomized representative sample) and is suitable only as a
+The CLI retains `--split test` as its default for compatibility; explicitly use
+`--split dev` to choose architecture/model settings and `--split test` only after
+freezing them. Reports identify `question_split`, `split_questions` (the total
+available pool), and `selected_questions` (after `--limit`). The legacy
+`test_questions` field remains only for test reports. These are selected case
+counts, not necessarily completed answer counts: answer evaluation can sample
+again with `--answer-samples`. None limits ingestion.
+
+The full test split has 1,147 questions. `--limit N` selects the
+first N selected-split rows (not a randomized representative sample) and is suitable only as a
 smoke/pilot. Report it as such. `--quantization none` explicitly bypasses any
 stored compressed index; scalar/binary settings must match their effective dense
 vector configuration. Report Recall@k/evidence recall, p50/p95/p99, sample count,

@@ -5,9 +5,10 @@ written by finance experts over real S&P 500 earnings-report pages (prose + tabl
 
 Corpus: every unique report page from train, dev and test is ingested, so held-out
 test questions compete against thousands of real distractor pages.
-Questions: the test split only. Nothing is tuned on test.
+Questions: select train/dev/test with --split (default test for compatibility).
+Use dev for architecture selection; held-out test is reporting-only.
 
-Retrieval scopes (see docs/BENCHMARKS.md):
+Retrieval scopes (see docs/EVALUATION.md):
 - ``global``: open retrieval over the whole corpus. Many FinQA questions do not name
   the company, so this is an intentionally harsh lower bound.
 - ``company``: retrieval scoped to the filer, as a product would after the caller or
@@ -410,6 +411,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="FinQA benchmark on production code paths")
     parser.add_argument("command", choices=["stats", "ingest", "retrieval", "answers"])
     parser.add_argument("--data", type=Path, default=Path("data/finqa"))
+    parser.add_argument(
+        "--split",
+        choices=["train", "dev", "test"],
+        default="test",
+        help="Question split only; use dev for comparisons, test for final reporting",
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--qdrant-url", default="http://localhost:6333")
     parser.add_argument("--collection", default="finqa_bench")
@@ -432,7 +439,9 @@ def main() -> None:
     parser.add_argument("--oversampling", type=float, default=2.0)
     parser.add_argument("--reranker-url", default="http://localhost:8081")
     parser.add_argument("--rerank-candidates", type=int, default=20)
-    parser.add_argument("--limit", type=int, default=0, help="First N test cases (0 = all)")
+    parser.add_argument(
+        "--limit", type=int, default=0, help="First N selected-split cases (0 = all)"
+    )
     parser.add_argument(
         "--configs",
         nargs="+",
@@ -451,8 +460,11 @@ def main() -> None:
     parser.add_argument("--rerank-answers", action="store_true")
     parser.add_argument("--seed", type=int, default=13)
     args = parser.parse_args()
+    if args.limit < 0:
+        parser.error("--limit must be zero or positive")
 
-    corpus, cases = load(args.data)
+    corpus, cases = load(args.data, args.split)
+    split_questions = len(cases)
     if args.limit:
         cases = cases[: args.limit]
     report: dict[str, Any] = {
@@ -463,7 +475,10 @@ def main() -> None:
             "corpus_pages": len(corpus.documents),
             "corpus_chunks": sum(len(chunk_document(d)) for d in corpus.documents.values()),
             "companies": len(corpus.companies),
-            "test_questions": len(cases),
+            "question_split": args.split,
+            "split_questions": split_questions,
+            "selected_questions": len(cases),
+            **({"test_questions": len(cases)} if args.split == "test" else {}),
         },
         "embedding_model": args.embedding_model,
         "embedding_space_id": args.embedding_space_id,
