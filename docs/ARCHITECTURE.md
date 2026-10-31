@@ -128,9 +128,11 @@ re-runs remote calls) and records only enum/count attributes. Set
 flowchart TD
     Q[Question + optional chat history] --> A["Deterministic analysis<br/>ticker/alias gazetteer, FY/quarter,<br/>metric lexicon, operation"]
     A --> F{Chat follow-up and<br/>not self-contained?}
-    F -- no --> D
-    F -- yes --> R["Standalone retrieval query<br/>LLM rewrite (chat) or entity carry-over"]
-    R --> D{"DecisionEngine<br/>heuristic or Laya"}
+    F -- no --> D{"DecisionEngine<br/>heuristic or Laya"}
+    F -- yes --> C["Carry structured company/metric/year<br/>from screened history"]
+    C --> D
+    C --> R["Standalone retrieval query<br/>LLM rewrite (chat) or entity carry-over"]
+    R -. "retrieval text only" .-> S
     D -- "refuse_out_of_scope<br/>(confident)" --> X["No retrieval; graph skips the model<br/>and abstains"]
     D -- "retrieve / clarify / direct_answer" --> S{Multi-entity, multi-period<br/>or calculation?}
     S -- no --> One[One search with the principal's filters]
@@ -174,7 +176,13 @@ masked: any failed sub-query search fails retrieval, as before.
 ignore embedded commands. A rewrite is rejected if it contains URLs, markup,
 injection phrases, tenant/ACL/`as_of` words or citation markers, drops a year
 the question asked about, or adds a year that appears in neither the question
-nor history. Injection-like history turns are never concatenated. Heuristic
+nor history, and it may not echo injection or advice text unless the current
+question contains it. Routing (heuristic and Laya) sees only the *current*
+question plus structured carried-over entities, never raw history or the
+rewrite, so a refused earlier turn ("Should I buy Apple stock?") cannot cause a
+later in-scope follow-up to be refused. Only the newest user turn may be
+concatenated, and only if it passes the same injection/advice screen;
+otherwise only its structured entities carry over. Heuristic
 refusals (prompt injection, investment advice, clearly off-topic) cannot be
 overridden by the model, and the model cannot refuse or answer directly when the
 query contains a recognised metric, year or company.
@@ -184,7 +192,12 @@ query contains a recognised metric, year or company.
 (`company:ADI`). The planner recognises tickers from the caller's `company:`
 groups, an optional `LEDGER_PLANNER_GAZETTEER_PATH` JSON file
 (`{"ADI": ["analog devices"]}`) and `Gazetteer.from_corpus(...)`. Bare
-uppercase words are not treated as tickers unless known.
+uppercase words are not treated as tickers unless known. Build the file from
+the FinQA corpus (optionally merging curated aliases for tickers present in it)
+with `uv run --frozen python scripts/build_gazetteer.py --finqa data/finqa --output data/gazetteer.json`
+(`--documents` accepts normalized Document JSONL; `--aliases` a JSON alias map).
+Two-digit fiscal years (`FY99`, `FY'05`, `fiscal 19`) pivot like four-digit
+years: 50–99 → 19xx, 00–49 → 20xx.
 
 **Laya decision tier.** [`compute/decisions.py`](../compute/decisions.py) serves
 the Apache-2.0 [Laya](https://huggingface.co/convaiinnovations/laya) `Router`
