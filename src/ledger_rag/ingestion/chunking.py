@@ -23,9 +23,9 @@ from typing import Literal, get_args
 
 from ledger_rag.core.models import Chunk, Document
 from ledger_rag.ingestion.context import (
+    SectionHeadings,
     document_context,
     render_header,
-    section_heading,
     table_caption,
 )
 
@@ -378,14 +378,17 @@ def _chunk_contextual(
             current.append(unit)
     context = document_context(document.id, document.title)
     texts = ["\n\n".join(u.text for u in group) for group in groups]
+    # The heading for a chunk is the last one in the sections before it, the part of its
+    # own section before it, and the chunk; one indexed scan keeps this linear.
+    headings = SectionHeadings("\n\n".join(sections))
+    section_starts = [0]
+    for section in sections:
+        section_starts.append(section_starts[-1] + len(section) + 2)
     chunks = []
     for ordinal, group in enumerate(groups):
         first = group[0]
         text = texts[ordinal]
-        preceding = "\n\n".join(
-            [*sections[: first.section], sections[first.section][: first.offset]]
-        )
-        heading = section_heading(f"{preceding}\n\n{text}")
+        heading = headings.heading(section_starts[first.section] + first.offset, text)
         caption = next((u.caption for u in group if u.caption), None)
         header = render_header(context, section=heading, caption=caption, summary=summary)
         index_text = header + "\n\n" + "\n\n".join(u.index for u in group)

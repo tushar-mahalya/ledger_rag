@@ -13,6 +13,7 @@ ingestion so re-indexing never re-bills or drifts.
 """
 
 import asyncio
+import bisect
 import hashlib
 import json
 import random
@@ -110,23 +111,84 @@ def document_context(document_id: str, title: str) -> DocumentContext:
     )
 
 
-def section_heading(text: str) -> str | None:
-    """Canonical label of the last recognized 10-K heading in ``text``."""
-    lowered = text.lower()
-    matches = sorted(
-        (match.start(), -match.end(), label)
-        for pattern, label in _HEADINGS
-        for match in pattern.finditer(lowered)
+def _heading_matches(
+    lowered: str, starts: list[int] | None = None, base: int = 0
+) -> list[tuple[int, int, str]]:
+    """Sorted ``(start, -end, label)`` matches; ``starts[i]`` resumes pattern ``i``."""
+    return sorted(
+        (base + match.start(), -(base + match.end()), label)
+        for number, (pattern, label) in enumerate(_HEADINGS)
+        for match in pattern.finditer(lowered, starts[number] - base if starts else 0)
     )
-    label: str | None = None
-    end = -1
+
+
+def _select_heading(
+    matches: Iterable[tuple[int, int, str]], label: str | None = None, end: int = -1
+) -> tuple[str | None, int]:
     for start, negative_end, candidate in matches:
         # A generic heading inside a numbered item ("item 7 . management's discussion")
         # belongs to that item.
         if start < end:
             continue
         label, end = candidate, -negative_end
-    return label
+    return label, end
+
+
+def section_heading(text: str) -> str | None:
+    """Canonical label of the last recognized 10-K heading in ``text``."""
+    return _select_heading(_heading_matches(text.lower()))[0]
+
+
+class SectionHeadings:
+    """``section_heading(document[:position] + "\\n\\n" + text)`` in time linear in the chunk.
+
+    The document is scanned once. Matches starting well before ``position`` (more than
+    ``2 * MARGIN`` characters) are reused with their greedy selection state, and only a
+    bounded window plus the chunk text is rescanned per query. Results equal
+    ``section_heading`` whenever every heading match is shorter than ``MARGIN`` and every
+    whitespace run shorter than ``SPACE_RUN``, so no regex attempt can see past the window.
+    The constructor checks this and otherwise falls back to the full scan.
+    """
+
+    MARGIN = 512
+    SPACE_RUN = 128
+
+    def __init__(self, document: str) -> None:
+        self.document = document
+        self.lowered = document.lower()
+        matches = _heading_matches(self.lowered)
+        self.exact = len(self.lowered) == len(document) and not any(
+            -negative_end - start >= self.MARGIN for start, negative_end, _ in matches
+        )
+        self.exact = self.exact and re.search(rf"\s{{{self.SPACE_RUN}}}", document) is None
+        self.starts = [start for start, _, _ in matches]
+        # Greedy selection state and per-pattern resume offsets after each match prefix.
+        self.states: list[tuple[str | None, int]] = []
+        self.resume: list[list[int]] = []
+        patterns = {label: number for number, (_, label) in enumerate(_HEADINGS)}
+        label: str | None = None
+        end = -1
+        resume = [0] * len(_HEADINGS)
+        for match in matches:
+            label, end = _select_heading([match], label, end)
+            resume = resume.copy()
+            pattern = patterns[match[2]]
+            resume[pattern] = max(resume[pattern], -match[1])
+            self.states.append((label, end))
+            self.resume.append(resume)
+
+    def heading(self, position: int, text: str) -> str | None:
+        cutoff = position - 2 * self.MARGIN
+        lowered_text = text.lower()
+        if not self.exact or cutoff <= 1 or len(lowered_text) != len(text):
+            return section_heading(f"{self.document[:position]}\n\n{text}")
+        count = bisect.bisect_left(self.starts, cutoff)
+        label, end = self.states[count - 1] if count else (None, -1)
+        resume = self.resume[count - 1] if count else [0] * len(_HEADINGS)
+        base = cutoff - 1
+        window = f"{self.lowered[base:position]}\n\n{lowered_text}"
+        starts = [max(offset, cutoff) for offset in resume]
+        return _select_heading(_heading_matches(window, starts, base), label, end)[0]
 
 
 def table_caption(preceding_prose: str) -> str | None:

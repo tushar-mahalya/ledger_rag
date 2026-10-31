@@ -1,5 +1,7 @@
 import hashlib
 import json
+import random
+import time
 from datetime import date
 
 import pytest
@@ -12,6 +14,7 @@ from ledger_rag.ingestion.chunking import (
     linearize_table,
 )
 from ledger_rag.ingestion.context import (
+    SectionHeadings,
     document_context,
     document_hash,
     render_header,
@@ -210,3 +213,67 @@ def test_v3_adds_a_bounded_summary_line(filing: Document) -> None:
         assert len(summary) == 1 and len(summary[0]) <= 610
     assert document_hash(filing.title, filing.text) == document_hash(filing.title, filing.text)
     assert document_hash("a", "b") != document_hash("a", "c")
+
+
+HEADING_SNIPPETS = [
+    "item 7 . management 2019s discussion and analysis",
+    "management's discussion and analysis",
+    "notes to the consolidated financial statements",
+    "item 7a . quantitative and qualitative disclosures about market risk",
+    "item 8 . financial statements",
+    "selected financial data",
+    "item 1a risk factors",
+    "item 5. market for registrant",
+]
+
+
+def _heading_rich_text(rng: random.Random, sections: int) -> str:
+    parts = []
+    for _ in range(sections):
+        words = [rng.choice(["revenue", "grew", "in", "the", "year", "item", "7", "."])]
+        words += rng.choices(
+            ["cash", "flows", "debt", "net", "income", "item"], k=rng.randint(5, 80)
+        )
+        if rng.random() < 0.3:
+            words.insert(rng.randrange(len(words)), rng.choice(HEADING_SNIPPETS))
+        parts.append(" ".join(words))
+    return "\n\n".join(parts)
+
+
+def test_indexed_section_headings_match_the_full_scan() -> None:
+    rng = random.Random(7)
+    for _ in range(3):
+        document = _heading_rich_text(rng, 120)
+        headings = SectionHeadings(document)
+        assert headings.exact
+        for _ in range(150):
+            position = rng.randrange(len(document) + 1)
+            text = document[position : position + rng.randint(0, 1800)]
+            if rng.random() < 0.3:
+                text = rng.choice(HEADING_SNIPPETS) + " " + text
+            expected = section_heading(f"{document[:position]}\n\n{text}")
+            assert headings.heading(position, text) == expected
+
+
+def test_section_headings_fall_back_to_the_full_scan_for_long_whitespace() -> None:
+    document = "item 7 ." + " " * 200 + "management's discussion and analysis\n\nprose " * 50
+    headings = SectionHeadings(document)
+    assert not headings.exact
+    position = len(document) - 10
+    expected = section_heading(f"{document[:position]}\n\ntext")
+    assert headings.heading(position, "text") == expected
+
+
+def test_contextual_chunking_scales_linearly_with_document_size(filing: Document) -> None:
+    rng = random.Random(11)
+    sections = []
+    while sum(len(s) + 2 for s in sections) < 700_000:
+        sections.append(_heading_rich_text(rng, 1))
+        if rng.random() < 0.2:
+            sections.append(TEXT)
+    big = filing.model_copy(update={"text": "\n\n".join(sections)})
+    started = time.perf_counter()
+    chunks = chunk_document(big, profile="v2")
+    elapsed = time.perf_counter() - started
+    assert len(chunks) > 300
+    assert elapsed < 2, f"v2 chunking of a 700 KB document took {elapsed:.2f} s"
