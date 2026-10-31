@@ -101,9 +101,22 @@ Each profile needs its own new collection. Never reuse a v1 collection name.
 
 ```bash
 uv run --locked --group compute modal run compute/ingestion.py \
-  --collection finqa_gte_modernbert_v2ctx --chunk-profile v2 \
+  --collection finqa_gte_modernbert_v2ctx_1 --chunk-profile v2 \
   --model-revision e7f32e3c00f91d699e8c43b53106206bcc72bb22
 ```
+
+A change to a profile's rendered text also needs a new collection, with the next `_N`
+suffix (as with `tatqa_gte_modernbert_v1_1`). The current v2 FinQA collections are
+listed below; ADR 0002 has their run lineage.
+
+| Collection | Embedding | Run ID | Points |
+|---|---|---|---:|
+| `finqa_gte_modernbert_v2ctx_1` | gte-modernbert-base, 768-d | `3ad18a9d04494ee0b087b4916960634b` | 8,647 |
+| `finqa_qwen3emb_v2ctx_1` | Qwen3-Embedding-0.6B, 1024-d | `75b8926c58d8462f985e4b2183ebcf9f` | 8,647 |
+
+`finqa_gte_modernbert_v2ctx` and `finqa_qwen3emb_v2ctx` (8,644 points each) indexed
+v2 text from before the review fixes. That text had no top-left table cells and missed
+177 captions. Both were deleted from Qdrant Cloud on 2026-10-31.
 
 v3 reads summaries only from the `ledger-data` Volume cache and fails if any
 document lacks one. Fill the cache first. The command below runs on a CPU

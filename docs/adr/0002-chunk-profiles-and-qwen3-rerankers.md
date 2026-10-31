@@ -283,20 +283,37 @@ SHA-256 `9b455b1b…ae9d`, 2,789 documents, TEI image
 `ghcr.io/huggingface/text-embeddings-inference:89-1.8`, float16 and no quantization.
 Reports are on the `ledger-data` Volume at `/data/ingestion/<run_id>.json`.
 
-| Collection | Profile | Embedding | Run ID | Chunks | Ingest s |
-|---|---|---|---|---:|---:|
-| `finqa_gte_modernbert_v1` (existing, untouched) | v1 | gte-modernbert-base 768-d | `adb0f1a36082405b8497e2c39d15bfe3` | 8,611 | 162 |
-| `finqa_gte_modernbert_v2ctx` | v2 | gte-modernbert-base 768-d | `701b26b2f7b842f18877e3f2cc2a0aec` | 8,644 | 762 |
-| `finqa_qwen3emb_v2ctx` | v2 | Qwen3-Embedding-0.6B 1024-d | `a38277a6839d47f292dd28c751362d58` | 8,644 | 281 |
+| Collection | Profile | Embedding | Run ID | Git SHA | Chunks | Ingest s |
+|---|---|---|---|---|---:|---:|
+| `finqa_gte_modernbert_v1` (existing, untouched) | v1 | gte-modernbert-base 768-d | `adb0f1a36082405b8497e2c39d15bfe3` | — | 8,611 | 162 |
+| `finqa_gte_modernbert_v2ctx_1` | v2 | gte-modernbert-base 768-d | `3ad18a9d04494ee0b087b4916960634b` | `9fd6d57` | 8,647 | 182 |
+| `finqa_qwen3emb_v2ctx_1` | v2 | Qwen3-Embedding-0.6B 1024-d | `75b8926c58d8462f985e4b2183ebcf9f` | `9fd6d57` | 8,647 | 925 |
+
+Both `_1` collections were built on 2026-10-31 after the review fixes (Modal apps
+`ap-HO7rzD7RC6CfZJDAq5eNRc` and `ap-yZR4guWUkjxwGgVqxGGODi`, run concurrently). After
+the builds, Qdrant reported exactly 8,647 points in each, status green. A spot check of
+`GS/2014/page_47.pdf` found `Units: $ in millions` and the caption `Table: the table
+below presents the operating results of our investing & lending segment.` in
+`index_text`.
+
+**Superseded and deleted.** `finqa_gte_modernbert_v2ctx` (run
+`701b26b2f7b842f18877e3f2cc2a0aec`, 762 s) and `finqa_qwen3emb_v2ctx` (run
+`a38277a6839d47f292dd28c751362d58`, 281 s) each held 8,644 points built from the
+defective v2 text: no top-left table cells and 177 fewer captions. Both were deleted
+from Qdrant Cloud on 2026-10-31 after the `_1` collections were verified. Their
+ingestion reports remain on the Volume. No v3 collection was built, so no summaries
+were generated. The summary cache is keyed by document content, which these fixes do
+not change, so a later v3 build reuses it as is.
 
 The `embedding_space_id` values are
 `tei-1.8-float16:Alibaba-NLP/gte-modernbert-base@e7f32e3c00f91d699e8c43b53106206bcc72bb22`
 and `tei-1.8-float16:Qwen/Qwen3-Embedding-0.6B@97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`.
 
-The gte v2 run had the same 69 batches as v1 but took 4.7× longer. Per-request
-TEI inference stayed around 80 ms, and the later Qwen3 run of the same chunks took
-281 s, so the slowdown is attributed to Qdrant Cloud write latency during that
-window. It has not been investigated further.
+Ingest time varies widely for the same 69 batches. The first gte v2 build took 762 s
+and its Qwen3 counterpart 281 s. In the rebuild, gte took 182 s and Qwen3 925 s, with
+the two jobs writing to Qdrant Cloud concurrently. The variance is attributed to
+Qdrant Cloud write latency, not embedding, but this has not been investigated
+further.
 
 ## A/B plan (eval workstream)
 
@@ -307,8 +324,8 @@ using the same questions, seed and page-level relevance:
 | Arm | Collection | Embedding / query prefix | Reranker |
 |---|---|---|---|
 | A0 (baseline) | `finqa_gte_modernbert_v1` | gte, none | none / TEI gte-reranker |
-| A1 | `finqa_gte_modernbert_v2ctx` | gte, none | none / TEI gte-reranker |
-| A2 | `finqa_qwen3emb_v2ctx` | Qwen3-0.6B, Qwen3 prefix above | none / TEI gte-reranker |
+| A1 | `finqa_gte_modernbert_v2ctx_1` | gte, none | none / TEI gte-reranker |
+| A2 | `finqa_qwen3emb_v2ctx_1` | Qwen3-0.6B, Qwen3 prefix above | none / TEI gte-reranker |
 | R1 | best of A0–A2 | — | Qwen3-Reranker-0.6B, 20 candidates |
 | R2 | best of A0–A2 | — | Qwen3-Reranker-4B, 20 and 50 candidates |
 
