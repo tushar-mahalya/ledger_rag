@@ -1,8 +1,15 @@
 from datetime import date
 from enum import StrEnum
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 
 class Profile(StrEnum):
@@ -10,11 +17,30 @@ class Profile(StrEnum):
     CHAT = "chat"
 
 
+MAX_SUBJECT_LENGTH = 256
+MAX_TENANT_LENGTH = 200
+MAX_CLAIM_VALUE_LENGTH = 256
+ClaimValue = Annotated[str, StringConstraints(min_length=1, max_length=MAX_CLAIM_VALUE_LENGTH)]
+
+
 class Principal(BaseModel):
-    subject: str
-    tenant_id: str
-    roles: list[str] = Field(default_factory=list)
-    groups: list[str] = Field(default_factory=list)
+    """Authenticated identity; values are bounded and roles/groups deduplicated in order.
+
+    List counts are bounded where untrusted claims enter (``security.auth``), not
+    here, because trusted evaluation principals legitimately hold many groups.
+    """
+
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    subject: str = Field(min_length=1, max_length=MAX_SUBJECT_LENGTH)
+    tenant_id: str = Field(min_length=1, max_length=MAX_TENANT_LENGTH)
+    roles: list[ClaimValue] = Field(default_factory=list)
+    groups: list[ClaimValue] = Field(default_factory=list)
+
+    @field_validator("roles", "groups")
+    @classmethod
+    def deduplicate(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(values))
 
 
 class Document(BaseModel):

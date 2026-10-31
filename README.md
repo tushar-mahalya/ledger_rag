@@ -157,7 +157,7 @@ Secrets are read at startup: rotate files, then roll the application instances.
 | Persistent index | `LEDGER_RETRIEVAL_BACKEND=qdrant`, URL/collection and optional API key; `LEDGER_QDRANT_BOOTSTRAP_ON_STARTUP=true` provisions a missing collection (with payload indexes) at startup, because readiness never creates one |
 | Dense index compression | `LEDGER_QDRANT_QUANTIZATION=none` (default), `scalar`, or experimental `binary`; `LEDGER_QDRANT_OVERSAMPLING=2.0` |
 | Cross-encoder | Optional `LEDGER_RERANKER_URL` (TEI base URL) and API key |
-| Production identity | OIDC issuer, audience, JWKS URL and signed `tenant_id`, `roles`, `groups` claims |
+| Production identity | OIDC issuer, audience, JWKS URL and signed `tenant_id`, `roles`, `groups` claims; `sub` ≤256 and `tenant_id` ≤200 chars, ≤32 roles, ≤128 groups, each ≤256 chars, else 401 (duplicates are dropped; rejections log field names only) |
 | Vault | Vault address, workload AppRole bootstrap or production workload identity, least-privilege policy |
 | Deployment | Target cloud/region/domain, TLS certificate, budget, CPU/GPU and model/data residency requirements |
 | IVR integration | Telephony credentials, signed-webhook/token-minting integration, STT/TTS endpoints and language/turn-taking requirements |
