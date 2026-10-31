@@ -16,3 +16,4 @@ reports/
 dist/
 build/
 *.egg-info/
+data/finqa/
