@@ -186,6 +186,13 @@ def test_section_heading_and_caption_detection() -> None:
     assert table_caption("Intro. the following table presents debt :") == (
         "the following table presents debt :"
     )
+    assert table_caption("Intro. the following table presents debt by segment. .") == (
+        "the following table presents debt by segment."
+    )
+    assert table_caption("the table below shows revenue : . ! ?") == (
+        "the table below shows revenue : ."
+    )
+    assert table_caption(". .") is None
     long = table_caption("x. the following table " + "word " * 100)
     assert long is not None and len(long) <= 240 and long.endswith("…")
 

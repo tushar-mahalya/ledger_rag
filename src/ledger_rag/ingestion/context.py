@@ -31,6 +31,7 @@ _FINQA_ID = re.compile(
 )
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 _SPACE = re.compile(r"\s+")
+_WORD = re.compile(r"[^\W_]")
 _APOSTROPHE = r"(?:'|’|\s?2019)?"  # FinQA renders U+2019 as " 2019"
 _HEADINGS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (re.compile(pattern), label)
@@ -193,7 +194,8 @@ class SectionHeadings:
 
 def table_caption(preceding_prose: str) -> str | None:
     """The sentence introducing a table, when it reads like a caption or unit line."""
-    sentences = [s for s in _SENTENCE.split(preceding_prose.strip()) if s.strip()]
+    # FinQA prose often ends with a stray " ." sentence; it never captions a table.
+    sentences = [s for s in _SENTENCE.split(preceding_prose.strip()) if _WORD.search(s)]
     if not sentences:
         return None
     last = _SPACE.sub(" ", sentences[-1]).strip()
