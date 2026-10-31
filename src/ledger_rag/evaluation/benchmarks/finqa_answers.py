@@ -301,10 +301,13 @@ def _resolve(
     """Validate saved contexts against this run and map chunk ids back to chunks."""
     if ks and (contexts["answer_retrieval"] != arm or contexts["top_k"] < max(ks)):
         raise ValueError("Saved contexts were built with a different retrieval arm or top-k")
-    if set(contexts["hits"]) != {case.id for case in sample}:
-        raise ValueError("Saved contexts do not cover exactly the sampled cases")
+    wanted = {case.id for case in sample}
+    if not wanted <= set(contexts["hits"]):
+        raise ValueError("Saved contexts do not cover the sampled cases")
     resolved: dict[str, list[tuple[Chunk, float]]] = {}
     for case_id, rows in contexts["hits"].items():
+        if case_id not in wanted:
+            continue
         pairs = []
         for document_id, chunk_id, value in rows:
             chunk = corpus.evidence(document_id).by_id.get(chunk_id)

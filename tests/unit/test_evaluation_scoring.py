@@ -286,6 +286,8 @@ def test_saved_contexts_must_match_sample_and_arm() -> None:
         _resolve(saved, corpus, [case], [3], "dense")
     with pytest.raises(ValueError, match="sampled cases"):
         _resolve({**saved, "hits": {}}, corpus, [case], [3], "hybrid:rerank")
+    extra = {**saved, "hits": {**saved["hits"], "other": [[document.id, "unused", 0.1]]}}
+    assert set(_resolve(extra, corpus, [case], [3], "hybrid:rerank")) == {"q"}
     with pytest.raises(ValueError, match="rebuilt corpus"):
         bad = {**saved, "hits": {"q": [[document.id, "nope", 0.1]]}}
         _resolve(bad, corpus, [case], [3], "hybrid:rerank")

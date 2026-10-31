@@ -119,7 +119,10 @@ class ChatClient:
         await asyncio.sleep(slot - now)
 
     def _sample_error(self, response: httpx.Response) -> None:
-        sample = f"{response.status_code}: {' '.join(response.text.split())[:300]}"
+        text = " ".join(response.text.split())
+        quota = re.findall(r'"(quotaMetric|quotaId|quotaValue|retryDelay)"\s*:\s*"([^"]*)"', text)
+        detail = "; ".join(f"{k}={v}" for k, v in quota) or text[:300]
+        sample = f"{response.status_code}: {detail}"
         if len(self.stats.error_samples) < 5 and sample not in self.stats.error_samples:
             self.stats.error_samples.append(sample)
 
