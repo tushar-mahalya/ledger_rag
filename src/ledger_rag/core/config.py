@@ -1,4 +1,5 @@
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -124,6 +125,83 @@ class Settings(BaseSettings):
     decision_chat_timeout_seconds: float = Field(default=0.4, gt=0, le=0.4)
     decision_voice_timeout_seconds: float = Field(default=0.15, gt=0, le=0.15)
     decision_min_confidence: float = Field(default=0.6, ge=0, le=1)
+
+    # External structured evidence (external/*): official SEC EDGAR and FRED/ALFRED APIs.
+    # Off by default; never offered to voice or closed-corpus benchmarks.
+    external_data_enabled: bool = False
+    external_required_group: str = Field(default="", max_length=256)
+    external_allowed_tenants: list[str] = Field(default_factory=list, max_length=100)
+    external_max_calls_per_turn: int = Field(default=2, ge=1, le=5)
+    external_max_facts_per_call: int = Field(default=8, ge=1, le=12)
+    external_timeout_seconds: float = Field(default=8, gt=0, le=30)
+    external_cache_ttl_seconds: float = Field(default=900, ge=0, le=86400)
+    external_cache_max_bytes: int = Field(default=64_000_000, ge=0, le=1_000_000_000)
+    external_max_response_bytes: int = Field(default=16_000_000, ge=65_536, le=64_000_000)
+    external_breaker_failures: int = Field(default=5, ge=1, le=100)
+    external_breaker_reset_seconds: float = Field(default=30, gt=0, le=3600)
+    sec_enabled: bool = True
+    # SEC fair access: declare a contact; at most 10 requests/second across all replicas.
+    sec_user_agent: str = Field(default="Ledger RAG tusharmahalya@gmail.com", max_length=200)
+    sec_max_requests_per_second: int = Field(default=5, ge=1, le=10)
+    fred_enabled: bool = True
+    fred_api_key: SecretStr | None = None
+    fred_max_requests_per_minute: int = Field(default=60, ge=1, le=120)
+
+    # MCP adapter (mcp_adapter/*): Streamable HTTP at /mcp, OAuth resource server only.
+    mcp_enabled: bool = False
+    mcp_resource_url: str = Field(default="", max_length=2048)
+    mcp_audience: str = Field(default="", max_length=2048, pattern=r"^\S*$")
+    mcp_required_scopes: list[str] = Field(default_factory=list, max_length=8)
+    mcp_allowed_origins: list[str] = Field(default_factory=list, max_length=16)
+
+    @model_validator(mode="after")
+    def validate_external(self) -> "Settings":
+        if self.external_data_enabled and self.sec_enabled:
+            agent = self.sec_user_agent.strip()
+            # SEC requires a declared User-Agent with contact details; refuse to send without.
+            if (
+                agent != self.sec_user_agent
+                or not re.fullmatch(r"[\x20-\x7e]+", agent)
+                or not re.search(r"[^\s@]+@[^\s@]+\.[^\s@]+", agent)
+            ):
+                raise ValueError("LEDGER_SEC_USER_AGENT must declare a contact e-mail address")
+        for tenant in self.external_allowed_tenants:
+            if not tenant or len(tenant) > 200:
+                raise ValueError("External data tenant allowlist entries must be 1-200 chars")
+        return self
+
+    @model_validator(mode="after")
+    def validate_mcp(self) -> "Settings":
+        for scope in self.mcp_required_scopes:
+            if not re.fullmatch(r"[\x21\x23-\x5b\x5d-\x7e]{1,128}", scope):
+                raise ValueError("MCP scopes must be RFC 6749 scope tokens")
+        for origin in self.mcp_allowed_origins:
+            parsed = urlsplit(origin)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path:
+                raise ValueError("MCP allowed origins must be bare HTTP(S) origins")
+        if not self.mcp_enabled:
+            return self
+        parsed = urlsplit(self.mcp_resource_url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or parsed.path != "/mcp"
+        ):
+            raise ValueError("LEDGER_MCP_RESOURCE_URL must be an HTTP(S) URL whose path is /mcp")
+        if self.environment == "production" and parsed.scheme != "https":
+            raise ValueError("Production MCP resource URL must use HTTPS")
+        if self.environment == "production" and self.auth_mode != "oidc":
+            raise ValueError("Production MCP requires OIDC")
+        return self
+
+    @property
+    def mcp_token_audience(self) -> str:
+        """Audience MCP tokens must carry (RFC 8707); defaults to the resource URL."""
+        return self.mcp_audience or self.mcp_resource_url
 
     @model_validator(mode="after")
     def validate_grounding(self) -> "Settings":
