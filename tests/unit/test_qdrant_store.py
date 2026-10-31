@@ -474,8 +474,10 @@ async def test_invalid_embeddings_do_not_write(rows: Any) -> None:
     await retriever.close()
 
 
-@pytest.mark.parametrize("status", [401, 429, 500])
-async def test_embedding_http_errors_are_sanitized_not_retried(status: int) -> None:
+@pytest.mark.parametrize(("status", "attempts"), [(401, 1), (429, 3), (500, 3)])
+async def test_embedding_http_errors_are_sanitized_and_only_transient_ones_retried(
+    status: int, attempts: int
+) -> None:
     retriever, client, _ = await store()
     await retriever._embedding_client.aclose()
     requests: list[httpx.Request] = []
@@ -488,7 +490,7 @@ async def test_embedding_http_errors_are_sanitized_not_retried(status: int) -> N
     with pytest.raises(RetrievalError) as error:
         await retriever.upsert([chunk()])
     assert str(error.value) == f"Embedding endpoint returned HTTP {status}"
-    assert len(requests) == 1
+    assert len(requests) == attempts
     client.upsert.assert_not_called()
     client.delete.assert_not_called()
     await retriever.close()

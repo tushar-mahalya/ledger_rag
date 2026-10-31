@@ -46,6 +46,7 @@ from qdrant_client import AsyncQdrantClient, models
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import Chunk, Hit, Principal, QueryRequest
+from ledger_rag.core.retry import RetryPolicy, send_with_retries
 from ledger_rag.generation.providers import _endpoint
 from ledger_rag.ingestion.chunking import contextual_text
 
@@ -124,6 +125,7 @@ class _ReadWriteGate:
 class QdrantRetriever:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._retry = RetryPolicy.from_settings(settings)
         self._collection = settings.qdrant_collection
         self._client = AsyncQdrantClient(
             url=settings.qdrant_url,
@@ -310,7 +312,8 @@ class QdrantRetriever:
 
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         try:
-            response = await self._embedding_client.post(
+            request = self._embedding_client.build_request(
+                "POST",
                 _endpoint(self._settings.embedding_base_url, "embeddings"),
                 headers={
                     "Authorization": "Bearer "
@@ -325,6 +328,9 @@ class QdrantRetriever:
                     "input": texts,
                     "dimensions": self._settings.embedding_dimensions,
                 },
+            )
+            response = await send_with_retries(
+                lambda: self._embedding_client.send(request), self._retry, operation="embedding"
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:

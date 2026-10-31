@@ -352,6 +352,20 @@ lease with `uv run python scripts/release_qdrant_write_lease.py
 --confirm-reconciled` (same `LEDGER_*` settings as the API) before restoring
 traffic.
 
+Upstream **retries** cover only idempotent computations: LLM, embedding and
+reranker HTTP calls. 408/425/429/500/502/503/504/529 and transport errors
+(connect, read timeout) are retried up to `LEDGER_UPSTREAM_MAX_RETRIES` (default
+2) with full-jitter backoff, `uniform(0, min(max, base·2^attempt))`
+(`LEDGER_UPSTREAM_RETRY_BASE_SECONDS` 0.2, `LEDGER_UPSTREAM_RETRY_MAX_DELAY_SECONDS`
+5). A `Retry-After` header (seconds or HTTP date) sets the minimum delay; if it
+exceeds the max delay, the call fails at once. A retry starts only if the delay plus
+0.25s still fits before the request deadline (`LEDGER_QUERY_DEADLINE_SECONDS`).
+The `voice` profile is capped at **one** retry. Other 4xx statuses fail fast.
+Each retry logs `upstream_retry` (operation, attempt, status, delay; no content).
+A retried LLM 5xx or timeout may be **billed twice**; set the cap to 0 if that
+matters. Qdrant reads and writes are never retried; writes stay governed by the
+lease above.
+
 Horizontal scaling requires a distributed index coordinator, durable ACL
 versioning, and a transactional ingestion outbox/reconciliation mechanism first.
 Then implement **shared** gateway quotas and test multi-replica failure/race

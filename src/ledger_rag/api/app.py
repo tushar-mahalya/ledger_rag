@@ -20,8 +20,10 @@ from ledger_rag.core.models import (
     Document,
     IngestRequest,
     Principal,
+    Profile,
     QueryRequest,
 )
+from ledger_rag.core.retry import request_deadline
 from ledger_rag.generation.evidence import citations_from_hits
 from ledger_rag.ingestion.chunking import chunk_document
 from ledger_rag.observability.telemetry import (
@@ -216,7 +218,7 @@ def create_app(
         state = runtime(request)
         async with slot(state):
             try:
-                async with asyncio.timeout(state.settings.query_deadline_seconds):
+                async with request_deadline(state.settings.query_deadline_seconds):
                     await state.service.retriever.upsert(chunks)
             except TimeoutError as exc:
                 raise HTTPException(504, "Ingestion deadline exceeded") from exc
@@ -231,7 +233,9 @@ def create_app(
         state = runtime(request)
         async with slot(state):
             try:
-                async with asyncio.timeout(state.settings.query_deadline_seconds):
+                async with request_deadline(
+                    state.settings.query_deadline_seconds, voice=payload.profile == Profile.VOICE
+                ):
                     hits, retrieval_ms = await state.service.retrieve(payload, principal)
                     answer = await state.service.generate(
                         payload, hits, retrieval_ms, request.state.request_id, principal
@@ -255,7 +259,10 @@ def create_app(
 
             try:
                 async with slot(state):
-                    async with asyncio.timeout(state.settings.query_deadline_seconds):
+                    async with request_deadline(
+                        state.settings.query_deadline_seconds,
+                        voice=payload.profile == Profile.VOICE,
+                    ):
                         hits, retrieval_ms = await state.service.retrieve(
                             payload, principal, on_activity=on_activity
                         )

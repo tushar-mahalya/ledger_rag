@@ -87,6 +87,9 @@ class Settings(BaseSettings):
     llm_max_tokens_parameter: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
     llm_seed: int | None = Field(default=None, ge=0, le=2**63 - 1)
     llm_reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] | None = None
+    upstream_max_retries: int = Field(default=2, ge=0, le=5)
+    upstream_retry_base_seconds: float = Field(default=0.2, gt=0, le=10)
+    upstream_retry_max_delay_seconds: float = Field(default=5, gt=0, le=60)
 
     @model_validator(mode="after")
     def validate_deployment(self) -> "Settings":

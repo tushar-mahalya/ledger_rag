@@ -164,9 +164,9 @@ async def test_anthropic_converts_parallel_tools_and_results(base: str) -> None:
 
 
 @pytest.mark.parametrize("provider_type", [OpenAIProvider, AnthropicProvider])
-@pytest.mark.parametrize("status", [401, 429, 500])
-async def test_http_errors_are_sanitized_and_not_retried(
-    provider_type: type[OpenAIProvider] | type[AnthropicProvider], status: int
+@pytest.mark.parametrize(("status", "attempts"), [(400, 1), (401, 1), (429, 3), (500, 3)])
+async def test_http_errors_are_sanitized_and_only_transient_ones_retried(
+    provider_type: type[OpenAIProvider] | type[AnthropicProvider], status: int, attempts: int
 ) -> None:
     provider = provider_type(settings())
     requests = await transport(provider, {"error": "secret-key PROMPT"}, status=status)
@@ -174,7 +174,7 @@ async def test_http_errors_are_sanitized_and_not_retried(
         await provider.complete([{"role": "user", "content": "PROMPT"}])
     assert str(status) in str(error.value)
     assert "secret-key" not in str(error.value) and "PROMPT" not in str(error.value)
-    assert len(requests) == 1
+    assert len(requests) == attempts
     await provider.close()
 
 

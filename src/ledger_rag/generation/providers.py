@@ -1,4 +1,8 @@
-"""Small, non-retrying HTTP adapters with an OpenAI-normalized tool contract."""
+"""Small HTTP adapters with an OpenAI-normalized tool contract.
+
+Transient failures (429/5xx overload, transport errors) are retried within the
+request deadline by ``core.retry``; other statuses fail fast and sanitized.
+"""
 
 import json
 import re
@@ -8,6 +12,7 @@ import httpx
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.contracts import Provider
+from ledger_rag.core.retry import RetryPolicy, send_with_retries
 
 
 class ProviderError(RuntimeError):
@@ -155,6 +160,7 @@ class _HTTPProvider:
         self._key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
         self._temperature = settings.llm_temperature
         self._max_tokens = settings.llm_max_tokens
+        self._retry = RetryPolicy.from_settings(settings)
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(settings.llm_timeout_seconds, connect=5.0),
             follow_redirects=False,
@@ -162,8 +168,11 @@ class _HTTPProvider:
 
     async def _post(self, suffix: str, body: dict[str, Any], headers: dict[str, str]) -> Any:
         try:
-            response = await self._client.post(
-                _endpoint(self._base_url, suffix), json=body, headers=headers
+            request = self._client.build_request(
+                "POST", _endpoint(self._base_url, suffix), json=body, headers=headers
+            )
+            response = await send_with_retries(
+                lambda: self._client.send(request), self._retry, operation="llm"
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
