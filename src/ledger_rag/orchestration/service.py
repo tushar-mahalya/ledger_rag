@@ -38,6 +38,13 @@ class RagService:
         self.provider = provider
         self.planner = planner or make_planner(settings, provider)
 
+    async def close(self) -> None:
+        """Release resources the service owns (the planner's decision client).
+
+        The retriever and provider are injected and closed by their owner.
+        """
+        await self.planner.close()
+
     async def retrieve(
         self,
         query: QueryRequest,

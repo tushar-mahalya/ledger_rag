@@ -546,3 +546,38 @@ async def test_llm_rewrite_cannot_copy_flagged_history() -> None:
 )
 def test_two_digit_fiscal_years_use_pivot(text: str, year: int) -> None:
     assert analyze(text).years == (year,)
+
+
+async def test_service_close_closes_planner_engine(settings: Settings) -> None:
+    from ledger_rag.orchestration.service import RagService
+    from ledger_rag.retrieval.memory import MemoryRetriever
+
+    closed: list[bool] = []
+
+    class Engine(HeuristicDecisionEngine):
+        async def close(self) -> None:
+            closed.append(True)
+
+    planner = Planner(settings, engine=Engine())
+    await RagService(settings, MemoryRetriever(), FakeProvider([]), planner=planner).close()
+    assert closed == [True]
+
+
+def test_app_lifespan_closes_service(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from ledger_rag.api.app import create_app
+    from ledger_rag.orchestration.service import RagService
+    from ledger_rag.retrieval.memory import MemoryRetriever
+
+    closed: list[bool] = []
+    original = RagService.close
+
+    async def close(self: RagService) -> None:
+        closed.append(True)
+        await original(self)
+
+    monkeypatch.setattr(RagService, "close", close)
+    with TestClient(create_app(settings, MemoryRetriever(), FakeProvider([]))):
+        assert closed == []
+    assert closed == [True]
