@@ -74,6 +74,10 @@ export function demoTurn(question: string): Turn {
       request_id: "design-preview",
       model: "Curated preview · no model call",
       tool_calls: 0,
+      calculation: null,
+      calculations: [],
+      verification: null,
+      abstention: null,
     },
   };
 }
