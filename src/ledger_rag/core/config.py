@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     query_deadline_seconds: float = Field(default=25, gt=0, le=180)
     max_tool_rounds: int = Field(default=3, ge=1, le=5)
     otlp_endpoint: str = ""
+    otlp_headers: dict[str, SecretStr] = Field(default_factory=dict)
     voice_enabled: bool = False
     stt_base_url: str = "https://api.openai.com/v1"
     stt_api_key: SecretStr | None = None

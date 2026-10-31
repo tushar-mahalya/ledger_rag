@@ -114,7 +114,9 @@ workflow, not literal credentials in shell history:
 
 * `secret/ledger/api`: `llm_api_key`, `embedding_api_key`, `qdrant_api_key`.
 * `secret/ledger/telemetry`: `metrics_token`, a short-lived OIDC access token with
-  the API audience, required tenant claim, and `admin` role.
+  the API audience, required tenant claim, and `admin` role, plus
+  `otlp_headers_json` (the JSON object `{}` for the local Collector, or protected
+  OTLP headers when directly using an authenticated OTLP backend).
 
 The templates intentionally address the KV v2 HTTP paths
 `secret/data/ledger/api` and `secret/data/ledger/telemetry`. Vault Agent AppRole
@@ -127,14 +129,16 @@ token. In the base infrastructure profile alone, Collector instead expects an
 operator-provided `deploy/private/metrics-token`; the production overlay replaces
 that bind mount with Vault delivery.
 
-The API waits up to 120 seconds for all three key files. Collector may initially
+The API waits up to 120 seconds for all required key files. Collector may initially
 restart until its credential file is rendered. A sealed/uninitialized Vault fails
 its `vault status` healthcheck and blocks Agent startup by design.
 
 `LEDGER_SECRETS_DIR=/run/ledger-secrets` is interpreted by `get_settings()`.
 Pydantic reads exact filenames `LEDGER_LLM_API_KEY`,
-`LEDGER_EMBEDDING_API_KEY`, and `LEDGER_QDRANT_API_KEY`; file contents are the raw
-secret values. Environment variables take precedence, so **do not set API-key
+`LEDGER_EMBEDDING_API_KEY`, `LEDGER_QDRANT_API_KEY`, and
+`LEDGER_OTLP_HEADERS`. The first three files contain raw key values; the last
+contains a JSON object of OTLP headers (use `{}` when none are required). Environment
+variables take precedence, so **do not set API-key
 environment variables** in production. Secret files are neither executable nor
 shell assignments. Settings and clients are initialized once: Agent updates files
 but application keys do **not** hot-reload. Pause ingestion and perform a controlled
@@ -172,8 +176,19 @@ does not ship or benchmark a TEI service, OCR pipeline, ASR, or TTS.
 
 ## Telemetry and diagnostics
 
-The API's `LEDGER_OTLP_ENDPOINT` points to
-`http://otel-collector:4318/v1/traces`. Collector exports traces to Tempo over OTLP,
+`LEDGER_OTLP_ENDPOINT` is an OTLP/HTTP base URL; the application appends
+`/v1/traces`. The production Compose Collector base is
+`http://otel-collector:4318`. The optional Langfuse Cloud trace base is
+`https://cloud.langfuse.com/api/public/otel` (select the correct region). For
+Langfuse, populate `otlp_headers_json` in Vault with the required `Authorization:
+Basic ...` and `x-langfuse-ingestion-version: 4` headers; rotate it like any other
+secret. See [Langfuse OTLP docs](https://langfuse.com/integrations/native/opentelemetry).
+This exporter sends traces only. The current service traces HTTP request boundaries,
+not GenAI prompts/completions or per-provider model spans; this is not yet a full
+Langfuse LLM-observability integration. Do not send sensitive prompt/document
+content. Restart the API after rotating headers; settings/exporters are startup-only.
+
+Collector exports traces to Tempo over OTLP,
 accepts OTLP logs and exports them to Loki's `/otlp` endpoint, and combines OTLP
 metrics with authenticated `/metrics` scrapes. Prometheus scrapes Collector
 `:8889`; Grafana provisions all three data sources.

@@ -35,6 +35,12 @@ template {
   error_on_missing_key = true
 }
 template {
+  contents = "{{- with secret \"secret/data/ledger/telemetry\" -}}{{ .Data.data.otlp_headers_json }}{{- end -}}"
+  destination = "/run/ledger-secrets/LEDGER_OTLP_HEADERS"
+  perms = "0600"
+  error_on_missing_key = true
+}
+template {
   contents = "{{- with secret \"secret/data/ledger/telemetry\" -}}{{ .Data.data.metrics_token }}{{- end -}}"
   destination = "/run/telemetry-secrets/metrics-token"
   perms = "0600"

@@ -5,7 +5,12 @@ import time
 from pathlib import Path
 
 directory = Path(os.environ["LEDGER_SECRETS_DIR"])
-names = ("LEDGER_LLM_API_KEY", "LEDGER_EMBEDDING_API_KEY", "LEDGER_QDRANT_API_KEY")
+names = (
+    "LEDGER_LLM_API_KEY",
+    "LEDGER_EMBEDDING_API_KEY",
+    "LEDGER_QDRANT_API_KEY",
+    "LEDGER_OTLP_HEADERS",
+)
 deadline = time.monotonic() + 120
 while not all((directory / name).is_file() and (directory / name).stat().st_size for name in names):
     if time.monotonic() >= deadline:

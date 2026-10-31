@@ -20,7 +20,7 @@ services:
       LEDGER_RETRIEVAL_BACKEND: qdrant
       LEDGER_QDRANT_URL: http://qdrant:6333
       LEDGER_SECRETS_DIR: /run/ledger-secrets
-      LEDGER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+      LEDGER_OTLP_ENDPOINT: http://otel-collector:4318
     volumes: !override
       - ledger-secrets:/run/ledger-secrets:ro
     depends_on:

@@ -73,7 +73,13 @@ def configure_telemetry(settings: Settings) -> TracerProvider | None:
     )
     provider.add_span_processor(
         BatchSpanProcessor(
-            OTLPSpanExporter(endpoint=f"{settings.otlp_endpoint.rstrip('/')}/v1/traces")
+            OTLPSpanExporter(
+                endpoint=f"{settings.otlp_endpoint.rstrip('/')}/v1/traces",
+                headers={
+                    name: value.get_secret_value() for name, value in settings.otlp_headers.items()
+                }
+                or None,
+            )
         )
     )
     trace.set_tracer_provider(provider)
