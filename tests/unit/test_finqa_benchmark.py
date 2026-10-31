@@ -1,11 +1,14 @@
+from argparse import Namespace
 from datetime import date
 
 import pytest
+from pydantic import SecretStr
 
 from ledger_rag.core.models import Chunk, Document, Hit
 from ledger_rag.evaluation.benchmarks.finqa import (
     Case,
     answer_correct,
+    bench_settings,
     numbers,
     page_document,
     page_metrics,
@@ -133,3 +136,26 @@ def test_summarize_bootstrap_bounds() -> None:
     assert result["m"]["mean"] == 0.75
     low, high = result["m"]["ci95"]
     assert 0 <= low <= 0.75 <= high <= 1
+
+
+@pytest.mark.parametrize(
+    ("mode", "oversampling"), [("none", 2.0), ("scalar", 4.0), ("binary", 1.5)]
+)
+def test_benchmark_settings_match_quantized_collection(mode: str, oversampling: float) -> None:
+    args = Namespace(
+        qdrant_url="http://localhost:6333",
+        collection=f"finqa_{mode}",
+        embedding_url="http://localhost:8080/v1",
+        embedding_key="test-key",
+        embedding_model="test-model",
+        embedding_dimensions=768,
+        query_prefix="query: ",
+        rerank_candidates=20,
+        quantization=mode,
+        oversampling=oversampling,
+    )
+    settings = bench_settings(args)
+    assert settings.qdrant_quantization == mode
+    assert settings.qdrant_oversampling == oversampling
+    assert settings.qdrant_collection == args.collection
+    assert settings.embedding_api_key == SecretStr("test-key")

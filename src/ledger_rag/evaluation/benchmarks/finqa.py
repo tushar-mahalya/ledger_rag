@@ -229,6 +229,8 @@ def bench_settings(args: argparse.Namespace, **overrides: Any) -> Settings:
         "embedding_model": args.embedding_model,
         "embedding_dimensions": args.embedding_dimensions,
         "embedding_query_prefix": args.query_prefix,
+        "qdrant_quantization": args.quantization,
+        "qdrant_oversampling": args.oversampling,
         "llm_timeout_seconds": 120,
         "query_deadline_seconds": 120,
         "reranker_timeout_seconds": 60,
@@ -414,6 +416,13 @@ def main() -> None:
     parser.add_argument("--embedding-model", default="Alibaba-NLP/gte-modernbert-base")
     parser.add_argument("--embedding-dimensions", type=int, default=768)
     parser.add_argument("--query-prefix", default="")
+    parser.add_argument(
+        "--quantization",
+        choices=["none", "scalar", "binary"],
+        default="none",
+        help="Must match the collection's effective dense-vector configuration",
+    )
+    parser.add_argument("--oversampling", type=float, default=2.0)
     parser.add_argument("--reranker-url", default="http://localhost:8081")
     parser.add_argument("--rerank-candidates", type=int, default=20)
     parser.add_argument("--limit", type=int, default=0, help="First N test cases (0 = all)")
@@ -451,6 +460,8 @@ def main() -> None:
         },
         "embedding_model": args.embedding_model,
         "reranker": args.reranker_url and "gte-reranker-modernbert-base",
+        "quantization": args.quantization,
+        "oversampling": args.oversampling,
     }
     if args.command == "ingest":
         report["ingest"] = asyncio.run(ingest(args, corpus))

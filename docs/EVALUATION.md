@@ -377,6 +377,51 @@ that leaked labels and inflated results. Pin a corrected revision and test
 positive/negative serialization parity. That construction leak is separate from
 LLM-pretraining contamination; both require disclosure.
 
+**Local Qdrant retrieval/quantization experiment (optional):**
+
+```sh
+# One complete, idempotent upsert into a dedicated local collection.
+uv run --locked python -m ledger_rag.evaluation.benchmarks.finqa ingest \
+  --data data/finqa --qdrant-url http://127.0.0.1:16333 \
+  --collection finqa_bench --embedding-url http://127.0.0.1:18080/v1 \
+  --embedding-key local --embedding-model Alibaba-NLP/gte-modernbert-base \
+  --embedding-dimensions 768 --output benchmarks/results/finqa-ingest.json
+
+# Copy stored vectors without another embedding pass; each destination must be new.
+uv run --locked python scripts/clone_qdrant_benchmark.py \
+  --qdrant-url http://127.0.0.1:16333 --source finqa_bench \
+  --destination finqa_bench_scalar --quantization scalar
+uv run --locked python scripts/clone_qdrant_benchmark.py \
+  --qdrant-url http://127.0.0.1:16333 --source finqa_bench \
+  --destination finqa_bench_binary --quantization binary
+
+# Run the same full test split, scopes and retrieval arms for each index.
+uv run --locked python -m ledger_rag.evaluation.benchmarks.finqa retrieval \
+  --data data/finqa --qdrant-url http://127.0.0.1:16333 \
+  --collection finqa_bench --quantization none --oversampling 2 \
+  --embedding-url http://127.0.0.1:18080/v1 --embedding-key local \
+  --embedding-model Alibaba-NLP/gte-modernbert-base --embedding-dimensions 768 \
+  --reranker-url http://127.0.0.1:18081 \
+  --configs sparse dense hybrid hybrid:rerank --scopes company global \
+  --output benchmarks/results/finqa-retrieval-none.json
+```
+
+Repeat the retrieval command with destination/quantization pairs
+`finqa_bench_scalar`/`scalar` and `finqa_bench_binary`/`binary`. Keep the test
+split, model, `--configs`, scopes, top-k and hardware identical; record the
+ingest/copy manifests and actual invocation. Collections are separate so search
+never mutates the full-precision baseline. Vector copying preserves payloads and
+original vectors; the helper refuses an existing destination, verifies the source
+schema and exact point counts, and never deletes either collection.
+
+The CLI default evaluates the full 1,147 test questions. `--limit N` selects the
+first N rows (not a randomized representative sample) and is suitable only as a
+smoke/pilot. Report it as such. `--quantization none` explicitly bypasses any
+stored compressed index; scalar/binary settings must match their effective dense
+vector configuration. Report Recall@k/evidence recall, p50/p95/p99, sample count,
+oversampling, point count and RAM/disk. No accuracy or latency gain is assumed;
+FinQA split/license and source-filing rights caveats above still apply.
+
 ### TAT-QA
 
 Primary sources: [maintainer repository](https://github.com/NExTplusplus/TAT-QA),
