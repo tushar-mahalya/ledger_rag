@@ -100,7 +100,10 @@ def page_document(example: dict[str, Any]) -> tuple[Document, dict[str, str]]:
     return document, units
 
 
-def load(data_dir: Path) -> tuple[Corpus, list[Case]]:
+def load(data_dir: Path, question_split: str = "test") -> tuple[Corpus, list[Case]]:
+    """Index pages from every split; return questions from ``question_split`` only."""
+    if question_split not in {"train", "dev", "test"}:
+        raise ValueError("question_split must be train, dev or test")
     corpus = Corpus()
     cases: list[Case] = []
     for split in ["train", "dev", "test"]:
@@ -109,7 +112,7 @@ def load(data_dir: Path) -> tuple[Corpus, list[Case]]:
             corpus.documents.setdefault(document.id, document)
             corpus.units.setdefault(document.id, units)
             corpus.companies.add(document.id.split("/")[0])
-            if split != "test":
+            if split != question_split:
                 continue
             qa = example["qa"]
             gold = [
