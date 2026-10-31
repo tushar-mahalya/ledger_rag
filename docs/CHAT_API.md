@@ -297,7 +297,7 @@ sequenceDiagram
         Tools-->>LLM: {result, citation_ids, steps}
     end
     LLM->>Validate: final answer with [Cn] markers
-    Validate->>Validate: citation IDs exist; per-sentence numeric provenance
+    Validate->>Validate: citation IDs exist, per-sentence numeric provenance
     opt chat, enabled and deterministic checks passed
         Validate->>Verifier: POST /v1/verify (bearer, timeout)
         Verifier-->>Validate: supported_score or fail open
