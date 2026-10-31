@@ -78,9 +78,10 @@ class QueryRequest(BaseModel):
         return self
 
 
-ActivityStage = Literal["retrieval", "generation", "tool", "validation"]
+ActivityStage = Literal["planning", "retrieval", "generation", "tool", "validation"]
 ActivityTool = Literal["calculator", "search_evidence"]
 ActivityLabel = Literal[
+    "Planning query",
     "Retrieving evidence",
     "Generating answer",
     "Calculating",

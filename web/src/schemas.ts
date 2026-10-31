@@ -22,7 +22,7 @@ export const answerSchema = z.object({
 });
 
 export const activitySchema = z.object({
-  stage: z.enum(["retrieval", "generation", "tool", "validation"]),
+  stage: z.enum(["planning", "retrieval", "generation", "tool", "validation"]),
   status: z.enum(["started", "completed"]),
   label: z.string().max(160),
   tool: z.enum(["calculator", "search_evidence"]).optional(),

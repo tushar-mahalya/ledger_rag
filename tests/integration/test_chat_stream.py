@@ -57,6 +57,8 @@ def test_stream_activity_and_evidence_contract(settings: Settings, document: Doc
         "activity",
         "activity",
         "activity",
+        "activity",
+        "activity",
         "answer",
         "done",
     ]
@@ -65,7 +67,11 @@ def test_stream_activity_and_evidence_contract(settings: Settings, document: Doc
         {"stage": "retrieval", "status": "started", "label": "Retrieving evidence"},
         {"stage": "retrieval", "status": "completed", "label": "Retrieving evidence"},
     ]
-    assert activities[4:6] == [
+    assert activities[2:4] == [
+        {"stage": "planning", "status": "started", "label": "Planning query"},
+        {"stage": "planning", "status": "completed", "label": "Planning query"},
+    ]
+    assert activities[6:8] == [
         {"stage": "tool", "status": "started", "label": "Calculating", "tool": "calculator"},
         {"stage": "tool", "status": "completed", "label": "Calculating", "tool": "calculator"},
     ]

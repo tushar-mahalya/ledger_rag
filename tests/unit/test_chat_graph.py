@@ -138,6 +138,8 @@ async def test_graph_nodes_are_executed_and_measured(
     assert CHAT_GRAPH.checkpointer is None and CHAT_GRAPH.store is None
     assert {"model", "tools", "validation"} <= set(CHAT_GRAPH.get_graph().nodes)
     assert [(e.stage, e.status) for e in events] == [
+        ("planning", "started"),
+        ("planning", "completed"),
         ("generation", "started"),
         ("generation", "completed"),
         ("tool", "started"),
@@ -151,7 +153,7 @@ async def test_graph_nodes_are_executed_and_measured(
     assert answer.retrieval_ms == 12.346 and answer.generation_ms > 0 and answer.tool_calls == 1
     finished = span_exporter.get_finished_spans()
     assert [span.name for span in finished].count("rag.chat.model") == 2
-    assert {"rag.chat.tools", "rag.chat.validation", "rag.generate"} <= {
+    assert {"rag.chat.plan", "rag.chat.tools", "rag.chat.validation", "rag.generate"} <= {
         span.name for span in finished
     }
     parent = next(span for span in finished if span.name == "rag.generate")
@@ -240,7 +242,11 @@ async def test_invalid_provider_output_never_validates(
         await RagService(settings, MemoryRetriever(), FakeProvider([response])).generate(
             QueryRequest(question="Revenue"), evidence, 0, "invalid", on_activity=observe
         )
-    assert [(event.stage, event.status) for event in events] == [("generation", "started")]
+    assert [(event.stage, event.status) for event in events] == [
+        ("planning", "started"),
+        ("planning", "completed"),
+        ("generation", "started"),
+    ]
 
 
 async def test_no_evidence_without_principal_skips_model(
@@ -256,6 +262,8 @@ async def test_no_evidence_without_principal_skips_model(
     )
     assert answer.abstained and answer.generation_ms == 0 and answer.tool_calls == 0
     assert [(e.stage, e.status) for e in events] == [
+        ("planning", "started"),
+        ("planning", "completed"),
         ("validation", "started"),
         ("validation", "completed"),
     ]
@@ -304,7 +312,7 @@ async def test_safe_failure_spans_do_not_capture_exception_payload(
         await RagService(settings, MemoryRetriever(), Failing([])).generate(
             QueryRequest(question="Revenue"), evidence, 0, "failure"
         )
-    finished = span_exporter.get_finished_spans()
+    finished = [s for s in span_exporter.get_finished_spans() if s.name != "rag.chat.plan"]
     assert finished and all(span.status.status_code == StatusCode.ERROR for span in finished)
     assert all(not span.events and span.status.description is None for span in finished)
     assert "private" not in str([span.attributes for span in finished])

@@ -1,11 +1,12 @@
 from dataclasses import dataclass
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 import structlog
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from langsmith import tracing_context
 
+from ledger_rag.core.config import Settings
 from ledger_rag.core.contracts import Provider
 from ledger_rag.core.models import Citation, Principal, QueryRequest
 from ledger_rag.generation.chat_tools import Retrieve, execute_tool
@@ -13,8 +14,11 @@ from ledger_rag.generation.evidence import validate_citations
 from ledger_rag.generation.tools import CALCULATOR, SEARCH_EVIDENCE
 from ledger_rag.observability.spans import safe_span
 from ledger_rag.orchestration.activity import ActivityCallback, activity
+from ledger_rag.planning.planner import Planner, QueryPlan, recall
 
 logger = structlog.get_logger()
+# Defaults only (no validation side effects); used when no plan was recorded.
+_DETERMINISTIC = Planner(Settings.model_construct())
 
 
 class ChatState(TypedDict):
@@ -24,6 +28,8 @@ class ChatState(TypedDict):
     tool_count: int
     pending_calls: list[dict[str, Any]]
     content: str
+    # Observability-only plan summary (no raw text); absent when planning is disabled.
+    plan: NotRequired[dict[str, str | int | float | bool]]
 
 
 class ChatUpdate(TypedDict, total=False):
@@ -33,6 +39,7 @@ class ChatUpdate(TypedDict, total=False):
     tool_count: int
     pending_calls: list[dict[str, Any]]
     content: str
+    plan: dict[str, str | int | float | bool]
 
 
 @dataclass(frozen=True)
@@ -43,6 +50,38 @@ class ChatContext:
     retrieve: Retrieve
     max_tool_calls: int
     on_activity: ActivityCallback | None
+    # Optional explicit plan; otherwise the plan recorded by RagService.retrieve is reused.
+    plan: QueryPlan | None = None
+    planner: Planner | None = None
+
+
+async def plan(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpdate:
+    context = runtime.context
+    found, recorded = recall(context.query)
+    current = context.plan or recorded
+    if current is None and found:
+        return {}  # planner_enabled=false for this request
+    async with activity(context.on_activity, "planning", span_name="rag.chat.plan") as span:
+        if current is None:
+            # Deterministic, offline plan: never re-runs the LLM rewrite or remote decisions.
+            planner = context.planner or _DETERMINISTIC
+            current = planner.deterministic(context.query, context.principal)
+        summary = current.attributes()
+        for key, value in summary.items():
+            span.set_attribute(key, value)
+    return {"plan": summary}
+
+
+def after_plan(state: ChatState, runtime: Runtime[ChatContext]) -> Literal["model", "validation"]:
+    # A confident out-of-scope refusal with no evidence skips the model and abstains.
+    summary = state.get("plan") or {}
+    if (
+        summary.get("rag.plan.route") == "refuse_out_of_scope"
+        and summary.get("rag.plan.subqueries") == 0
+        and not state["citations"]
+    ):
+        return "validation"
+    return entry(state, runtime)
 
 
 def entry(state: ChatState, runtime: Runtime[ChatContext]) -> Literal["model", "validation"]:
@@ -126,10 +165,12 @@ async def validation(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpd
 
 
 builder = StateGraph(ChatState, context_schema=ChatContext)
+builder.add_node("plan", plan)
 builder.add_node("model", model)
 builder.add_node("tools", tools)
 builder.add_node("validation", validation)
-builder.add_conditional_edges(START, entry)
+builder.add_edge(START, "plan")
+builder.add_conditional_edges("plan", after_plan)
 builder.add_conditional_edges("model", after_model)
 builder.add_edge("tools", "model")
 builder.add_edge("validation", END)
@@ -142,7 +183,7 @@ async def run_chat(state: ChatState, context: ChatContext) -> ChatState:
         result = await CHAT_GRAPH.ainvoke(
             state,
             context=context,
-            config={"recursion_limit": 2 * context.max_tool_calls + 3, "callbacks": []},
+            config={"recursion_limit": 2 * context.max_tool_calls + 4, "callbacks": []},
         )
     return ChatState(
         messages=result["messages"],
