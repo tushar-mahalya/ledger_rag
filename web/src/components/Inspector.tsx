@@ -8,8 +8,9 @@ import {
   Layers,
   Table2,
 } from "lucide-react";
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import type { Citation, Turn } from "../contracts";
+import { highlightSpan } from "../grounding";
 import { artifactDownload, safeExternalUrl, type Artifact } from "../markdown";
 
 export type InspectorTab = "sources" | "artifacts" | "run";
@@ -17,6 +18,7 @@ export type Selection = {
   turnId: string;
   citationId?: string;
   artifactId?: string;
+  quote?: string;
 };
 
 function download(content: string, filename: string, type: string) {
@@ -50,6 +52,19 @@ export function Inspector({
   const citations = turn?.answer?.citations ?? turn?.evidence?.citations ?? [];
   const artifact =
     artifacts.find((item) => item.id === selection?.artifactId) ?? artifacts[0];
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!selection?.citationId || tab !== "sources") return;
+    const reduce = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    bodyRef.current
+      ?.querySelector(`[data-citation="${selection.citationId}"]`)
+      ?.scrollIntoView({
+        behavior: reduce ? "auto" : "smooth",
+        block: "nearest",
+      });
+  }, [selection?.citationId, selection?.quote, tab]);
   return (
     <div className="inspector-content">
       <div className="inspector-heading">
@@ -110,6 +125,7 @@ export function Inspector({
       </div>
       <div
         className="inspector-body"
+        ref={bodyRef}
         role="tabpanel"
         id={`${prefix}-panel-${tab}`}
         aria-labelledby={`${prefix}-tab-${tab}`}
@@ -137,6 +153,7 @@ export function Inspector({
               return (
                 <section
                   key={citation.id}
+                  data-citation={citation.id}
                   className={`source-card ${selected ? "selected" : ""}`}
                 >
                   <button
@@ -161,7 +178,22 @@ export function Inspector({
                           ? "FICTIONAL DISCLOSURE"
                           : "RETRIEVED EXCERPT"}
                       </span>
-                      <blockquote>{citation.quote}</blockquote>
+                      <blockquote>
+                        {highlightSpan(
+                          citation.quote,
+                          selection?.citationId === citation.id
+                            ? selection.quote
+                            : undefined,
+                        ).map((segment, index) =>
+                          segment.unsupported ? (
+                            <mark key={index} className="operand-highlight">
+                              {segment.text}
+                            </mark>
+                          ) : (
+                            segment.text
+                          ),
+                        )}
+                      </blockquote>
                       <div className="source-identifier">
                         <span>Document ID</span>
                         <code>{citation.document_id}</code>
@@ -333,6 +365,26 @@ export function Inspector({
                           : "Cited answer"
                         : "No final answer"}
                     </dd>
+                    <dt>Verification</dt>
+                    <dd>
+                      {turn.answer?.verification
+                        ? `${turn.answer.verification.status} · ${turn.answer.verification.mode} mode`
+                        : "Not received"}
+                    </dd>
+                    <dt>Calculations</dt>
+                    <dd>
+                      {turn.answer?.calculations.length ?? "Not received"}
+                    </dd>
+                    {turn.answer?.abstention && (
+                      <>
+                        <dt>Abstention policy</dt>
+                        <dd>
+                          {turn.answer.abstention.calibrated
+                            ? "Calibrated"
+                            : "Uncalibrated thresholds"}
+                        </dd>
+                      </>
+                    )}
                   </dl>
                   <p className="context-intro">
                     Timings describe this request, not p95 latency or a

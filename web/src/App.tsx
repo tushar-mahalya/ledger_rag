@@ -160,11 +160,13 @@ export default function App() {
     turn: Turn,
     citation?: Citation,
     artifact?: Artifact,
+    quote?: string,
   ) {
     setSelection({
       turnId: turn.id,
       citationId: citation?.id,
       artifactId: artifact?.id,
+      quote,
     });
     setTab(nextTab);
     if (window.matchMedia("(max-width: 1120px)").matches) setContextOpen(true);
@@ -518,7 +520,9 @@ export default function App() {
                 <Response
                   key={turn.id}
                   turn={turn}
-                  onCitation={(citation) => inspect("sources", turn, citation)}
+                  onCitation={(citation, quote) =>
+                    inspect("sources", turn, citation, undefined, quote)
+                  }
                   onArtifact={(artifact) =>
                     inspect("artifacts", turn, undefined, artifact)
                   }

@@ -1,22 +1,37 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { remarkCitations, safeExternalUrl } from "../markdown";
+import {
+  remarkCitations,
+  remarkUnsupported,
+  safeExternalUrl,
+} from "../markdown";
 import type { Citation } from "../contracts";
 
 export const Markdown = memo(function Markdown({
   text,
   citations,
   onCitation,
+  unsupported,
 }: {
   text: string;
   citations: Citation[];
   onCitation: (citation: Citation) => void;
+  unsupported?: string[];
 }) {
+  const key = unsupported?.join("\u0000") ?? "";
+  const plugins = useMemo(
+    () => [
+      remarkGfm,
+      remarkCitations,
+      remarkUnsupported(key ? key.split("\u0000") : []),
+    ],
+    [key],
+  );
   return (
     <div className="markdown">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkCitations]}
+        remarkPlugins={plugins}
         skipHtml
         urlTransform={(url) =>
           /^#citation-C\d+$/.test(url) ? url : (safeExternalUrl(url) ?? "")
@@ -65,6 +80,18 @@ export const Markdown = memo(function Markdown({
             >
               <table>{children}</table>
             </div>
+          ),
+          mark: ({ children }) => (
+            <mark
+              className="unsupported-number"
+              title="Not found in the cited evidence"
+            >
+              {children}
+              <span className="sr-only">
+                {" "}
+                (not supported by cited evidence)
+              </span>
+            </mark>
           ),
           th: ({ children }) => <th>{children}</th>,
           td: ({ children }) => <td>{children}</td>,
