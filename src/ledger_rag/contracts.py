@@ -1,0 +1,25 @@
+from typing import Any, Protocol
+
+from ledger_rag.models import Chunk, Hit, Principal, QueryRequest
+
+
+class Retriever(Protocol):
+    async def upsert(self, chunks: list[Chunk]) -> None: ...
+
+    async def search(self, query: QueryRequest, principal: Principal) -> list[Hit]: ...
+
+    async def ready(self) -> bool: ...
+
+    async def close(self) -> None: ...
+
+
+class Provider(Protocol):
+    model: str
+
+    async def complete(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
+        """Return OpenAI-normalized {content, tool_calls} for either wire protocol."""
+        ...
+
+    async def close(self) -> None: ...

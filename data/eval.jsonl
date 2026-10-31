@@ -1,0 +1,4 @@
+{"id":"revenue-2024","question":"What was Aurora revenue in fiscal year 2024?","as_of":"2025-12-31","relevant_document_ids":["aurora-2024"],"answer_contains":["120"],"should_abstain":false}
+{"id":"revenue-2025","question":"What was Aurora revenue in fiscal year 2025?","relevant_document_ids":["aurora-2025"],"answer_contains":["150"],"should_abstain":false}
+{"id":"liquidity","question":"What was cash and total debt in 2024?","as_of":"2025-12-31","relevant_document_ids":["aurora-2024"],"answer_contains":["30"],"should_abstain":false}
+{"id":"missing","question":"unfindablexyz cryptocurrency aeronautics","relevant_document_ids":[],"answer_contains":[],"should_abstain":true}
