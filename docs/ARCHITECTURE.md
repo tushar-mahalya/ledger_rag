@@ -107,14 +107,130 @@ index fallbacks. SSE failures emit `error`, not a success-shaped final answer.
 The UI accepts an answer only after `done`, validates event shapes, bounds memory
 and cancels abandoned requests. See [the wire contract](CHAT_API.md).
 
-Citation validation checks references and required citation structure. It does
-**not** prove semantic entailment, correct financial units or truthful arithmetic
-inputs. The calculator bounds Decimal expressions; the LLM still has to select
-the correct cited operands. A full semantic faithfulness gate remains unimplemented.
+Citation validation checks references and required citation structure, then
+numeric provenance: each number in a sentence must match that sentence's cited
+evidence or a program result bound to those citations. The calculator is an
+evidence-bound program: operands are exact cited spans, earlier steps or small
+constants, so the model cannot type its own inputs. This still does **not** prove
+semantic entailment or that the model chose the right operands; the optional
+LettuceDetect verifier is an unmeasured, chat-only signal, and the abstention
+thresholds are uncalibrated. See [grounded calculation](CHAT_API.md#grounded-calculation-and-verification).
 
 Sources: [API](../src/ledger_rag/api/app.py),
 [RAG service](../src/ledger_rag/orchestration/service.py),
 [reranking](../src/ledger_rag/retrieval/reranking.py).
+
+### Query planning
+
+`RagService.retrieve` plans each request before searching
+([planning package](../src/ledger_rag/planning/)). The chat graph's `plan` node
+at `START` reuses that plan (it is matched to the request by a hash, so it never
+re-runs remote calls) and records only enum/count attributes. Set
+`LEDGER_PLANNER_ENABLED=false` to restore single-query retrieval exactly.
+
+```mermaid
+flowchart TD
+    Q[Question + optional chat history] --> A["Deterministic analysis<br/>ticker/alias gazetteer, FY/quarter,<br/>metric lexicon, operation"]
+    A --> F{Chat follow-up and<br/>not self-contained?}
+    F -- no --> D{"DecisionEngine<br/>heuristic or Laya"}
+    F -- yes --> C["Carry structured company/metric/year<br/>from screened history"]
+    C --> D
+    C --> R["Standalone retrieval query<br/>LLM rewrite (chat) or entity carry-over"]
+    R -. "retrieval text only" .-> S
+    D -- "refuse_out_of_scope<br/>(confident)" --> X["No retrieval; graph skips the model<br/>and abstains"]
+    D -- "retrieve / clarify / direct_answer" --> S{Multi-entity, multi-period<br/>or calculation?}
+    S -- no --> One[One search with the principal's filters]
+    S -- yes --> Many["≤4 template sub-queries (voice ≤2),<br/>bounded concurrent searches"]
+    Many --> RRF[RRF fuse, dedupe by chunk ID]
+    One --> P["Soft preference: named company,<br/>then report year (stable reorder)"]
+    RRF --> P
+    P --> Z["Truncate to top_k (voice ≤3),<br/>re-check authorized() for every hit"]
+```
+
+Routes other than a confident refusal still retrieve: `clarify` and
+`direct_answer` are recorded for observability but do not suppress evidence,
+because a wrong skip costs more than one search. Only `question` and an
+over-fetch `top_k` (chat, ≤10) change between sub-queries; tenant, groups,
+`as_of` and profile come from the request and principal. The optional
+`LEDGER_PLANNER_HARD_COMPANY_FILTER` only removes `company:` groups the
+principal already holds; it can never add access. No `Retriever` protocol change
+was needed.
+
+```mermaid
+flowchart LR
+    subgraph Rewrite["Rewrite (chat only)"]
+        L1["LLM rewrite<br/>≤1.5 s, one line, ≤400 chars"] -- "timeout / error /<br/>invalid output" --> L2["Entity carry-over<br/>from user turns"]
+        L2 -- "no entities" --> L3["Concatenate newest safe<br/>user turn"]
+        L3 -- "nothing safe" --> L4[Original question]
+    end
+    subgraph Decide["Decision"]
+        D1["Laya on Modal GPU<br/>chat ≤400 ms, voice ≤150 ms"] -- "timeout / HTTP error /<br/>bad payload / low confidence" --> D2[HeuristicDecisionEngine]
+    end
+    subgraph Decompose["Decomposition"]
+        T1["Deterministic templates"] -- "single query and<br/>LLM decomposition enabled" --> T2["Optional LLM sub-queries<br/>(year-validated)"]
+        T2 -- "failure" --> T1
+    end
+```
+
+Every fallback logs a fixed `rewrite_fallback`, `decision_fallback` or
+`decompose_fallback` event with an exception class only. Index failures are not
+masked: any failed sub-query search fails retrieval, as before.
+
+**Safety rules.** History is serialized as JSON data under an instruction to
+ignore embedded commands. A rewrite is rejected if it contains URLs, markup,
+injection phrases, tenant/ACL/`as_of` words or citation markers, drops a year
+the question asked about, or adds a year that appears in neither the question
+nor history, and it may not echo injection or advice text unless the current
+question contains it. Routing (heuristic and Laya) sees only the *current*
+question plus structured carried-over entities, never raw history or the
+rewrite, so a refused earlier turn ("Should I buy Apple stock?") cannot cause a
+later in-scope follow-up to be refused. Only the newest user turn may be
+concatenated, and only if it passes the same injection/advice screen;
+otherwise only its structured entities carry over. Heuristic
+refusals (prompt injection, investment advice, clearly off-topic) cannot be
+overridden by the model, and the model cannot refuse or answer directly when the
+query contains a recognised metric, year or company.
+
+**Gazetteer.** FinQA documents carry the ticker and report year in the ID
+(`ADI/2009/page_49.pdf`), title (`ADI annual report 2009, page 49`) and ACL group
+(`company:ADI`). The planner recognises tickers from the caller's `company:`
+groups, an optional `LEDGER_PLANNER_GAZETTEER_PATH` JSON file
+(`{"ADI": ["analog devices"]}`) and `Gazetteer.from_corpus(...)`. Bare
+uppercase words are not treated as tickers unless known. Build the file from
+the FinQA corpus (optionally merging curated aliases for tickers present in it)
+with `uv run --frozen python scripts/build_gazetteer.py --finqa data/finqa --output data/gazetteer.json`
+(`--documents` accepts normalized Document JSONL; `--aliases` a JSON alias map).
+Two-digit fiscal years (`FY99`, `FY'05`, `fiscal 19`) pivot like four-digit
+years: 50–99 → 19xx, 00–49 → 20xx.
+
+**Laya decision tier.** [`compute/decisions.py`](../compute/decisions.py) serves
+the Apache-2.0 [Laya](https://huggingface.co/convaiinnovations/laya) `Router`
+(`laya==0.4.19`, English ModernBERT checkpoint pinned to Hub revision
+`7b928d828b7b0e022f929d9bd2e44165aa270148`) on an L4/T4 behind the `ledger-tei`
+bearer key, with a fixed server-side question schema. It is used only for short
+routing and turn decisions, never for evidence gating (512-token input). It is
+opt-in: `LEDGER_DECISION_BACKEND=laya`, `LEDGER_DECISION_URL`,
+`LEDGER_DECISION_API_KEY`. Deploy with
+`LEDGER_DECISIONS_MIN_CONTAINERS=1 uv run --locked --group compute modal deploy compute/decisions.py`
+for warm voice latency (the default of 0 scales to zero and accepts cold starts,
+which fall back to heuristics).
+
+Measured on 2026-10-31 by `modal run compute/decisions.py` (ephemeral app,
+warm container on the `["L4", "T4"]` GPU preference list, 50 representative
+FinQA-style queries sent sequentially from a CPU Modal function):
+
+| Metric | p50 | p95 | max |
+|---|---:|---:|---:|
+| Model forward (`model_ms`) | 36.7 ms | 38.7 ms | 39.5 ms |
+| HTTPS round trip | 75.7 ms | 83.5 ms | 84.7 ms |
+
+An unauthenticated request returned 401. Round trips from outside Modal add
+network latency, so measure from the API host before relying on the voice
+budget. Zero-shot routing was mixed: it labelled the elliptical "What about
+2010?" as out of scope and "Should I buy Apple stock now?" as a direct answer.
+That is why heuristic refusals take precedence and entity-bearing queries cannot
+be refused by the model. Treat Laya as an experiment until it is evaluated on
+labelled routing data. The paid Jev API is not integrated.
 
 ## 3. Retrieval and index contracts
 
@@ -122,13 +238,13 @@ Sources: [API](../src/ledger_rag/api/app.py),
 |---|---|---|
 | Chunking | Preserve paragraphs, table rows/headers and bounded neighboring context; embed title plus chunk text | No LLM-generated context, late chunking or visual table encoder yet |
 | Identity | Production chunker hashes tenant/document/ordinal/content; Qdrant uses deterministic UUIDs and ownership checks | Generic chunk callers must still obey the ownership contract |
-| Hybrid retrieval | Dense cosine plus hashed lexical sparse vectors, fused with RRF | Fixed reference length 256 and hashed terms are a BM25 approximation, not exact corpus-wide BM25 |
+| Hybrid retrieval | Dense cosine plus hashed lexical sparse vectors, fused with RRF | Fixed reference length 256 and hashed terms are a BM25 approximation, not exact corpus-wide BM25; Qdrant applies native IDF ([ADR 0001](adr/0001-native-bm25.md)) |
 | Permissions | Tenant, group ACL and publication-day filters apply before ranking, with post-retrieval checks | `as_of` is disclosure publication date, not fiscal year |
 | Index compatibility | Legacy schema 2 binds embeddings to endpoint/model/dimensions/rendering; opt-in schema 3 uses explicit embedding-space identity | A logical ID is not proof of served weights; validate the pinned query model and precision |
 | Reranking | Optional TEI cross-encoder; configurable candidate count, voice bypass | Measure quality/latency tradeoff; an extra network hop is not free |
 | Compression | Optional scalar/binary vector quantization with dense rescoring; `none` bypasses it | Distinct from CPU INT8 model inference; neither has demonstrated corpus-wide uplift here |
 | Bulk builds | One Modal GPU container writes a new collection, creates filter indexes and verifies counts before committing a manifest | No automatic resume, online cutover, distributed write lock or production release |
-| Small replacements | Upload all new chunks before tenant/document-scoped stale deletion; uncertain writes quarantine that instance | Not transactional across processes; a restart is not reconciliation |
+| Small replacements | Upload all new chunks before tenant/document-scoped stale deletion; a write lease in collection metadata makes an abandoned write fail closed in every instance | Not transactional; the lease is best-effort coordination, not a distributed lock; release only after reconciliation |
 
 See [ingestion and release boundaries](INGESTION.md),
 [Qdrant implementation](../src/ledger_rag/retrieval/qdrant.py) and

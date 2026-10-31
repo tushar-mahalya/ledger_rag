@@ -40,8 +40,10 @@ unauthenticated database or tunnel it publicly as a shortcut.
    ingestion credential. The deployed server must support collection metadata
    (the reference uses Qdrant 1.20.0). Collection creation needs the corresponding
    permission; query credentials should not have write access.
-3. Store the database key at `secret/ledger/api#qdrant_api_key` in Vault.
-   With an authenticated Vault session, project it into the Modal environment:
+3. Store the database key at `secret/ledger/qdrant#api_key` in Vault. Prefer
+   [Modal workload identity](OPERATIONS.md#modal-workload-identity) so the job reads
+   it directly; otherwise, with an authenticated Vault session, project it into the
+   Modal environment:
 
    ```bash
    LEDGER_QDRANT_URL=https://YOUR-DATABASE \
@@ -110,6 +112,33 @@ snapshot before reading it. Keep the uploaded input immutable during that copy;
 there is no transactional snapshot of a concurrently edited Volume file.
 Blank/malformed lines, duplicate document identities, wrong tenants and empty
 corpora fail explicitly without including document bodies in validation errors.
+
+## Evaluation dataset corpora
+
+ConvFinQA, TAT-QA and FinanceBench are fetched, checksum-verified and normalized
+offline into `data/<dataset>/normalized/documents.jsonl`, which uses the same
+Document JSONL contract. See [DATASETS.md](DATASETS.md) for provenance,
+licenses, measured statistics and recorded runs. Upload each corpus to a
+content-addressed path, named by its SHA-256, so the report's `input_sha256` can
+be checked against the local file:
+
+```bash
+SHA=$(sha256sum data/tatqa/normalized/documents.jsonl | cut -d' ' -f1)
+uv run --locked --group compute modal volume put ledger-data \
+  data/tatqa/normalized/documents.jsonl /datasets/tatqa/$SHA/documents.jsonl
+uv run --locked --group compute modal run compute/ingestion.py \
+  --source jsonl --input-path /data/datasets/tatqa/$SHA/documents.jsonl \
+  --tenant-id tatqa --collection tatqa_gte_modernbert_v1_1 \
+  --model-revision e7f32e3c00f91d699e8c43b53106206bcc72bb22
+```
+
+- ConvFinQA pages are byte-identical FinQA pages, so they reuse
+  `finqa_gte_modernbert_v1` and are never re-ingested.
+- FinanceBench is **evaluation-only** (CC-BY-NC-4.0).
+- JSONL reports record `input_path` and `input_sha256`, which is the digest of
+  the uploaded file. FinQA reports leave both `null`.
+- Modal mounts `/data` through a symlink. The input guard therefore compares
+  fully resolved paths.
 
 ## Integrity and failure behavior
 
@@ -180,9 +209,15 @@ endpoint, and `LEDGER_QDRANT_COLLECTION`. The production Compose overlay accepts
 the external `LEDGER_QDRANT_URL`; its bundled Qdrant dependency remains part of
 that reference stack. Deploy the API independently for a cloud-database-only setup.
 
-For the existing Modal query endpoint, set `LEDGER_EMBED_MODEL` and
-`LEDGER_EMBED_REVISION` when deploying
-[inference](../compute/inference.py); an explicit revision also pins float16.
+The Modal query endpoints in [inference](../compute/inference.py) default to
+pinned commits (`gte-modernbert-base@e7f32e3c…`, `gte-reranker-modernbert-base@f7481e60…`),
+always serve float16, and reject branch or tag revisions at import. Override with
+`LEDGER_EMBED_MODEL`/`LEDGER_EMBED_REVISION` and
+`LEDGER_RERANK_MODEL`/`LEDGER_RERANK_REVISION` (40-character commits), then print
+the matching identity with
+`uv run --group compute modal run compute/inference.py::space_id`; it uses the
+same format as the ingestion report. Volume models (`/models/...`) take no
+revision and need an explicitly reviewed label.
 That endpoint separately needs `ledger-tei` for caller authentication.
 Do not label CPU INT8, different weights, pooling or rendering as the same space
 without an explicit compatibility evaluation. The ID is an operator contract,

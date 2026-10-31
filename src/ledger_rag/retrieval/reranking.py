@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 import httpx
 from opentelemetry import trace
@@ -6,6 +7,7 @@ from opentelemetry import trace
 from ledger_rag.core.config import Settings
 from ledger_rag.core.contracts import Retriever
 from ledger_rag.core.models import Chunk, Hit, Principal, Profile, QueryRequest
+from ledger_rag.core.retry import RetryPolicy, send_with_retries
 from ledger_rag.ingestion.chunking import contextual_text
 from ledger_rag.retrieval.memory import authorized
 
@@ -17,6 +19,7 @@ class RerankingRetriever:
         self.inner = inner
         self.url = settings.reranker_url.rstrip("/")
         self.candidates = settings.rerank_candidates
+        self.retry = RetryPolicy.from_settings(settings)
         headers = (
             {"Authorization": f"Bearer {settings.reranker_api_key.get_secret_value()}"}
             if settings.reranker_api_key
@@ -37,7 +40,8 @@ class RerankingRetriever:
         if not candidates:
             return []
         with trace.get_tracer(__name__).start_as_current_span("rag.rerank"):
-            response = await self.client.post(
+            request = self.client.build_request(
+                "POST",
                 f"{self.url}/rerank",
                 json={
                     "query": query.question,
@@ -46,6 +50,9 @@ class RerankingRetriever:
                     "raw_scores": False,
                     "return_text": False,
                 },
+            )
+            response = await send_with_retries(
+                lambda: self.client.send(request), self.retry, operation="rerank"
             )
             response.raise_for_status()
             data = response.json()
@@ -77,6 +84,15 @@ class RerankingRetriever:
 
     async def ready(self) -> bool:
         return await self.inner.ready()
+
+    def collectors(self) -> list[Any]:
+        collectors = getattr(self.inner, "collectors", None)
+        return list(collectors()) if collectors is not None else []
+
+    async def bootstrap(self) -> None:
+        bootstrap = getattr(self.inner, "bootstrap", None)
+        if bootstrap is not None:
+            await bootstrap()
 
     async def close(self) -> None:
         await self.client.aclose()

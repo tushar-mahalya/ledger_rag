@@ -10,6 +10,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from structlog.testing import capture_logs
 
 from ledger_rag.api.app import create_app
 from ledger_rag.core.config import Settings
@@ -166,6 +167,71 @@ async def test_oidc_signature_and_typed_claims(settings: Settings) -> None:
         assert error.value.status_code == 401
     with pytest.raises(HTTPException):
         await auth.authenticate("Bearer " + "x" * 16385)
+
+
+async def test_oidc_claims_are_bounded_without_logging_values(settings: Settings) -> None:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    auth = Authenticator(
+        settings.model_copy(
+            update={
+                "auth_mode": "oidc",
+                "oidc_issuer": "https://id.example",
+                "oidc_audience": "ledger",
+                "oidc_jwks_url": "https://id.example/jwks",
+            }
+        )
+    )
+    auth.jwks = SimpleNamespace(
+        get_signing_key_from_jwt=lambda token: SimpleNamespace(key=private_key.public_key())
+    )
+    now = int(time.time())
+    claims: dict[str, Any] = {
+        "sub": "user",
+        "tenant_id": "tenant-a",
+        "roles": ["reader", "reader"],
+        "groups": ["analyst", "finance", "analyst"],
+        "iss": "https://id.example",
+        "aud": "ledger",
+        "exp": now + 60,
+        "iat": now,
+    }
+
+    def bearer(changes: dict[str, Any]) -> str:
+        return "Bearer " + jwt.encode({**claims, **changes}, private_key, algorithm="RS256")
+
+    accepted = await auth.authenticate(bearer({"groups": [f"g{i}" for i in range(128)]}))
+    assert len(accepted.groups) == 128
+    normalized = await auth.authenticate(bearer({}))
+    assert normalized.roles == ["reader"] and normalized.groups == ["analyst", "finance"]
+    secret = "SECRET-CLAIM-VALUE"
+    for changes in [
+        {"sub": secret * 20},
+        {"tenant_id": secret * 20},
+        {"roles": [secret * 20]},
+        {"groups": [""]},
+        {"roles": [f"r{i}" for i in range(33)]},
+        {"groups": [f"g{i}" for i in range(129)]},
+    ]:
+        with capture_logs() as logs, pytest.raises(HTTPException) as error:
+            await auth.authenticate(bearer(changes))
+        assert error.value.status_code == 401
+        assert error.value.detail == "Invalid identity claims"
+        assert [log["event"] for log in logs] == ["oidc_claims_rejected"]
+        assert secret not in repr(logs) and secret not in repr(error.value)
+
+
+def test_principal_bounds_values_and_deduplicates() -> None:
+    principal = Principal(subject="s", tenant_id="t", roles=["a", "a"], groups=["g", "h", "g"])
+    assert principal.roles == ["a"] and principal.groups == ["g", "h"]
+    for bad in [
+        {"subject": ""},
+        {"subject": "x" * 257},
+        {"tenant_id": "x" * 201},
+        {"groups": ["x" * 257]},
+    ]:
+        with pytest.raises(ValueError) as error:
+            Principal(**{"subject": "s", "tenant_id": "t", **bad})
+        assert "xxxx" not in str(error.value)
 
 
 def test_rate_limiter_capacity_fails_closed(principal: Principal) -> None:

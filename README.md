@@ -152,12 +152,15 @@ Secrets are read at startup: rotate files, then roll the application instances.
 |---|---|
 | OpenAI-compatible LLM | `LEDGER_PROVIDER=openai`, `LEDGER_LLM_BASE_URL`, `LEDGER_LLM_MODEL`, `LEDGER_LLM_API_KEY` |
 | Anthropic-compatible LLM | `LEDGER_PROVIDER=anthropic`, messages-compatible base URL, model and key |
+| Generation controls | Optional `LEDGER_LLM_TEMPERATURE`, `LEDGER_LLM_MAX_TOKENS` (sent as `LEDGER_LLM_MAX_TOKENS_PARAMETER`: `max_tokens` or `max_completion_tokens`), `LEDGER_LLM_SEED`, `LEDGER_LLM_REASONING_EFFORT` (`none`…`high`, e.g. Gemini's OpenAI layer); unset values are not sent. Anthropic sends `max_tokens` (default 2048) and temperature ≤1, and refuses seed/reasoning effort at startup |
 | Dense embeddings | `LEDGER_EMBEDDING_BASE_URL`, model, matching dimensions and API key |
 | Colocated ingestion identity | `LEDGER_EMBEDDING_SPACE_ID` from the verified job manifest; empty retains legacy endpoint-bound collections |
-| Persistent index | `LEDGER_RETRIEVAL_BACKEND=qdrant`, URL/collection and optional API key |
+| Persistent index | `LEDGER_RETRIEVAL_BACKEND=qdrant`, URL/collection and optional API key; `LEDGER_QDRANT_BOOTSTRAP_ON_STARTUP=true` provisions a missing collection (with payload indexes) at startup, because readiness never creates one |
 | Dense index compression | `LEDGER_QDRANT_QUANTIZATION=none` (default), `scalar`, or experimental `binary`; `LEDGER_QDRANT_OVERSAMPLING=2.0` |
+| Answer verification | `LEDGER_VERIFICATION_MODE=enforce` (default), `flag` or `off`; optional `LEDGER_GROUNDEDNESS_VERIFIER=lettucedetect` with URL/key (off by default, fails open) |
 | Cross-encoder | Optional `LEDGER_RERANKER_URL` (TEI base URL) and API key |
-| Production identity | OIDC issuer, audience, JWKS URL and signed `tenant_id`, `roles`, `groups` claims |
+| Upstream retries | `LEDGER_UPSTREAM_MAX_RETRIES` (default 2; voice is capped at 1), `LEDGER_UPSTREAM_RETRY_BASE_SECONDS`, `LEDGER_UPSTREAM_RETRY_MAX_DELAY_SECONDS`: full-jitter, `Retry-After`-aware, deadline-bounded retries of LLM/embedding/reranker calls ([operations](docs/OPERATIONS.md#health-capacity-and-failure-handling)) |
+| Production identity | OIDC issuer, audience, JWKS URL and signed `tenant_id`, `roles`, `groups` claims; `sub` ≤256 and `tenant_id` ≤200 chars, ≤32 roles, ≤128 groups, each ≤256 chars, else 401 (duplicates are dropped; rejections log field names only) |
 | Vault | Vault address, workload AppRole bootstrap or production workload identity, least-privilege policy |
 | Deployment | Target cloud/region/domain, TLS certificate, budget, CPU/GPU and model/data residency requirements |
 | IVR integration | Telephony credentials, signed-webhook/token-minting integration, STT/TTS endpoints and language/turn-taking requirements |

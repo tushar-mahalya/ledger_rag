@@ -24,6 +24,7 @@ from opentelemetry import trace
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import Answer, Principal, Profile, QueryRequest
+from ledger_rag.core.retry import request_deadline
 from ledger_rag.generation.providers import ProviderError
 from ledger_rag.observability.telemetry import Metrics
 from ledger_rag.orchestration.service import RagService
@@ -363,7 +364,7 @@ class VoiceSession:
                 metrics.outcome = "busy"
                 return BUSY_PROMPT, None
         try:
-            async with asyncio.timeout(self.settings.query_deadline_seconds):
+            async with request_deadline(self.settings.query_deadline_seconds, voice=True):
                 hits, retrieval_ms = await deps.service.retrieve(request, self.principal)
                 answer = await deps.service.generate(
                     request, hits, retrieval_ms, f"voice-{metrics.turn_id}", self.principal

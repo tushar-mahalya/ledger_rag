@@ -3,23 +3,25 @@
 #
 #   VAULT_ADDR=https://vault.example:8200 VAULT_TOKEN=... scripts/sync_modal_secrets.sh
 #
-# ledger-tei.TEI_API_KEY <- secret/ledger/api#embedding_api_key  (the key the service sends)
-# With argument "ingestion": LEDGER_QDRANT_URL plus secret/ledger/api#qdrant_api_key
+# ledger-tei.TEI_API_KEY <- secret/ledger/embedding#api_key  (the key the service sends)
+# With argument "ingestion": LEDGER_QDRANT_URL plus secret/ledger/qdrant#api_key
 # are projected into ledger-ingestion for direct database writes.
 # With argument "llm": LEDGER_LLM_BASE_URL (default: Gemini's OpenAI-compatible endpoint)
-# plus secret/ledger/api#llm_api_key are projected into ledger-llm for evaluation jobs.
+# plus secret/ledger/llm#api_key are projected into ledger-llm for evaluation jobs.
+# Prefer workload identity (scripts/vault_configure_modal_jwt.sh): jobs then read Vault
+# directly with short-lived tokens and no provider credential is copied into Modal.
 # Values never appear in argv or shell history: they are written to a 0600 temp file that
 # is removed on exit, then loaded with `modal secret create --from-json`.
 set -euo pipefail
 set +x
 case "${1:-tei}" in
-  tei) field=embedding_api_key; secret=ledger-tei ;;
+  tei) path=embedding; secret=ledger-tei ;;
   ingestion)
     : "${LEDGER_QDRANT_URL:?LEDGER_QDRANT_URL must be an HTTPS URL reachable from Modal}"
-    field=qdrant_api_key; secret=ledger-ingestion ;;
+    path=qdrant; secret=ledger-ingestion ;;
   llm)
     export LEDGER_LLM_BASE_URL="${LEDGER_LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}"
-    field=llm_api_key; secret=ledger-llm ;;
+    path=llm; secret=ledger-llm ;;
   *) echo "usage: $0 [tei|ingestion|llm]" >&2; exit 1 ;;
 esac
 command -v vault >/dev/null || { echo "vault CLI not found" >&2; exit 1; }
@@ -29,7 +31,7 @@ umask 077
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
-key=$(vault kv get -field="$field" secret/ledger/api)
+key=$(vault kv get -field=api_key "secret/ledger/$path")
 python3 - "$tmp" "$secret" 3<<<"$key" <<'PY'
 import json
 import os

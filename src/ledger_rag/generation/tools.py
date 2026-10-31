@@ -1,18 +1,56 @@
-import ast
-from decimal import Decimal, InvalidOperation, localcontext
+from ledger_rag.generation.program import MAX_ARGS, MAX_QUOTE_CHARS, MAX_STEPS, OPS
+
+_OPERAND = {
+    "type": "object",
+    "description": (
+        "Exactly one of: {citation_id, quote} where quote is an exact span of that evidence "
+        "text containing one number; {ref: '#n'} for the result of earlier step n (0-based); "
+        "or {constant} limited to 1, 2, 4, 12, 100, 1000 or 1000000."
+    ),
+    "properties": {
+        "citation_id": {"type": "string", "maxLength": 8},
+        "quote": {"type": "string", "minLength": 1, "maxLength": MAX_QUOTE_CHARS},
+        "ref": {"type": "string", "maxLength": 3},
+        "constant": {"type": "number"},
+    },
+    "additionalProperties": False,
+}
 
 CALCULATOR = {
     "type": "function",
     "function": {
         "name": "calculator",
         "description": (
-            "Evaluate basic arithmetic from cited evidence. Use only numeric literals, "
-            "+ - * / and parentheses. Returns decimal result; no external side effects."
+            "Execute a short FinQA-style program over cited evidence with exact decimal "
+            "arithmetic. Numbers must be bound to evidence by quoting the exact span; free "
+            "numeric literals are rejected. Scale words (thousand/million/billion) are applied "
+            "and percentages become fractions. percent_change(old, new) returns a percentage; "
+            "greater returns 1 or 0. Returns the result and a step trace with provenance."
         ),
         "parameters": {
             "type": "object",
-            "properties": {"expression": {"type": "string", "maxLength": 200}},
-            "required": ["expression"],
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": MAX_STEPS,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "op": {"type": "string", "enum": list(OPS)},
+                            "args": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": MAX_ARGS,
+                                "items": _OPERAND,
+                            },
+                        },
+                        "required": ["op", "args"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["steps"],
             "additionalProperties": False,
         },
     },
@@ -34,60 +72,3 @@ SEARCH_EVIDENCE = {
         },
     },
 }
-
-
-def calculate(expression: str) -> str:
-    if len(expression) > 200:
-        raise ValueError("Expression exceeds 200 characters")
-    try:
-        tree = ast.parse(expression, mode="eval")
-    except SyntaxError as exc:
-        raise ValueError("Invalid arithmetic syntax") from exc
-    if sum(1 for _ in ast.walk(tree)) > 64:
-        raise ValueError("Expression is too complex")
-
-    def visit(node: ast.AST) -> Decimal:
-        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
-            source = ast.get_source_segment(expression, node)
-            if source is None or len(source) > 40:
-                raise ValueError("Invalid numeric literal")
-            value = Decimal(source.replace("_", ""))
-        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-            operand = visit(node.operand)
-            value = -operand if isinstance(node.op, ast.USub) else operand
-        elif isinstance(node, ast.BinOp):
-            left, right = visit(node.left), visit(node.right)
-            if isinstance(node.op, ast.Add):
-                value = left + right
-            elif isinstance(node.op, ast.Sub):
-                value = left - right
-            elif isinstance(node.op, ast.Mult):
-                value = left * right
-            elif isinstance(node.op, ast.Div):
-                if right == 0:
-                    raise ValueError("Division by zero")
-                value = left / right
-            else:
-                raise ValueError("Unsupported arithmetic operator")
-        else:
-            raise ValueError("Only numeric arithmetic is allowed")
-        if not value.is_finite():
-            raise ValueError("Result is outside the supported range")
-        exponent = value.as_tuple().exponent
-        if not isinstance(exponent, int) or exponent < -128 or exponent > 30:
-            raise ValueError("Decimal exponent is outside the supported range")
-        if abs(value) > Decimal("1e30"):
-            raise ValueError("Result is outside the supported range")
-        return value
-
-    try:
-        with localcontext() as context:
-            context.prec = 28
-            result = visit(tree.body)
-    except (InvalidOperation, OverflowError) as exc:
-        raise ValueError("Invalid arithmetic value") from exc
-    integer_digits = max(1, result.adjusted() + 1)
-    exponent = result.as_tuple().exponent
-    if not isinstance(exponent, int) or integer_digits + max(0, -exponent) + 2 > 256:
-        raise ValueError("Formatted result exceeds the output budget")
-    return format(result, "f")

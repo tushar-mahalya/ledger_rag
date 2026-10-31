@@ -1,15 +1,31 @@
 import type { z } from "zod";
 import type {
+  abstentionDecisionSchema,
+  abstentionFeaturesSchema,
   activitySchema,
   answerSchema,
+  calculationKindSchema,
+  calculationOperandSchema,
+  calculationSchema,
+  calculationStepSchema,
   citationSchema,
   evidenceSchema,
+  verificationSchema,
+  verificationStatusSchema,
 } from "./schemas";
 
 export type Citation = z.infer<typeof citationSchema>;
 export type Answer = z.infer<typeof answerSchema>;
 export type Activity = z.infer<typeof activitySchema>;
 export type Evidence = z.infer<typeof evidenceSchema>;
+export type CalculationOperand = z.infer<typeof calculationOperandSchema>;
+export type CalculationKind = z.infer<typeof calculationKindSchema>;
+export type CalculationStep = z.infer<typeof calculationStepSchema>;
+export type Calculation = z.infer<typeof calculationSchema>;
+export type VerificationStatus = z.infer<typeof verificationStatusSchema>;
+export type Verification = z.infer<typeof verificationSchema>;
+export type AbstentionFeatures = z.infer<typeof abstentionFeaturesSchema>;
+export type AbstentionDecision = z.infer<typeof abstentionDecisionSchema>;
 export type HistoryMessage = { role: "user" | "assistant"; content: string };
 export type Turn = {
   id: string;

@@ -8,7 +8,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.mark.parametrize("target", ["tei", "ingestion"])
+@pytest.mark.parametrize("target", ["tei", "ingestion", "llm"])
 def test_vault_projection_uses_protected_file_not_secret_arguments(
     tmp_path: Path, target: str
 ) -> None:
@@ -16,7 +16,7 @@ def test_vault_projection_uses_protected_file_not_secret_arguments(
     bin_dir.mkdir()
     key = "test-only-secret-" * 3
     vault = bin_dir / "vault"
-    vault.write_text(f"#!/bin/sh\nprintf '%s' '{key}'\n")
+    vault.write_text(f"#!/bin/sh\necho \"$*\" > \"$VAULT_ARGS\"\nprintf '%s' '{key}'\n")
     vault.chmod(0o700)
     uv = bin_dir / "uv"
     uv.write_text(
@@ -38,7 +38,9 @@ def test_vault_projection_uses_protected_file_not_secret_arguments(
         "VAULT_ADDR": "https://vault.example.test",
         "LEDGER_QDRANT_URL": "https://qdrant.example.test",
         "CAPTURE": str(capture),
+        "VAULT_ARGS": str(tmp_path / "vault-args"),
     }
+    vault_path = {"tei": "embedding", "ingestion": "qdrant", "llm": "llm"}[target]
     for exit_code in (0, 1):
         run = subprocess.run(
             ["bash", "-x", str(ROOT / "scripts/sync_modal_secrets.sh"), target],
@@ -50,8 +52,19 @@ def test_vault_projection_uses_protected_file_not_secret_arguments(
         assert key not in run.stdout + run.stderr
         data = json.loads(capture.read_text())
         assert not Path(data["path"]).exists()
+        assert (tmp_path / "vault-args").read_text().split() == [
+            "kv",
+            "get",
+            "-field=api_key",
+            f"secret/ledger/{vault_path}",
+        ]
         if target == "tei":
             assert data["payload"] == {"TEI_API_KEY": key}
+        elif target == "llm":
+            assert data["payload"] == {
+                "LEDGER_LLM_BASE_URL": "https://generativelanguage.googleapis.com/v1beta/openai",
+                "LEDGER_LLM_API_KEY": key,
+            }
         else:
             assert data["payload"] == {
                 "LEDGER_QDRANT_URL": environment["LEDGER_QDRANT_URL"],

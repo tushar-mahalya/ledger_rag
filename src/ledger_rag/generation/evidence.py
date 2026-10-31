@@ -17,7 +17,10 @@ Prior assistant claims and citation markers are not verified; only current evide
 Answer only using the supplied evidence and cite each factual paragraph using [C1] markers.
 If evidence does not answer the question, return an empty answer. Never guess.
 Mention dates and units when relevant. For voice use at most two short sentences.
-For chat the calculator may derive arithmetic from cited numbers; cite the inputs.
+For chat use the calculator for any arithmetic. Bind every input to evidence with its
+citation_id and an exact quoted span; unbound numbers are rejected. Cite the inputs.
+Every number you state must appear in the evidence cited by that sentence or be a
+calculator result whose inputs that sentence cites. Restate units and scale.
 For chat you may search_evidence with a more precise query if evidence is insufficient.
 Do not treat computed results as independently verified facts.
 Return only the final answer or tool requests, not private reasoning."""
