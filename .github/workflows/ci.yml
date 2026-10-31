@@ -8,6 +8,32 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  chatbot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22.22.1"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web --ignore-scripts
+      - run: npm --prefix web run lint
+      - run: npm --prefix web run format:check
+      - run: npm --prefix web test
+      - run: npm --prefix web run build
+      - run: npm --prefix web run check:budget
+      - run: npm --prefix web exec -- playwright install --with-deps chromium
+      - run: npm --prefix web run test:e2e
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: "0.13.6"
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: npm --prefix web run test:live
+      - run: docker build -t ledger-workspace:ci web
+      - run: docker compose -f compose.yaml -f deploy/compose.chat.yaml --profile chat config --quiet
   quality:
     runs-on: ubuntu-latest
     strategy:

@@ -13,7 +13,7 @@ compare alternatives and define when to revisit them.
 
 ```mermaid
 flowchart TB
-    Chat["Chat client: HTTP / SSE"] --> Auth
+    Chat["React research workspace: HTTP / SSE"] --> Auth
     Caller["PCM / Twilio media: WebSocket"] --> Auth
     subgraph API["Single API deployment: modular monolith"]
         Auth["Identity, roles and admission limits"] --> Voice["Voice gateway"]
@@ -45,6 +45,13 @@ external dependencies, not a requirement to split every domain into microservice
 Postgres, Valkey, a durable job orchestrator and GraphQL are **not deployed parts
 of this topology**.
 
+The [browser workspace](CHAT_WORKSPACE.md) is a static React/TypeScript client,
+not another application-server tier. Chat generation now uses a request-scoped
+LangGraph with explicit model, bounded-tool and citation-validation nodes.
+The graph has no shared conversation cache or durable checkpointer. Optional
+bounded history is untrusted context, not evidence or authority; voice rejects
+nonempty history and retains its direct fast path.
+
 **Important exception:** `POST /v1/documents` remains a synchronous, authorized
 small-write path sharing the API's admission capacity and in-process retriever
 lock. It can block queries during replacement. It is not a durable asynchronous
@@ -74,6 +81,7 @@ sequenceDiagram
     opt SSE transport
         API-->>Client: Evidence event, not a final answer
     end
+    Note over API,Client: Safe activity events describe actual stages, never private reasoning
     RAG->>LLM: Instructions plus untrusted evidence
     opt Chat requests tools
         loop Configured cumulative tool budget
@@ -96,6 +104,8 @@ The diagram abbreviates the optional reranker wrapper around retrieval. Tool
 searches go through that same configured retrieval path; they do not bypass
 authorization. Failures return sanitized errors rather than silent provider or
 index fallbacks. SSE failures emit `error`, not a success-shaped final answer.
+The UI accepts an answer only after `done`, validates event shapes, bounds memory
+and cancels abandoned requests. See [the wire contract](CHAT_API.md).
 
 Citation validation checks references and required citation structure. It does
 **not** prove semantic entailment, correct financial units or truthful arithmetic
@@ -180,8 +190,10 @@ LLM, embedding, Qdrant and OTLP-header files. Rotation needs a controlled restar
 Modal platform credentials, the batch database secret and serving TEI keys are
 separate credentials with different consumers.
 
-The application emits JSON logs, metrics, and HTTP/RAG/rerank/voice spans. The
-Collector restricts exported attributes. Its OTLP logs receiver is configured,
+The application emits JSON logs, metrics, and HTTP/RAG/rerank/voice spans plus
+safe LangGraph model/tool/validation spans. The Collector retains fixed stage,
+tool and profile enums, booleans and counts, while excluding configured model
+strings and free-text input/output. Its OTLP logs receiver is configured,
 but an application-to-Collector log shipper is **not** wired. Grafana, Prometheus,
 Tempo and Loki have reference configuration; dashboards, alert rules and
 validated GenAI/Langfuse semantics remain gaps. See the

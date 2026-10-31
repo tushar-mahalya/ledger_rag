@@ -18,3 +18,7 @@ dist/
 build/
 *.egg-info/
 data/finqa/
+node_modules/
+web/test-results/
+web/playwright-report/
+*.tsbuildinfo

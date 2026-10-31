@@ -18,7 +18,8 @@ supersede conflicting snapshot claims; they do not erase unresolved caveats.
 | Training | FinQA train hard negatives, dev selection, held-out test reporting, lineage and metric gate. | Code/tests implemented. Remote fine-tunes not verified. Float dev promotion does not gate INT8 serving quality. |
 | Voice | Generic PCM and Twilio Media Streams gateway, VAD and barge-in. | Synthetic wire/lifecycle tests only. Real calls, signed webhook token minting and end-to-end speech SLO remain open. |
 | Control plane | GraphQL can aggregate admin documents/jobs/evals/models, not token/media traffic. | Proposed only; no GraphQL endpoint. First justify durable metadata, auth, pagination and query-cost limits. |
-| Observability | OTel/Prometheus/structured logs; optional Langfuse sink without a second orchestration stack. | Base telemetry implemented; Langfuse/GenAI integration remains pending. |
+| Chat workspace | React/TypeScript static client, source/artifact inspectors and real execution events; typed request-scoped LangGraph for bounded tools. | Implemented with tab-memory history; no persistent chat/checkpointer or executed artifacts. |
+| Observability | OTel/Prometheus/structured logs, safe graph-node spans; optional Langfuse sink without duplicated vendor tracing. | Base telemetry implemented; live Langfuse/GenAI token/cost integration remains pending. |
 
 ## Ranked experiments and rejected shortcuts
 
@@ -42,10 +43,13 @@ supersede conflicting snapshot claims; they do not erase unresolved caveats.
 - **LangChain:** not required for the implemented protocol adapters and bounded
   tools. Adopt only if a concrete integration removes more maintenance than it adds.
   Do not claim its overhead without measuring the actual path.
-- **LangGraph:** defer until durable, resumable, multi-step workflows are a real
-  requirement. A graph abstraction alone does not improve retrieval accuracy.
-- **LangSmith:** not required by the existing OTel design; evaluate governance,
-  licensing and portability if hosted evaluation/workflows become necessary.
+- **LangGraph:** adopted for the requested chatbot's explicit model, bounded-tool
+  and validation flow with real stage observability. This supersedes the earlier
+  deferral; it is not a durable workflow/checkpointer or an accuracy improvement
+  by itself. Voice stays direct. See [the chat contract](../CHAT_API.md).
+- **LangSmith:** a transitive LangGraph dependency, not an enabled integration.
+  Automatic export is explicitly disabled, including tracing environment flags.
+  Evaluate governance, licensing and portability before enabling a separate sink.
 - **Langfuse:** preferred experiment as an optional OTel destination, not a
   replacement for service logs/metrics. [Current official integration docs](https://langfuse.com/integrations/native/opentelemetry)
   support OTLP/HTTP at `/api/public/otel`; trace-specific endpoint is
@@ -205,7 +209,7 @@ automatically coordinate ACL changes with a separately indexed copy.
 |---|---|
 | Modular monolith + independent batch compute | Keep the synchronous query path simple. Do not add network services solely to appear sophisticated. The small-write API still shares query capacity; bulk builds use Modal instead. |
 | Durable metadata, outbox and coordinated writes | Required before continuous multi-writer updates, robust ACL/deletion propagation or automated repair. This is a missing capability, not something current Modal retries provide. |
-| LangGraph | Useful when chat actually needs checkpointed conversation state, resumable human approval or complex branching. A checkpointer is not a cross-system transaction or a quality improvement by itself. |
+| LangGraph | Now implemented for explicit bounded chat stages and safe activity instrumentation. Persistence and resumable approval remain future requirements; no checkpointer or cross-system transaction is implied. |
 | Temporal | Candidate for durable ingestion/release orchestration and recovery once those workflows justify its infrastructure. Activities and side effects still need idempotency; automatic retries can otherwise duplicate external work. |
 | GraphQL | Consider only for a real admin/control-plane metadata surface. Keep REST/SSE/WebSocket for current query and media traffic. |
 

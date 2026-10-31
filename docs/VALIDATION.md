@@ -1,8 +1,9 @@
 # Validation record
 
 Date: 2026-10-31. This record distinguishes measured local behavior from untested
-production targets. The current refresh covers source/packaging checks, local
-FinQA statistics, documentation syntax and a read-only database preflight.
+production targets. The latest refresh covers source/packaging, the chat graph,
+browser contracts, accessibility, static deployment and documentation syntax.
+Earlier local FinQA statistics and the read-only database preflight are retained.
 Earlier experiments are recorded separately, not claimed as reruns against the
 current workspace. Re-run the commands before relying on these results.
 
@@ -18,20 +19,55 @@ uv run --locked python scripts/check_agent_skills.py
 uv build --no-sources
 ```
 
-- 323 tests passed, including the FinQA split/reporting regressions.
-- Ruff lint passed; formatting checks passed for 81 files.
-- Strict mypy passed for 39 service/helper files and three compute files.
+- 375 tests passed, including 52 new graph/history/stream regressions beyond the
+  preceding 323-test baseline.
+- Ruff lint passed; formatting checks passed for 91 files.
+- Strict mypy passed for 45 service/helper files and three compute files.
 - Wheel and source distribution built successfully.
 - The Agent Skills validator passed, including canonical skills, local links,
   Claude aliases and the locked Modal skill version.
-- All nine Mermaid diagrams parsed locally with Mermaid 11.12.2. This checks
+- All ten Mermaid diagrams parsed locally with Mermaid 11.12.2. This checks
   syntax only, not visual rendering.
-- Warnings include the upstream Starlette TestClient/httpx deprecation, intentional
-  local execution of mocked Modal functions, SDK compatibility probes and local
+- Warnings include intentional local execution of mocked Modal functions,
+  SDK compatibility probes and local
   Qdrant's lack of payload indexing. Real-server indexing was checked in the
   earlier isolated-server tests below.
 - Provider tests use mocked remote HTTP endpoints. Qdrant tests include the
   installed SDK's real local backend, not just response-shaped mocks.
+
+## Chat workspace validation
+
+Commands and architecture are in [the workspace guide](CHAT_WORKSPACE.md).
+
+- **15 TypeScript unit tests** passed: SSE framing/UTF-8, runtime schemas,
+  failure/completion bounds, history limits, safe references and artifact exports.
+- **10 desktop/mobile Playwright cases** passed. They cover citation inspection,
+  downloads, mocked live SSE/history, explicit failures, cancellation, token
+  non-persistence, reduced motion, layout and axe WCAG A/AA checks. A strengthened
+  cancellation case also passed on both viewports after explicitly switching
+  conversations before releasing a delayed response.
+- Automated accessibility checks caught low contrast and modal focus-restoration
+  defects; both were fixed and re-tested. This is not a comprehensive manual
+  screen-reader or all-browser accessibility certification.
+- A separate **real local browser integration** passed through the same-origin
+  proxy, authenticated API, LangGraph and citation gate over the fictional
+  extractive provider. Actual activity and request/model/timing metadata rendered.
+  Test API/UI processes were stopped; no external model, GPU or paid job ran.
+- ESLint, Prettier, strict TypeScript and the Vite production build passed.
+  Combined JavaScript/CSS gzip size was **162,954 bytes** (159.1 KiB), below the
+  200 KiB gate. The largest minified JavaScript chunk was **381,364 bytes**,
+  below 450 KiB. These are build measurements, not network or real-user SLOs.
+- The pinned static Nginx image built and served as UID/GID 101, with a read-only
+  filesystem, dropped capabilities and strict CSP. A browser rendered Markdown
+  and opened the artifact inspector with **no page errors or CSP violations**.
+  The temporary test container was stopped.
+- Compose's chat overlay and the Collector configuration validated. The latter
+  used a temporary non-secret credential fixture, not live telemetry credentials.
+  Fixed graph stage/tool/profile values and outcome/count fields are retained;
+  model strings and raw prompt/tool content are not allowlisted.
+- Independent implementation review found no significant integration issues.
+  No remote LLM accuracy, end-user latency, live Langfuse export, persistent
+  conversation recovery or complete GenAI usage/cost reporting is claimed.
 
 ## Local FinQA statistics
 

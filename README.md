@@ -17,6 +17,7 @@ not the number of frameworks in the diagram.
 | Capability | Implementation |
 |---|---|
 | Reusable API | FastAPI query, ingestion, health, metrics, and SSE endpoints |
+| Research workspace | React/TypeScript chat, rich Markdown, source and artifact inspectors, real execution activity and per-request measurements |
 | Two execution profiles | Voice: at most three initial chunks, no tools/rerank; chat: bounded calculator and corrective retrieval |
 | Provider portability | OpenAI chat-completions and Anthropic messages wire protocols, custom base URLs, normalized tool history |
 | Local, keyless demo | Deterministic lexical retrieval and extractive responses over **fictional** disclosures |
@@ -25,7 +26,7 @@ not the number of frameworks in the diagram.
 | Ingestion | Paragraph-aware bounded chunks, neighboring parent metadata, content hashes and stable tenant-scoped IDs |
 | Identity and permissions | OIDC signature/issuer/audience/expiry validation; server-derived tenant and group ACLs, admin/reader roles |
 | Evidence contract | Source, disclosure date and exact retrieved quote; unknown or missing paragraph citations trigger abstention |
-| Tool harness | Allowlisted read-only retrieval and Decimal arithmetic; argument validation, cumulative tool budget, query deadline |
+| Tool harness | Typed request-scoped LangGraph chat; allowlisted retrieval and Decimal arithmetic, bounded untrusted history, cumulative tool budget and deadlines |
 | Operations | Structured redacted logs, request/trace IDs, OTLP traces, Prometheus metrics, Docker, Vault Agent templates, CI |
 | Evaluation | Retrieval/answer smoke tests, authorization/failure-path suites, reproducible evaluation and HTTP benchmarking |
 | Voice gateway | Generic PCM and Twilio Media Streams adapters, VAD and barge-in; synthetic lifecycle tests, not verified carrier calls |
@@ -34,7 +35,8 @@ not the number of frameworks in the diagram.
 
 **Important boundaries:** valid citation markers do not establish semantic
 entailment. The default demo is not neural RAG. SSE sends evidence followed by a
-validated complete answer, **not** raw token streaming; this is deliberate to avoid
+validated complete answer, **not** raw token streaming; safe execution activity is
+streamed separately. This is deliberate to avoid
 speaking an answer before the citation gate. Real telephony calls, signed webhook
 token minting and end-to-end voice latency remain unverified.
 GraphRAG, ColPali, late interaction, validated GPU serving, durable workflow orchestration,
@@ -82,6 +84,22 @@ infrastructure, Vault bootstrap, telemetry, and the production overlay see
 [the operations runbook](docs/OPERATIONS.md). Do not expose demo authentication
 publicly or treat an unsecured local Vault as a production secrets service.
 
+### Chat workspace
+
+With Node 22.12+:
+
+```bash
+npm ci --prefix web --ignore-scripts
+npm --prefix web run dev
+```
+
+Open `http://127.0.0.1:5173` for the clearly labeled fictional design preview.
+Start the API above and use **Connect API** with your Ledger access token for
+live authenticated queries. Provider keys stay on the backend; the browser
+never receives them. Conversations and access tokens are tab-memory-only.
+See [workspace design, deployment and checks](docs/CHAT_WORKSPACE.md) and
+[the graph/history/SSE contract](docs/CHAT_API.md).
+
 ## Tests and evaluation
 
 ```bash
@@ -109,6 +127,7 @@ of concurrency capacity.
 - [Coding-agent workflows and portable skills](docs/AGENT_WORKFLOWS.md)
 - [Current decisions, tradeoffs and open experiments](docs/research/2026-10-31-decisions.md)
 - [Architecture and execution paths](docs/ARCHITECTURE.md)
+- [Chat workspace, design research and browser validation](docs/CHAT_WORKSPACE.md)
 - [Primary-source research and dataset decisions](docs/RESEARCH.md)
 - [Deployment, secrets, observability and recovery](docs/OPERATIONS.md)
 - [Single-container Modal ingestion and database uploads](docs/INGESTION.md)
