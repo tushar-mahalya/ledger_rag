@@ -152,6 +152,7 @@ Secrets are read at startup: rotate files, then roll the application instances.
 |---|---|
 | OpenAI-compatible LLM | `LEDGER_PROVIDER=openai`, `LEDGER_LLM_BASE_URL`, `LEDGER_LLM_MODEL`, `LEDGER_LLM_API_KEY` |
 | Anthropic-compatible LLM | `LEDGER_PROVIDER=anthropic`, messages-compatible base URL, model and key |
+| Generation controls | Optional `LEDGER_LLM_TEMPERATURE`, `LEDGER_LLM_MAX_TOKENS` (sent as `LEDGER_LLM_MAX_TOKENS_PARAMETER`: `max_tokens` or `max_completion_tokens`), `LEDGER_LLM_SEED`, `LEDGER_LLM_REASONING_EFFORT` (`none`…`high`, e.g. Gemini's OpenAI layer); unset values are not sent. Anthropic sends `max_tokens` (default 2048) and temperature ≤1, and refuses seed/reasoning effort at startup |
 | Dense embeddings | `LEDGER_EMBEDDING_BASE_URL`, model, matching dimensions and API key |
 | Colocated ingestion identity | `LEDGER_EMBEDDING_SPACE_ID` from the verified job manifest; empty retains legacy endpoint-bound collections |
 | Persistent index | `LEDGER_RETRIEVAL_BACKEND=qdrant`, URL/collection and optional API key; `LEDGER_QDRANT_BOOTSTRAP_ON_STARTUP=true` provisions a missing collection (with payload indexes) at startup, because readiness never creates one |

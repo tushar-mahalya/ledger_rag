@@ -153,6 +153,8 @@ class _HTTPProvider:
         self.model = settings.llm_model
         self._base_url = settings.llm_base_url
         self._key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
+        self._temperature = settings.llm_temperature
+        self._max_tokens = settings.llm_max_tokens
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(settings.llm_timeout_seconds, connect=5.0),
             follow_redirects=False,
@@ -178,6 +180,21 @@ class _HTTPProvider:
 
 
 class OpenAIProvider(_HTTPProvider):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings)
+        # Only explicitly configured controls are sent; compatible servers differ on
+        # which they accept (e.g. newer OpenAI models need max_completion_tokens).
+        self._generation: dict[str, Any] = {
+            key: value
+            for key, value in {
+                "temperature": settings.llm_temperature,
+                settings.llm_max_tokens_parameter: settings.llm_max_tokens,
+                "seed": settings.llm_seed,
+                "reasoning_effort": settings.llm_reasoning_effort,
+            }.items()
+            if value is not None
+        }
+
     async def complete(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
     ) -> dict[str, Any]:
@@ -200,7 +217,11 @@ class OpenAIProvider(_HTTPProvider):
                 wire_messages.append(wire)
         except (ValueError, TypeError, KeyError, AttributeError):
             raise ProviderError("Invalid tool-call history") from None
-        body: dict[str, Any] = {"model": self.model, "messages": wire_messages}
+        body: dict[str, Any] = {
+            "model": self.model,
+            "messages": wire_messages,
+            **self._generation,
+        }
         if tools:
             body["tools"] = tools
         data = await self._post("chat/completions", body, {"Authorization": f"Bearer {self._key}"})
@@ -221,6 +242,16 @@ class OpenAIProvider(_HTTPProvider):
 
 
 class AnthropicProvider(_HTTPProvider):
+    DEFAULT_MAX_TOKENS = 2048
+
+    def __init__(self, settings: Settings) -> None:
+        # Fail at startup rather than silently ignoring controls Messages lacks.
+        if settings.llm_seed is not None or settings.llm_reasoning_effort is not None:
+            raise ProviderError("Anthropic does not support llm_seed or llm_reasoning_effort")
+        if settings.llm_temperature is not None and settings.llm_temperature > 1:
+            raise ProviderError("Anthropic llm_temperature must be between 0 and 1")
+        super().__init__(settings)
+
     async def complete(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
     ) -> dict[str, Any]:
@@ -266,9 +297,11 @@ class AnthropicProvider(_HTTPProvider):
                     wire_messages.append({"role": role, "content": blocks})
             body: dict[str, Any] = {
                 "model": self.model,
-                "max_tokens": 2048,
+                "max_tokens": self._max_tokens or self.DEFAULT_MAX_TOKENS,
                 "messages": wire_messages,
             }
+            if self._temperature is not None:
+                body["temperature"] = self._temperature
             if system:
                 body["system"] = "\n\n".join(system)
             if tools:
