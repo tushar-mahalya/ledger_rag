@@ -23,7 +23,7 @@ processors:
     trace_statements:
       - context: span
         statements:
-          - keep_keys(attributes, ["http.request.method", "http.response.status_code", "http.route", "error.type"])
+          - keep_keys(attributes, ["http.request.method", "http.response.status_code", "http.route", "error.type", "rag.stage", "rag.tool", "rag.profile", "rag.tool_calls", "rag.abstained", "rag.citation_count", "retrieval.hit_count"])
     log_statements:
       - context: log
         statements:

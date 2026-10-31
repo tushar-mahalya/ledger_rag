@@ -1,7 +1,8 @@
 from datetime import date
 from enum import StrEnum
+from typing import Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Profile(StrEnum):
@@ -54,11 +55,48 @@ class Citation(BaseModel):
     quote: str
 
 
+class HistoryMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=8000)
+
+
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000, pattern=r"\S")
     profile: Profile = Profile.CHAT
     as_of: date | None = None
     top_k: int = Field(default=5, ge=1, le=10)
+    history: list[HistoryMessage] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="after")
+    def bounded_chat_history(self) -> Self:
+        if sum(len(message.content) for message in self.history) > 32000:
+            raise ValueError("History exceeds 32000 characters")
+        if self.profile == Profile.VOICE and self.history:
+            raise ValueError("History is not supported for voice")
+        return self
+
+
+ActivityStage = Literal["retrieval", "generation", "tool", "validation"]
+ActivityTool = Literal["calculator", "search_evidence"]
+ActivityLabel = Literal[
+    "Retrieving evidence",
+    "Generating answer",
+    "Calculating",
+    "Searching evidence",
+    "Checking tool request",
+    "Validating citations",
+]
+
+
+class Activity(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    stage: ActivityStage
+    status: Literal["started", "completed"]
+    label: ActivityLabel
+    tool: ActivityTool | None = None
 
 
 class Answer(BaseModel):

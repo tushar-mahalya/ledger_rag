@@ -218,7 +218,10 @@ Application structlog JSON goes to **process/container output** with request/tra
 IDs and no request body. It is not automatically shipped to Loki: install a reviewed
 host log forwarder (e.g. Alloy/Fluent Bit), parse JSON, redact at source, and send OTLP
 logs to Collector. No Docker socket or unrestricted host-log mount is supplied.
-Collector drops arbitrary span attributes and log bodies as defense in depth;
+Collector retains HTTP metadata plus fixed graph stage/tool/profile enums and
+numeric/boolean retrieval/citation/outcome fields. Model strings, prompts, tool
+arguments and outputs are not allowlisted. It drops other span attributes and
+log bodies as defense in depth;
 this is not proof of complete PII redaction. Review resource attributes, span
 names, labels, exception strings, and ingress logs too. Never log JWTs, API keys,
 queries, documents, or financial amounts. Separate security audit records from

@@ -11,9 +11,18 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+from ledger_rag.api.streaming import SendEvent, buffered_events
 from ledger_rag.core.config import Settings, get_settings
 from ledger_rag.core.contracts import Provider, Retriever
-from ledger_rag.core.models import Answer, Document, IngestRequest, Principal, QueryRequest
+from ledger_rag.core.models import (
+    Activity,
+    Answer,
+    Document,
+    IngestRequest,
+    Principal,
+    QueryRequest,
+)
+from ledger_rag.generation.evidence import citations_from_hits
 from ledger_rag.ingestion.chunking import chunk_document
 from ledger_rag.observability.telemetry import (
     BodyTooLarge,
@@ -234,27 +243,40 @@ def create_app(
         require_role(principal, "reader")
         state = runtime(request)
 
-        async def events() -> AsyncIterator[str]:
-            # Emit evidence immediately; never send unvalidated model tokens to a voice client.
+        async def produce(send: SendEvent) -> None:
+            async def on_activity(event: Activity) -> None:
+                await send(f"event: activity\ndata: {event.model_dump_json(exclude_none=True)}\n\n")
+
             try:
                 async with slot(state):
                     async with asyncio.timeout(state.settings.query_deadline_seconds):
-                        hits, retrieval_ms = await state.service.retrieve(payload, principal)
+                        hits, retrieval_ms = await state.service.retrieve(
+                            payload, principal, on_activity=on_activity
+                        )
                         evidence_event = json.dumps(
                             {
                                 "request_id": request.state.request_id,
                                 "retrieval_ms": retrieval_ms,
                                 "sources": [hit.chunk.source for hit in hits],
+                                "citations": [
+                                    citation.model_dump(mode="json")
+                                    for citation in citations_from_hits(hits)
+                                ],
                             }
                         )
-                        yield f"event: evidence\ndata: {evidence_event}\n\n"
+                        await send(f"event: evidence\ndata: {evidence_event}\n\n")
                         answer = await state.service.generate(
-                            payload, hits, retrieval_ms, request.state.request_id, principal
+                            payload,
+                            hits,
+                            retrieval_ms,
+                            request.state.request_id,
+                            principal,
+                            on_activity=on_activity,
                         )
                         observe(state, answer)
-                        yield f"event: answer\ndata: {answer.model_dump_json()}\n\n"
-                        yield "event: done\ndata: {}\n\n"
-            except (TimeoutError, httpx.HTTPError, ValueError, RuntimeError, HTTPException) as exc:
+                        await send(f"event: answer\ndata: {answer.model_dump_json()}\n\n")
+                        await send("event: done\ndata: {}\n\n")
+            except Exception as exc:
                 logger.error("stream_failure", error_class=type(exc).__name__)
                 error_event = json.dumps(
                     {
@@ -262,10 +284,12 @@ def create_app(
                         "request_id": request.state.request_id,
                     }
                 )
-                yield f"event: error\ndata: {error_event}\n\n"
+                await send(f"event: error\ndata: {error_event}\n\n")
 
         return StreamingResponse(
-            events(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"}
+            buffered_events(produce),
+            media_type="text/event-stream",
+            headers={"X-Accel-Buffering": "no"},
         )
 
     return app

@@ -14,6 +14,7 @@ from prometheus_client import CollectorRegistry, Counter, Histogram
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ledger_rag.core.config import Settings
+from ledger_rag.observability.spans import safe_span
 
 
 class BodyTooLarge(HTTPException):
@@ -124,9 +125,8 @@ class RequestMiddleware:
                 ]
             await send(message)
 
-        tracer = trace.get_tracer(__name__)
         try:
-            with tracer.start_as_current_span("http.request") as span:
+            with safe_span("http.request") as span:
                 context = span.get_span_context()
                 structlog.contextvars.bind_contextvars(trace_id=f"{context.trace_id:032x}")
                 await self.app(scope, limited_receive, wrapped_send)
