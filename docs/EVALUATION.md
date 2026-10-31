@@ -190,11 +190,12 @@ companies, production traffic, or model pretraining.
 `--seed` seeds the bootstrap only. It does not control a remote model's sampler,
 network scheduling, or indexing randomness. Repeated normalized questions under
 different IDs are flagged, but are not silently removed or reweighted. Where
-questions share reports/companies, case-level independence is optimistic:
-publication-quality studies should also bootstrap at company/report level,
-use paired case-level differences for model comparisons, and state cluster units.
-Those grouped/paired comparison procedures are experiment extensions, not
-implemented claims of this CLI.
+questions share reports/companies, case-level independence is optimistic.
+Cases may set an optional `cluster` (for example the source report); the
+bootstrap then resamples **whole clusters** and reports the cluster count.
+Unclustered suites keep the case-level interval. The FinQA benchmark always
+clusters by report (`company/year`) and reports paired cluster-bootstrap
+differences between arms, modes and models (see [FinQA](#finqa)).
 
 The manifest records exact input-byte SHA256 digests, installed package and
 Python versions, package Python-source SHA256, model/provider identifiers, and an
@@ -386,9 +387,10 @@ Preserve native train/dev/test boundaries. Reconstruct report/page identity from
 example IDs; serialize `pre_text`, `table`, and `post_text` consistently for both
 positive and negative candidates, preserving row/column headers and units.
 Keep `qa.program`, `qa.exe_ans`, and `qa.gold_inds` exclusively in gold labels.
-Map supporting fact indices to audited chunks. Gold programs/execution results
-can support an independent official execution/program scorer; the current
-substring/numeric evaluator is **not** that scorer. The private test has no
+Supporting fact indices are mapped to chunks as described under
+[Gold labels and evidence mapping](#gold-labels-and-evidence-mapping). The answer
+scorer compares the final value with `exe_ans`; it is **not** the official
+program-execution scorer and gives no credit for programs. The private test has no
 public reference labels; do not invent retrieval or execution accuracy there.
 
 The maintainer changelog documents a May 2022 `table_row_to_text` formatting bug
@@ -443,21 +445,207 @@ never mutates the full-precision baseline. Vector copying preserves payloads and
 original vectors; the helper refuses an existing destination, verifies the source
 schema and exact point counts, and never deletes either collection.
 
-The CLI retains `--split test` as its default for compatibility; explicitly use
-`--split dev` to choose architecture/model settings and `--split test` only after
-freezing them. Reports identify `question_split`, `split_questions` (the total
-available pool), and `selected_questions` (after `--limit`). The legacy
-`test_questions` field remains only for test reports. These are selected case
-counts, not necessarily completed answer counts: answer evaluation can sample
-again with `--answer-samples`. None limits ingestion.
+#### Splits and the sealed test set
 
-The full test split has 1,147 questions. `--limit N` selects the
-first N selected-split rows (not a randomized representative sample) and is suitable only as a
-smoke/pilot. Report it as such. `--quantization none` explicitly bypasses any
-stored compressed index; scalar/binary settings must match their effective dense
-vector configuration. Report Recall@k/evidence recall, p50/p95/p99, sample count,
-oversampling, point count and RAM/disk. No accuracy or latency gain is assumed;
-FinQA split/license and source-filing rights caveats above still apply.
+`--split` defaults to **dev**. The test split is sealed: `--split test` fails
+unless `--unseal-test` is also passed, and unsealed reports carry
+`dataset.test_split_unsealed: true` and a warning on stderr. Unseal only after the
+configuration is frozen on dev, and report the result once. Fine-tuning follows
+the same rule: `compute/training.py` promotes on dev and evaluates test only with
+`--unseal-test`. Reports identify `question_split`, `split_questions` (the pool),
+and `selected_questions` (after `--limit`, which takes the first N rows and is
+only a smoke/pilot). Answer runs sample `--answer-samples` cases with `--seed`.
+
+#### Scoring (answers)
+
+The reader prompt (`finqa_answers.py`, version and SHA-256 in every report) asks
+for short reasoning followed by three structured lines:
+
+```text
+ANSWER: <single value | yes | no | INSUFFICIENT>
+CONFIDENCE: <0-100>
+CITATIONS: C1, C3
+```
+
+Only the **last** `ANSWER:` line is parsed; there is no "first number in the text"
+fallback. A missing line, several numbers, or an unparseable value is a
+`format_error` and counts as wrong. `INSUFFICIENT` counts as an abstention. The
+gold value is `qa.exe_ans` (the executed program result).
+
+| Metric | Definition |
+|---|---|
+| `exact` | Numeric: prediction and gold agree after ROUND_HALF_UP to the gold's stated precision. The precision comes from `qa.answer` on the `exe_ans` scale (`12.6%` against `0.12574` gives 3 decimals). If the stated answer is inconsistent with `exe_ans`, it falls back to 3 significant figures. Yes/no and text: normalized exact match. |
+| `tolerant` | `exact`, or within 1% relative tolerance. |
+| `percent_scale_diagnostic` | `tolerant`, but also accepts ×100/÷100 scale slips. A diagnostic only, never a headline metric. |
+| `selective_exact`, `coverage`, `abstention_rate` | Accuracy over answered cases; answered share; abstained share. |
+| `risk_coverage` | Accuracy at fixed coverage (and AURC) when ranked by self-reported confidence or by the top retrieval score. |
+| `citation_precision/recall` | Cited context chunks against the chunks that satisfy gold evidence units (below). |
+
+A percentage is read as a ratio only when the model writes the `%` sign, so a bare
+`12.6` against gold `0.126` is wrong under `exact` and `tolerant`.
+
+#### Gold labels and evidence mapping
+
+`qa.gold_inds` keys (`text_3`, `table_2`, ...) are audited before any retrieval
+or answers run. Unknown keys (absent from the page) and missing `gold_inds` are
+counted in `dataset.gold_labels` and **fail the run**; nothing is silently
+dropped. dev: 883 questions, 1,513 gold units, 0 unknown. test: 0 unknown.
+train: 1 unknown.
+
+Retrieved chunks are scored against **gold units**, not substrings of
+answer-bearing text. `Corpus.evidence(page)` rebuilds the page's chunks with the
+production `chunk_document`. Chunk IDs are deterministic (tenant, document,
+ordinal and text hash), so they match the IDs stored in Qdrant without
+re-ingestion. Each unit is mapped in two steps:
+
+1. **whole**: the unit's whitespace-normalized text is contained in one or more
+   chunks; any of those chunks satisfies it.
+2. **fragments**: otherwise the unit is split into sentences, each found in some
+   chunk; the unit is satisfied only when every fragment's chunk is retrieved.
+
+Units that match neither way are `unmapped`: they stay in the denominator and can
+never be satisfied. All 1,513 dev and 1,903 test gold units map **whole**; train
+has one unmapped unit (its unknown key). Across all 86,421 page units in the
+corpus, 29 map by fragments and 7 are unmapped. Table rows are matched against the
+rendered Markdown row of the same page.
+
+| Retrieval metric | Definition |
+|---|---|
+| `page_recall@k`, `page_mrr@10` | The gold page appears in the top k (reciprocal rank of the first gold-page chunk). |
+| `evidence_recall@k` | Share of gold units satisfied by the top-k chunks. |
+| `all_evidence@k` | 1 if every gold unit is satisfied. |
+| `evidence_precision@k` | Share of top-k chunks that satisfy at least one gold unit. |
+| `evidence_mrr@10` | Reciprocal rank of the first chunk that satisfies a unit. |
+
+Returned chunk IDs that are not in the rebuilt corpus are counted under
+`integrity.unknown_retrieved_chunk_ids`.
+
+#### Uncertainty and holdout views
+
+Every metric reports `mean`, `ci95`, `n`, `clusters` and `ineligible` (rows where
+the metric does not apply, for example no gold units). The 95% CI is a seeded
+**cluster bootstrap over reports** (`company/year`, 224 reports across the 883 dev
+questions); 2,000 resamples by default. Arm-versus-`hybrid` and mode/model
+comparisons are **paired** cluster-bootstrap differences over shared questions.
+Views:
+
+- `all`
+- `company_unseen_in_train`: only 2 dev questions, so reported but too small to use
+- `report_unseen_in_train`: 77 questions
+- `company_fold_holdout` and `company_fold_selection`: a deterministic 1-in-5
+  company-hash fold, for company-disjoint selection versus confirmation
+
+#### Lineage
+
+Each report records:
+
+- git SHA (with `-dirty` if applicable) and the SHA-256 of the evaluation source
+- collection, embedding model, revision and `embedding_space_id`
+- reranker model and revision
+- corpus SHA-256 (the bulk-ingestion definition, verified against
+  `--expected-corpus-sha256`)
+- FinQA commit, seed and bootstrap settings
+- for answers: model, `reasoning_effort`, temperature (or `default` when
+  omitted), max tokens, LLM seed, prompt version and hash, pacing, latency
+  percentiles, token usage (including reasoning tokens when returned), finish
+  reasons, HTTP status counts and quota error samples
+
+API keys and endpoint URLs are never recorded; only the LLM host is.
+
+#### Modal evaluation job (read-only)
+
+`compute/evaluation.py` runs the benchmark against the production Qdrant Cloud
+collection without writing to it. It only calls `count` and `search`, both of
+which open the collection with `create=False` and verify its embedding identity.
+
+```mermaid
+flowchart LR
+  subgraph GPU["evaluate · L4 (L40S fallback, CC 8.9)"]
+    F[fetch_finqa.sh<br/>pinned commit] --> V[verify corpus SHA-256<br/>and 8,611 points]
+    T1[TEI embedder :8000<br/>gte-modernbert-base@e7f32e3] --> R
+    T2[TEI reranker :8001<br/>gte-reranker-modernbert-base@f7481e6] --> R
+    V --> R[retrieval: 4 arms × 2 scopes]
+    V --> C[contexts: company-scoped<br/>hybrid:rerank top-5 for the answer sample]
+  end
+  Q[(Qdrant Cloud<br/>finqa_gte_modernbert_v1)] -. read-only search .-> R & C
+  C -->|/data/evaluation/&lt;run&gt;.json| G
+  subgraph CPU["generate · CPU only"]
+    G[answers: retrieved@3, retrieved@5, oracle<br/>paced per model, ≤8 concurrent,<br/>jittered retries on 429/5xx]
+  end
+  L[(Gemini OpenAI-compatible API)] <--> G
+  R & G --> O[/data/evaluation/&lt;run&gt;.json<br/>+ summary to local entrypoint/]
+```
+
+The answers stage is split from the GPU stage so GPU minutes are never spent
+waiting on provider quotas. `retrieved@3` is a prefix of the same
+`retrieved@5` ranking. `oracle` gives the model every chunk of the gold page.
+
+```sh
+# Smoke: 20 retrieval questions and 20 answer samples.
+uv run --locked --group compute modal run compute/evaluation.py \
+  --command all --limit 20 --answer-samples 20
+
+# Full dev retrieval baseline (883 questions, 4 arms × 2 scopes).
+uv run --locked --group compute modal run compute/evaluation.py --command retrieval \
+  --retrieval-concurrency 8
+
+# Answers: GPU contexts stage, then paced CPU generation.
+uv run --locked --group compute modal run compute/evaluation.py --command answers \
+  --models gemini-3.5-flash-lite,gemini-3.5-flash:low --answer-samples 200 \
+  --llm-rpm 12 --llm-concurrency 4
+# Reuse saved contexts (no GPU): --contexts-run <run_id of the contexts report>
+
+uv run --locked --group compute modal volume get ledger-data evaluation/<run_id>.json .
+```
+
+Secrets:
+
+- `ledger-ingestion` supplies `LEDGER_QDRANT_URL` and `LEDGER_QDRANT_API_KEY`
+  (GPU stage only).
+- `ledger-llm` supplies `LEDGER_LLM_BASE_URL` and `LEDGER_LLM_API_KEY`.
+
+Both are removed from the TEI processes' environment. A random per-job key
+protects the loopback TEI servers. TEI echoes this key in its startup log, but it
+is useless outside the single-use container.
+
+Model specs take the form `model[:reasoning_effort]`. `--temperature default`
+omits the parameter, as Gemini 3 guidance recommends. `--llm-seed` is sent only
+when set.
+
+The local CLI provides the same commands:
+
+```sh
+uv run --locked python -m ledger_rag.evaluation.benchmarks.finqa contexts|answers ...
+```
+
+It also accepts `--contexts <report.json>` and `--llm-rpm`.
+
+#### Hosted free-tier runs (infrastructure evidence, not a baseline)
+
+These runs used the Gemini free tier through its OpenAI-compatible API. They are
+recorded only as evidence of provider throttling. **Their accuracy numbers are not
+a baseline and are not published**: the samples are tiny, and only the completions
+that escaped HTTP 429 were scored, so any accuracy is survivorship-biased.
+
+| Run | Sample | Pacing | Completions | HTTP requests | HTTP 429 | Failed completions |
+|---|---|---|---|---|---|---|
+| `44dbf8e0334449a7be8aa8ef0baab41f` | first 20 dev rows | none, 8 concurrent | 120 | 494 | 436 (88%) | 62: flash 40/60, flash-lite 22/60 |
+| `728ae134305f4f98a6e6b33042966e7c` | 10 sampled dev questions | 10 rpm per model, 4 concurrent | 60 | 92 | 59 (64%) | 27: flash 27/30, flash-lite 0/30 |
+| `448a606b3c2e4bb2b35626f0b64f207d` | 1 dev question (probe) | none | 6 | 6 | 3 | 3: flash 3/3 |
+
+Models were `gemini-3.5-flash` with `reasoning_effort=low` and
+`gemini-3.5-flash-lite`, over the `retrieved@3`, `retrieved@5` and `oracle`
+modes. Run `728ae134` failed with "You exceeded your current quota". The probe's
+429 body names the per-model daily free-tier quota
+(`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, value 20, retry delay
+31,132 s). Contexts for `728ae134` came from GPU run
+`5d2ee9629f97463cb2551cf24944f9f8`.
+
+A full dev answer run is 883 questions × 3 modes × 2 models, or about 5,300
+completions, which is not feasible at 20 requests per model per day. The baseline
+therefore uses a self-hosted open-weight model on Modal; Gemini remains an optional
+provider. The quota accounting (`llm_calls.status_counts`, `retries`, `failures`,
+`error_samples`) stays in every report.
 
 ### TAT-QA
 
