@@ -444,3 +444,12 @@ async def test_documents_are_embedded_with_contextual_title_header() -> None:
     await retriever.upsert([chunk()])
     assert json.loads(requests[-1].content)["input"] == ["Results\nRevenue increased."]
     assert retriever._identity["chunk_text"] == "title-header-v1"
+
+
+async def test_embedding_requests_are_sub_batched_in_order() -> None:
+    retriever, _, requests = await store()
+    retriever._settings = retriever._settings.model_copy(update={"embedding_batch_size": 2})
+    chunks = [chunk(f"tenant/doc/{i}", ordinal=i, text=f"text {i}") for i in range(5)]
+    await retriever.upsert(chunks)
+    assert [len(json.loads(r.content)["input"]) for r in requests] == [2, 2, 1]
+    assert json.loads(requests[2].content)["input"] == ["Results\ntext 4"]

@@ -105,6 +105,13 @@ class QdrantRetriever:
                 raise RetrievalError("Qdrant collection embedding/schema identity is incompatible")
 
     async def _embed(self, texts: list[str]) -> list[list[float]]:
+        size = self._settings.embedding_batch_size
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), size):
+            vectors.extend(await self._embed_batch(texts[start : start + size]))
+        return vectors
+
+    async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         try:
             response = await self._embedding_client.post(
                 _endpoint(self._settings.embedding_base_url, "embeddings"),
