@@ -9,6 +9,8 @@ def chunk_document(document: Document, max_chars: int = 1800, overlap: int = 200
     if max_chars < 200 or overlap < 0 or overlap >= max_chars:
         raise ValueError("Invalid chunk size or overlap")
     sections = [s.strip() for s in re.split(r"\n\s*\n", document.text) if s.strip()]
+    if not sections:
+        raise ValueError("Document must contain non-whitespace evidence")
     units: list[str] = []
     for section in sections:
         if len(section) <= max_chars:

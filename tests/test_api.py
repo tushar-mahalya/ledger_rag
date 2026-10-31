@@ -57,6 +57,22 @@ def test_cross_tenant_and_duplicate_ingest_rejected(client: TestClient, document
     )
 
 
+def test_blank_replacement_is_rejected_before_batch_mutation(
+    client: TestClient, document: Document
+) -> None:
+    original = document.model_dump(mode="json")
+    assert (
+        client.post("/v1/documents", json={"documents": [original]}, headers=AUTH).status_code
+        == 201
+    )
+    invalid = {**original, "text": " \n\t ", "allowed_groups": ["private"]}
+    assert (
+        client.post("/v1/documents", json={"documents": [invalid]}, headers=AUTH).status_code == 422
+    )
+    response = client.post("/v1/query", json={"question": "Revenue"}, headers=AUTH)
+    assert not response.json()["abstained"]
+
+
 def test_stream_has_validated_answer_and_done(client: TestClient, document: Document) -> None:
     client.post(
         "/v1/documents", json={"documents": [document.model_dump(mode="json")]}, headers=AUTH

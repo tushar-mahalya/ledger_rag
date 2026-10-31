@@ -86,11 +86,27 @@ def test_calculator(expression: str, expected: str) -> None:
 
 @pytest.mark.parametrize(
     "expression",
-    ["__import__('os')", "2**100", "1/0", "True + 1", "1e999", "[1]", "1 << 2", "9" * 201],
+    [
+        "__import__('os')",
+        "2**100",
+        "1/0",
+        "True + 1",
+        "1e999",
+        "[1]",
+        "1 << 2",
+        "9" * 201,
+        "1e-1000000",
+        "1e-128 * 0.1",
+        "1e-1000000000",
+    ],
 )
 def test_calculator_rejects_unsafe_inputs(expression: str) -> None:
     with pytest.raises(ValueError):
         calculate(expression)
+
+
+def test_calculator_fixed_point_output_is_bounded() -> None:
+    assert len(calculate("1e-128")) <= 256
 
 
 async def test_citations_are_from_authorized_evidence(

@@ -71,7 +71,12 @@ def calculate(expression: str) -> str:
                 raise ValueError("Unsupported arithmetic operator")
         else:
             raise ValueError("Only numeric arithmetic is allowed")
-        if not value.is_finite() or abs(value) > Decimal("1e30"):
+        if not value.is_finite():
+            raise ValueError("Result is outside the supported range")
+        exponent = value.as_tuple().exponent
+        if not isinstance(exponent, int) or exponent < -128 or exponent > 30:
+            raise ValueError("Decimal exponent is outside the supported range")
+        if abs(value) > Decimal("1e30"):
             raise ValueError("Result is outside the supported range")
         return value
 
@@ -81,4 +86,8 @@ def calculate(expression: str) -> str:
             result = visit(tree.body)
     except (InvalidOperation, OverflowError) as exc:
         raise ValueError("Invalid arithmetic value") from exc
+    integer_digits = max(1, result.adjusted() + 1)
+    exponent = result.as_tuple().exponent
+    if not isinstance(exponent, int) or integer_digits + max(0, -exponent) + 2 > 256:
+        raise ValueError("Formatted result exceeds the output budget")
     return format(result, "f")

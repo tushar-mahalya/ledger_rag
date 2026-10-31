@@ -20,7 +20,7 @@ class Document(BaseModel):
     id: str = Field(min_length=1, max_length=200)
     tenant_id: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=1, max_length=500)
-    text: str = Field(min_length=1, max_length=1_000_000)
+    text: str = Field(min_length=1, max_length=1_000_000, pattern=r"\S")
     source: str = Field(min_length=1, max_length=2048)
     published_at: date
     allowed_groups: list[str] = Field(default_factory=list, max_length=100)
