@@ -1,12 +1,13 @@
-# ADR-0001: Versioned chunk profiles and Qwen3 rerankers
+# ADR 0002: Versioned chunk profiles and Qwen3 rerankers
 
-- **Status:** accepted for A/B evaluation. No profile or reranker is promoted yet.
-- **Date:** 2026-10-31
-- **Scope:** [chunking](../src/ledger_rag/ingestion/chunking.py),
-  [document context](../src/ledger_rag/ingestion/context.py),
-  [Modal ingestion](../compute/ingestion.py), [summaries](../compute/summaries.py),
-  [vLLM reranker app](../compute/reranker.py) and its
-  [client](../src/ledger_rag/retrieval/vllm_reranker.py).
+- Status: accepted for A/B evaluation. No profile or reranker is promoted yet.
+- Date: 2026-10-31 (revised the same day after code review; see
+  [Revision after code review](#revision-after-code-review))
+- Context: retrieval workstream. Scope: [chunking](../../src/ledger_rag/ingestion/chunking.py),
+  [document context](../../src/ledger_rag/ingestion/context.py),
+  [Modal ingestion](../../compute/ingestion.py), [summaries](../../compute/summaries.py),
+  [vLLM reranker app](../../compute/reranker.py) and its
+  [client](../../src/ledger_rag/retrieval/vllm_reranker.py).
 
 ## Context
 
@@ -73,8 +74,13 @@ Summary: <≤600 chars, v3 only>
 - **Section:** the last canonical 10-K heading found in the text up to and including
   the chunk (Items 1–9A, Notes, MD&A, Market Risk, Selected Financial Data, auditor's
   report). A generic match nested inside a more specific Item match is ignored.
-  Over FinQA, about 3k chunks get a section and 1,759 get a table caption. A line is
-  omitted rather than guessed when nothing is found.
+  The document is scanned once (`SectionHeadings`); each chunk rescans only a bounded
+  window plus its own text, so cost is linear in document size.
+- **Table caption:** the last sentence with a letter or digit in the prose before the
+  table, when it reads like a caption or unit line. Punctuation-only sentences, such
+  as FinQA's stray trailing `" ."`, are skipped.
+- Over FinQA, 3,006 chunks get a section and 1,937 chunks (on 1,923 pages) get a table
+  caption. A line is omitted rather than guessed when nothing is found.
 
 ### Table linearization (v2/v3)
 
@@ -86,7 +92,19 @@ Each table cell becomes one line:
 
 Example: `cash and cash equivalents | 2009: $ 1,234`.
 
-- Labels are clipped to 160 characters.
+Each table unit (and each continuation) starts with a header block:
+
+- `Units: <top-left cell>` when that cell names units (`$ in millions`,
+  `( in millions )`), otherwise `Rows: <top-left cell>` (a row dimension such as
+  `december 31`). The line is dropped when the chunk's rendered `Table:` caption
+  already contains the cell, and omitted when the cell is empty.
+- `Column: <header>` for a column header that row lines would not carry in full:
+  it is clipped, or no row has a value under it.
+
+Then:
+
+- Labels are clipped to 160 characters in value lines; a clipped row label is
+  emitted once in full.
 - A value is never split from its header, and a row is never split across chunks.
 - Headerless (single-row) FinQA tables are linearized as data.
 - Packing is greedy within bounds: display `text` ≤1,800 characters and indexed body
@@ -96,8 +114,9 @@ Example: `cash and cash equivalents | 2009: $ 1,234`.
 - If the header is longer than half the budget, or a single row exceeds 1,800
   display characters, the section falls back to v1-style windows.
 - Output and IDs are deterministic.
-- FinQA v2 statistics: 8,644 chunks (v1: 8,611). Indexed text has a mean of
-  ~1,520 characters, p99 3,084 and max 3,938 (header included).
+- FinQA v2 statistics: 8,647 chunks (v1: 8,611). Indexed text has a mean of
+  ~1,531 characters, p99 3,107 and max 3,920 (header included). Every non-empty
+  FinQA table cell appears in its page's combined index text.
 
 **Known side effect:** the sparse encoder normalizes length against a fixed
 `avgdl=256` tokens, so longer v2 index text lowers per-term BM25 weights relative
@@ -106,7 +125,7 @@ sparse scores across profiles are not comparable.
 
 ### Optional v3 summaries
 
-[`compute/summaries.py`](../compute/summaries.py) runs on a CPU Modal container:
+[`compute/summaries.py`](../../compute/summaries.py) runs on a CPU Modal container:
 
 - **Model:** `gemini-3.5-flash-lite`, through the OpenAI-compatible `ledger-llm`
   secret.
@@ -168,7 +187,7 @@ Jina-v4.
 | `Qwen/Qwen3-Reranker-0.6B` | `e61197ed45024b0ed8a2d74b80b4d909f1255473` | L4 | vLLM 0.32.0 |
 | `Qwen/Qwen3-Reranker-4B` | `22e683669bc0f0bd69640a1354a6d0aebcfeede5` | L40S | vLLM 0.32.0 |
 
-All three are Apache-2.0. [`compute/reranker.py`](../compute/reranker.py) follows the
+All three are Apache-2.0. [`compute/reranker.py`](../../compute/reranker.py) follows the
 documented vLLM recipe:
 
 - **Model conversion:** `--runner pooling` with
@@ -235,8 +254,15 @@ L4. The proposed default is therefore:
 - **Chat:** 4B on 20–50 candidates.
 
 `VllmRerankingRetriever(inner, settings, voice_url=...)` implements this routing:
-`settings.reranker_url` serves chat, the optional `voice_url` serves voice, and
-voice bypasses reranking when `voice_url` is empty.
+
+- `settings.reranker_url` serves chat. The optional voice endpoint comes from
+  `voice_url` or `LEDGER_RERANKER_VOICE_URL` (`settings.reranker_voice_url`).
+- An empty URL disables reranking for that profile: the inner retriever's results
+  are returned unchanged. This matches the TEI wrapper, which `make_retriever` does
+  not install when `reranker_url` is empty.
+- Both endpoints receive the same bearer key. Both are validated like other service
+  endpoints, and both must use HTTPS in production (checked by `Settings` at startup
+  and by the client for an explicit `voice_url`).
 
 ```mermaid
 flowchart TD
@@ -300,11 +326,11 @@ using the same questions, seed and page-level relevance:
   against display `text`. All 1,903 test gold units are contained verbatim in some
   chunk under both v1 and v2, so that metric is also comparable.
 - **v3 arm (optional):** `finqa_gte_modernbert_v3ctx` is built only if v2 shows a
-  gain. The summary cache is already populated; see INGESTION.md.
+  gain. The summary cache is already populated; see [ingestion](../INGESTION.md).
 
 Harness wiring:
 
-- **Qwen3 query embedding:** deploy [inference](../compute/inference.py) with
+- **Qwen3 query embedding:** deploy [inference](../../compute/inference.py) with
   `LEDGER_EMBED_MODEL=Qwen/Qwen3-Embedding-0.6B` and the pinned revision. Pass
   `--embedding-model`, `--embedding-dimensions 1024`, `--embedding-space-id`
   and `--query-prefix`.
@@ -312,7 +338,24 @@ Harness wiring:
   as `--reranker-url`, with `LEDGER_RERANKER_API_KEY` set to the `ledger-tei` key.
   The default finance instruction is applied server-side.
 
-## Consequences
+## Revision after code review
+
+A review of the first version found four defects. All are fixed, and v2 output is
+deterministic again under the new rules. Numbers are measured on the full FinQA
+corpus (2,789 pages) unless noted.
+
+| Finding | Before | After |
+|---|---|---|
+| Section heading detection was O(chunks × document length) | 676 KB synthetic document: 30.0 s (v1: 0.009 s) | 0.34 s; FinQA v2 output byte-identical to before the change |
+| Linearization dropped the top-left header cell | 956 non-empty cells missing from index text in 951 tables (946 top-left) | 0 missing |
+| A trailing `" ."` sentence hid table captions | 1,746 pages (1,759 chunks) with a caption | 1,923 pages (1,936 chunks; 1,937 with the table fix) |
+| Voice reranker URL not scheme-checked, empty chat URL posted to `/rerank` | misconfiguration failed per request | HTTPS required in production at startup; empty URL bypasses reranking |
+
+A 1,000-filing JSONL ingest under v2 would have exceeded the one-hour Modal timeout
+from heading detection alone. The two v2 collections built before the fix indexed
+the defective text and were rebuilt (see [Collections built](#collections-built)).
+
+## Consequences and follow-up
 
 - **New behavior is opt-in.** v1 remains the default and no existing collection
   changes. Selecting v2/v3 requires a new collection.

@@ -88,12 +88,13 @@ adding concurrency. `max_containers=1` is per function/app, not a global index l
 ## Chunk profiles
 
 `--chunk-profile` selects how chunks are indexed (default `v1`). See
-[ADR-0001](ADR-0001-retrieval-chunk-profiles-and-rerankers.md) for the design.
+[ADR 0002](adr/0002-chunk-profiles-and-qwen3-rerankers.md) for the design.
 
 - **`v1`:** the original, byte-identical chunking.
 - **`v2`:** adds a deterministic filing header (ticker, fiscal year, form, page,
-  section and table caption) and a row-wise table linearization to the *indexed* text.
-  Displayed and cited text keeps the Markdown table. Expect 8,644 FinQA chunks.
+  section and table caption) and a row-wise table linearization, headed by the
+  table's units or row-dimension cell, to the *indexed* text.
+  Displayed and cited text keeps the Markdown table. Expect 8,647 FinQA chunks.
 - **`v3`:** adds a cached per-document LLM summary line to the v2 header.
 
 Each profile needs its own new collection. Never reuse a v1 collection name.
