@@ -86,6 +86,33 @@ There is no upload UI, persistent artifact version store, executable HTML/
 Mermaid sandbox, voice UI, hosted authentication flow or multi-user conversation
 database yet. These require explicit contracts and evaluation, not dead controls.
 
+### Grounding surfaces
+
+The `answer` event's optional `calculation`, `calculations`, `verification` and
+`abstention` fields (see [CHAT_API](CHAT_API.md)) drive four surfaces. Older
+payloads without them still parse; the surfaces simply do not render.
+
+| Surface | Behavior |
+|---|---|
+| Calculation trace | Collapsed `<details>` per answer. Each step reads as `subtract(“USD 150 million” [C1], “USD 120 million” [C2]) = USD 30 million`. Evidence chips open the cited source and highlight the quoted span; step refs (`#0`) focus the earlier step; constants are dashed and labelled. The final result shows its kind and the exact backend value. |
+| Verification badge | Footer pill (Verified, Unverified, Failed, Skipped) with groundedness score when present. Its disclosure lists mode, checked count, unsupported numbers and reasons; Escape or outside focus closes it. |
+| Unsupported numbers | Only for non-verified, non-abstained answers: exact mentions from `unsupported_numbers` are wrapped in `<mark>` through a remark plugin, never in links or code, with screen-reader text. |
+| Abstention | Calm notice with reasons, a "Thresholds uncalibrated" note when `calibrated` is false, and rephrasing tips. The trace is hidden because the backend clears the citations it references. |
+| Timeline | Started/completed pairs fold into one row per step, with icons for planning, retrieval, generation, tools and validation (including "Verifying grounding"). |
+
+The demo mode includes a verified three-step growth calculation, verified
+comparison and liquidity answers, and an abstained forecast question. The demo
+texts were checked against the backend number checker. Contract fixtures in
+`web/src/fixtures/answers.json` are dumped from the pydantic models with
+`run_program` and `check_numbers`; regenerate them with `uv run --frozen python`
+when the models change.
+
+Known contract gaps: `Calculation` has no unit or currency field, so the display
+is inferred from the step kind and operand scale. `rag.plan.*` details are not
+sent to the client. "Verifying grounding" shares the `validation` stage and is
+distinguishable only by label. `abstention.features.unsupported_numbers` is a
+count, while `verification.unsupported_numbers` is a list.
+
 ## Design research and rationale
 
 The visual direction is an original, restrained research desk: warm paper,
@@ -148,10 +175,12 @@ npm --prefix web run test:live
 ```
 
 Unit cases cover event framing/UTF-8, payload bounds, completion/error semantics,
-history limits, reference parsing, safe links and spreadsheet exports. Browser
+history limits, reference parsing, safe links, spreadsheet exports, grounding
+schema fixtures, derivation formatting and unsupported-number highlighting. Browser
 cases cover desktop/mobile citation and artifact flows, download, explicit live
 mode, mocked authenticated SSE/history, cancellation, truncation, secret
-non-persistence, reduced motion and axe accessibility checks.
+non-persistence, reduced motion and axe accessibility checks, plus the grounding
+demo, unverified and abstained flows.
 
 Mocked browser streams test UI contracts, not model quality or production SLOs.
 The live smoke test uses the real authenticated API, same-origin proxy, graph
