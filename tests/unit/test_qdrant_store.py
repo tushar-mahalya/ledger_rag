@@ -570,6 +570,65 @@ async def test_concurrent_updates_and_search_are_serialized() -> None:
     await retriever.close()
 
 
+async def test_concurrent_searches_run_in_parallel() -> None:
+    retriever, client, _ = await store()
+    started, release = 0, asyncio.Event()
+    all_started = asyncio.Event()
+
+    async def blocked_query(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        nonlocal started
+        started += 1
+        if started == 3:
+            all_started.set()
+        await release.wait()
+        return SimpleNamespace(points=[])
+
+    client.query_points.side_effect = blocked_query
+    principal = Principal(subject="public", tenant_id="tenant")
+    searches = [
+        asyncio.create_task(retriever.search(QueryRequest(question="revenue"), principal))
+        for _ in range(3)
+    ]
+    await asyncio.wait_for(all_started.wait(), timeout=2)
+    writer = asyncio.create_task(retriever.upsert([chunk()]))
+    await asyncio.sleep(0.01)
+    client.upsert.assert_not_called()
+    late = asyncio.create_task(retriever.search(QueryRequest(question="revenue"), principal))
+    await asyncio.sleep(0.01)
+    assert started == 3, "a waiting writer must block new readers"
+    release.set()
+    await asyncio.wait_for(asyncio.gather(*searches, writer, late), timeout=2)
+    client.upsert.assert_awaited_once()
+    assert started == 4
+    await retriever.close()
+
+
+async def test_cancelled_waiters_do_not_wedge_the_gate() -> None:
+    retriever, client, _ = await store()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def blocked_query(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        entered.set()
+        await release.wait()
+        return SimpleNamespace(points=[])
+
+    client.query_points.side_effect = blocked_query
+    principal = Principal(subject="public", tenant_id="tenant")
+    reader = asyncio.create_task(retriever.search(QueryRequest(question="revenue"), principal))
+    await entered.wait()
+    writer = asyncio.create_task(retriever.upsert([chunk()]))
+    await asyncio.sleep(0.01)
+    writer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await writer
+    client.query_points.side_effect = None
+    await asyncio.wait_for(retriever.search(QueryRequest(question="revenue"), principal), 2)
+    release.set()
+    await reader
+    await asyncio.wait_for(retriever.upsert([chunk()]), timeout=2)
+    await retriever.close()
+
+
 async def test_cancelled_remote_write_quarantines_instance() -> None:
     retriever, client, _ = await store()
     entered, blocked = asyncio.Event(), asyncio.Event()

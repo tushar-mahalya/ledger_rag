@@ -3,9 +3,11 @@
 Sparse TF uses BM25 k1=1.2, b=0.75 and a fixed reference length of 256
 tokens; Qdrant supplies corpus IDF. No local embedding model is loaded.
 Upsert receives full document chunk sets. Stale deletion follows successful
-upsert, is tenant-scoped, and is not transactional with it. This instance
-serializes reads and writes and refuses further operations after an uncertain
-mutation; recovery requires external reconciliation, not merely a retry.
+upsert, is tenant-scoped, and is not transactional with it. Within an
+instance, reads run concurrently while writes and collection management are
+exclusive (writer-preferring), so a search never observes this instance's own
+half-applied replacement. The instance refuses further operations after an
+uncertain mutation; recovery requires external reconciliation, not a retry.
 Other instances require external serialization and coordinated recovery.
 """
 
@@ -14,6 +16,8 @@ import hashlib
 import math
 import re
 from collections import Counter, defaultdict
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
@@ -46,6 +50,53 @@ def _sparse(text: str, *, document: bool) -> models.SparseVector:
     return models.SparseVector(indices=indices, values=[weights[index] for index in indices])
 
 
+class _ReadWriteGate:
+    """Writer-preferring async read/write gate; state changes never await, so it is cancel-safe."""
+
+    def __init__(self) -> None:
+        self._readers = 0
+        self._writer = False
+        self._waiting_writers = 0
+        self._waiters: list[asyncio.Future[None]] = []
+
+    def _wake(self) -> None:
+        waiters, self._waiters = self._waiters, []
+        for waiter in waiters:
+            if not waiter.done():
+                waiter.set_result(None)
+
+    async def _wait_until(self, ready: Callable[[], bool]) -> None:
+        while not ready():
+            waiter = asyncio.get_running_loop().create_future()
+            self._waiters.append(waiter)
+            await waiter
+
+    @asynccontextmanager
+    async def read(self) -> AsyncIterator[None]:
+        await self._wait_until(lambda: not self._writer and not self._waiting_writers)
+        self._readers += 1
+        try:
+            yield
+        finally:
+            self._readers -= 1
+            self._wake()
+
+    @asynccontextmanager
+    async def write(self) -> AsyncIterator[None]:
+        self._waiting_writers += 1
+        try:
+            await self._wait_until(lambda: not self._writer and not self._readers)
+        finally:
+            self._waiting_writers -= 1
+            self._wake()
+        self._writer = True
+        try:
+            yield
+        finally:
+            self._writer = False
+            self._wake()
+
+
 class QdrantRetriever:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -59,8 +110,7 @@ class QdrantRetriever:
             timeout=httpx.Timeout(settings.llm_timeout_seconds, connect=5),
             follow_redirects=False,
         )
-        self._lock = asyncio.Lock()
-        self._operation_lock = asyncio.Lock()
+        self._gate = _ReadWriteGate()
         self._write_uncertain = False
         self._staging_collection = False
         self._identity = {
@@ -97,12 +147,11 @@ class QdrantRetriever:
 
     async def create_empty_collection(self) -> None:
         """Claim a new staging collection; never reuse an existing or partial index."""
-        async with self._operation_lock:
+        async with self._gate.write():
             self._check_write_state()
-            async with self._lock:
-                if await self._client.collection_exists(self._collection):
-                    raise RetrievalError("Destination collection already exists; use a new name")
-                await self._create_collection()
+            if await self._client.collection_exists(self._collection):
+                raise RetrievalError("Destination collection already exists; use a new name")
+            await self._create_collection()
             await self._ensure_collection(create=False)
             indexes: dict[str, models.PayloadSchemaType | models.KeywordIndexParams] = {
                 "tenant_id": models.KeywordIndexParams(
@@ -119,40 +168,40 @@ class QdrantRetriever:
             self._staging_collection = True
 
     async def count(self) -> int:
-        async with self._operation_lock:
+        async with self._gate.read():
             self._check_write_state()
             await self._ensure_collection(create=False)
             return (await self._client.count(self._collection, exact=True)).count
 
     async def _ensure_collection(self, *, create: bool) -> None:
-        async with self._lock:
-            if create and not await self._client.collection_exists(self._collection):
-                await self._create_collection()
-            info = await self._client.get_collection(self._collection)
-            vectors = info.config.params.vectors
-            sparse = info.config.params.sparse_vectors
-            metadata = info.config.metadata
-            if (
-                not isinstance(vectors, dict)
-                or "dense" not in vectors
-                or vectors["dense"].size != self._settings.embedding_dimensions
-                or vectors["dense"].distance != models.Distance.COSINE
-                or not sparse
-                or "sparse" not in sparse
-                or sparse["sparse"].modifier != models.Modifier.IDF
-                or not metadata
-                or any(metadata.get(key) != value for key, value in self._identity.items())
-            ):
-                raise RetrievalError("Qdrant collection embedding/schema identity is incompatible")
-            if self._settings.qdrant_quantization != "none":
-                quantization = vectors["dense"].quantization_config
-                if quantization is None:
-                    quantization = info.config.quantization_config
-                if quantization != self._quantization():
-                    raise RetrievalError(
-                        "Qdrant quantization configuration is incompatible; "
-                        "provision or migrate the collection explicitly"
-                    )
+        """Validate the collection; ``create`` is only legal while holding the write gate."""
+        if create and not await self._client.collection_exists(self._collection):
+            await self._create_collection()
+        info = await self._client.get_collection(self._collection)
+        vectors = info.config.params.vectors
+        sparse = info.config.params.sparse_vectors
+        metadata = info.config.metadata
+        if (
+            not isinstance(vectors, dict)
+            or "dense" not in vectors
+            or vectors["dense"].size != self._settings.embedding_dimensions
+            or vectors["dense"].distance != models.Distance.COSINE
+            or not sparse
+            or "sparse" not in sparse
+            or sparse["sparse"].modifier != models.Modifier.IDF
+            or not metadata
+            or any(metadata.get(key) != value for key, value in self._identity.items())
+        ):
+            raise RetrievalError("Qdrant collection embedding/schema identity is incompatible")
+        if self._settings.qdrant_quantization != "none":
+            quantization = vectors["dense"].quantization_config
+            if quantization is None:
+                quantization = info.config.quantization_config
+            if quantization != self._quantization():
+                raise RetrievalError(
+                    "Qdrant quantization configuration is incompatible; "
+                    "provision or migrate the collection explicitly"
+                )
 
     def _quantization(self) -> models.QuantizationConfig | None:
         mode = self._settings.qdrant_quantization
@@ -229,13 +278,13 @@ class QdrantRetriever:
             raise RetrievalError("Invalid embedding response") from None
 
     async def upsert(self, chunks: list[Chunk]) -> None:
-        async with self._operation_lock:
+        async with self._gate.write():
             self._check_write_state()
             await self._upsert(chunks)
 
     async def append_staging(self, chunks: list[Chunk]) -> None:
         """Skip redundant stale deletes only for a collection claimed by this instance."""
-        async with self._operation_lock:
+        async with self._gate.write():
             self._check_write_state()
             if not self._staging_collection:
                 raise RetrievalError("Staging writes require a newly claimed collection")
@@ -336,7 +385,7 @@ class QdrantRetriever:
         return models.Filter(must=must)
 
     async def search(self, query: QueryRequest, principal: Principal) -> list[Hit]:
-        async with self._operation_lock:
+        async with self._gate.read():
             self._check_write_state()
             return await self._search(query, principal)
 
@@ -396,7 +445,7 @@ class QdrantRetriever:
 
     async def ready(self) -> bool:
         try:
-            async with self._operation_lock:
+            async with self._gate.write():
                 self._check_write_state()
                 await self._ensure_collection(create=True)
             return True
