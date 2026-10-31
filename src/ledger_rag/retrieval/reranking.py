@@ -78,6 +78,11 @@ class RerankingRetriever:
     async def ready(self) -> bool:
         return await self.inner.ready()
 
+    async def bootstrap(self) -> None:
+        bootstrap = getattr(self.inner, "bootstrap", None)
+        if bootstrap is not None:
+            await bootstrap()
+
     async def close(self) -> None:
         await self.client.aclose()
         await self.inner.close()

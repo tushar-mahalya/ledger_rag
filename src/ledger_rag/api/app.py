@@ -72,6 +72,10 @@ def create_app(
             backend = make_provider(resolved)
         voice: VoiceRuntime | None = None
         try:
+            bootstrap = getattr(store, "bootstrap", None)
+            if resolved.qdrant_bootstrap_on_startup and bootstrap is not None:
+                # Readiness is read-only; provisioning is this explicit startup step.
+                await bootstrap()
             if resolved.seed_path:
                 if resolved.environment == "production":
                     raise ValueError(

@@ -301,6 +301,15 @@ governance or an authorization review.
 Use `/health/live` for liveness and `/health/ready` for readiness.
 Readiness must gate load-balancer traffic; it is not a remote LLM accuracy or
 provider-availability guarantee. Use separate synthetic identity/model probes.
+Readiness is **read-only and lock-free**: one collection-info read validates
+reachability, vector/sparse schema, embedding identity, quantization and write
+state. It never creates or alters a collection and does not wait behind writers.
+A missing collection is reported unready. Provision explicitly: set
+`LEDGER_QDRANT_BOOTSTRAP_ON_STARTUP=true` (the bundled production overlay does,
+for its fresh local Qdrant) to create a missing collection with its payload
+indexes at startup, ingest documents (the write path provisions the same way),
+or build a staged collection with the [ingestion runbook](INGESTION.md). An
+existing collection is validated and never migrated in place.
 The image's healthcheck uses installed Python, not a nonexistent curl binary.
 Vault uses its installed CLI; minimal infrastructure images without guaranteed
 HTTP clients have no pretend curl/wget healthchecks. Probe their HTTP health

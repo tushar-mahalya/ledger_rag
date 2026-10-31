@@ -213,17 +213,65 @@ async def test_duplicate_and_cross_tenant_ids_rejected() -> None:
     await retriever.close()
 
 
-async def test_collection_creation_and_readiness_reachability() -> None:
+async def test_readiness_is_read_only_and_bootstrap_provisions_explicitly() -> None:
     retriever, client, _ = await store()
     client.collection_exists.return_value = False
-    assert await retriever.ready()
+    client.get_collection.side_effect = RuntimeError("collection not found")
+    assert not await retriever.ready()
+    client.create_collection.assert_not_called()
+    client.create_payload_index.assert_not_called()
+    client.update_collection.assert_not_called()
+    client.get_collection.side_effect = None
+    await retriever.bootstrap()
     kwargs = client.create_collection.call_args.kwargs
     assert kwargs["vectors_config"]["dense"].size == 32
     assert kwargs["sparse_vectors_config"]["sparse"].modifier == models.Modifier.IDF
     assert kwargs["metadata"]["embedding_model"] == "test-embedding"
+    assert {call.kwargs["field_name"] for call in client.create_payload_index.await_args_list} == {
+        "tenant_id",
+        "document_id",
+        "allowed_groups",
+        "published_day",
+    }
+    assert await retriever.ready()
+    client.create_collection.reset_mock()
+    client.create_payload_index.reset_mock()
+    client.collection_exists.return_value = True
+    await retriever.bootstrap()
+    client.create_collection.assert_not_called()
+    client.create_payload_index.assert_not_called()
     client.get_collection.side_effect = RuntimeError("unreachable")
     assert not await retriever.ready()
     client.update_collection.assert_not_called()
+    await retriever.close()
+
+
+async def test_bootstrap_tolerates_concurrent_provisioning() -> None:
+    retriever, client, _ = await store()
+    client.collection_exists.side_effect = [False, True]
+    client.create_collection.side_effect = RuntimeError("already exists")
+    await retriever.bootstrap()
+    client.create_payload_index.assert_not_called()
+    client.collection_exists.side_effect = [False, False]
+    with pytest.raises(RuntimeError, match="already exists"):
+        await retriever.bootstrap()
+    await retriever.close()
+
+
+async def test_readiness_does_not_wait_for_writers() -> None:
+    retriever, client, _ = await store()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def blocked_upsert(*args: Any, **kwargs: Any) -> None:
+        entered.set()
+        await release.wait()
+
+    client.upsert.side_effect = blocked_upsert
+    writer = asyncio.create_task(retriever.upsert([chunk()]))
+    await entered.wait()
+    assert await asyncio.wait_for(retriever.ready(), timeout=1)
+    release.set()
+    await writer
     await retriever.close()
 
 
@@ -237,6 +285,7 @@ async def test_quantization_creation_and_dense_only_rescoring(mode: str) -> None
     expected = retriever._quantization()
     client.get_collection.return_value.config.quantization_config = expected
     try:
+        await retriever.bootstrap()
         assert await retriever.ready()
         kwargs = client.create_collection.call_args.kwargs
         assert kwargs["quantization_config"] == expected
@@ -468,6 +517,8 @@ async def test_local_sdk_executes_real_sparse_dense_fusion() -> None:
     retriever, mock, _ = await store()
     await mock.close()
     retriever._client = AsyncQdrantClient(":memory:")
+    assert not await retriever.ready()
+    await retriever.bootstrap()
     assert await retriever.ready()
     await retriever.upsert(
         [

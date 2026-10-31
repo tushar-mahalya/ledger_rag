@@ -150,3 +150,25 @@ def test_vault_secret_file(
         assert loaded.demo_token and loaded.demo_token.get_secret_value() == "file-secret"
     finally:
         get_settings.cache_clear()
+
+
+class BootstrappingRetriever(MemoryRetriever):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bootstraps = 0
+
+    async def bootstrap(self) -> None:
+        self.bootstraps += 1
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_collection_bootstrap_is_an_explicit_startup_step(
+    settings: Settings, enabled: bool
+) -> None:
+    store = BootstrappingRetriever()
+    configured = settings.model_copy(update={"qdrant_bootstrap_on_startup": enabled})
+    with TestClient(create_app(configured, store, make_provider(configured))) as test_client:
+        assert store.bootstraps == int(enabled)
+        for _ in range(3):
+            assert test_client.get("/health/ready").status_code == 200
+    assert store.bootstraps == int(enabled)

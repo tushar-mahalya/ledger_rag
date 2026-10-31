@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     vad_trailing_silence_ms: int = Field(default=500, ge=100, le=5000)
     vad_max_utterance_seconds: float = Field(default=15, ge=1, le=60)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    # Reliability controls. Unset generation fields are omitted from provider requests.
+    qdrant_bootstrap_on_startup: bool = False
 
     @model_validator(mode="after")
     def validate_deployment(self) -> "Settings":

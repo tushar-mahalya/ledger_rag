@@ -9,6 +9,12 @@ exclusive (writer-preferring), so a search never observes this instance's own
 half-applied replacement. The instance refuses further operations after an
 uncertain mutation; recovery requires external reconciliation, not a retry.
 Other instances require external serialization and coordinated recovery.
+
+Readiness is read-only: it validates reachability, schema/identity and write
+state and never creates or alters a collection. Provisioning (collection,
+sparse IDF modifier, metadata and payload indexes) happens only on explicit
+paths: ``bootstrap()`` (``LEDGER_QDRANT_BOOTSTRAP_ON_STARTUP``), document
+upsert/ingestion, or ``create_empty_collection()`` for staged builds.
 """
 
 import asyncio
@@ -153,19 +159,31 @@ class QdrantRetriever:
                 raise RetrievalError("Destination collection already exists; use a new name")
             await self._create_collection()
             await self._ensure_collection(create=False)
-            indexes: dict[str, models.PayloadSchemaType | models.KeywordIndexParams] = {
-                "tenant_id": models.KeywordIndexParams(
-                    type=models.KeywordIndexType.KEYWORD, is_tenant=True
-                ),
-                "document_id": models.PayloadSchemaType.KEYWORD,
-                "allowed_groups": models.PayloadSchemaType.KEYWORD,
-                "published_day": models.PayloadSchemaType.INTEGER,
-            }
-            for name, schema in indexes.items():
-                await self._client.create_payload_index(
-                    self._collection, field_name=name, field_schema=schema, wait=True
-                )
+            await self._create_payload_indexes()
             self._staging_collection = True
+
+    async def _create_payload_indexes(self) -> None:
+        indexes: dict[str, models.PayloadSchemaType | models.KeywordIndexParams] = {
+            "tenant_id": models.KeywordIndexParams(
+                type=models.KeywordIndexType.KEYWORD, is_tenant=True
+            ),
+            "document_id": models.PayloadSchemaType.KEYWORD,
+            "allowed_groups": models.PayloadSchemaType.KEYWORD,
+            "published_day": models.PayloadSchemaType.INTEGER,
+        }
+        for name, schema in indexes.items():
+            await self._client.create_payload_index(
+                self._collection, field_name=name, field_schema=schema, wait=True
+            )
+
+    async def bootstrap(self) -> None:
+        """Explicitly provision a missing collection with indexes, then validate it.
+
+        An existing collection is validated but never altered.
+        """
+        async with self._gate.write():
+            self._check_write_state()
+            await self._ensure_collection(create=True)
 
     async def count(self) -> int:
         async with self._gate.read():
@@ -176,7 +194,14 @@ class QdrantRetriever:
     async def _ensure_collection(self, *, create: bool) -> None:
         """Validate the collection; ``create`` is only legal while holding the write gate."""
         if create and not await self._client.collection_exists(self._collection):
-            await self._create_collection()
+            try:
+                await self._create_collection()
+            except Exception:
+                # Another process may have provisioned it concurrently; validate theirs.
+                if not await self._client.collection_exists(self._collection):
+                    raise
+            else:
+                await self._create_payload_indexes()
         info = await self._client.get_collection(self._collection)
         vectors = info.config.params.vectors
         sparse = info.config.params.sparse_vectors
@@ -330,7 +355,20 @@ class QdrantRetriever:
                 )
             )
             documents[(chunk.tenant_id, chunk.document_id)].append(point_id)
-        self._write_uncertain = True
+        try:
+            await self._apply(points, documents, replace_documents=replace_documents)
+        except BaseException:
+            # Failure or cancellation mid-mutation leaves an unknown mixture of chunks.
+            self._write_uncertain = True
+            raise
+
+    async def _apply(
+        self,
+        points: list[models.PointStruct],
+        documents: dict[tuple[str, str], list[str]],
+        *,
+        replace_documents: bool,
+    ) -> None:
         size = self._settings.qdrant_upsert_batch_size
         for start in range(0, len(points), size):
             await self._client.upsert(
@@ -357,7 +395,6 @@ class QdrantRetriever:
                     ),
                     wait=True,
                 )
-        self._write_uncertain = False
 
     @staticmethod
     def _filter(query: QueryRequest, principal: Principal) -> models.Filter:
@@ -444,10 +481,10 @@ class QdrantRetriever:
         return hits[: query.top_k]
 
     async def ready(self) -> bool:
+        """Read-only and lock-free: never creates, alters or waits for writers."""
         try:
-            async with self._gate.write():
-                self._check_write_state()
-                await self._ensure_collection(create=True)
+            self._check_write_state()
+            await self._ensure_collection(create=False)
             return True
         except Exception:
             return False
