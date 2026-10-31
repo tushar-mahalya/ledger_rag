@@ -39,8 +39,32 @@ def _call(value: dict[str, Any]) -> dict[str, Any]:
     return {"id": call_id, "name": name, "arguments": _arguments(function.get("arguments"))}
 
 
+def _years(text: str) -> set[str]:
+    return set(re.findall(r"\b(?:FY\s*)?((?:19|20)\d{2})\b", text, flags=re.IGNORECASE))
+
+
+def _single_period(question: str) -> str | None:
+    years = _years(question)
+    if len(years) != 1 or re.search(
+        r"\b(?:compar\w*|versus|vs|between|before|after|since|through|until|"
+        r"trend\w*|growth|chang\w*|previous|prior)\b|"
+        r"\bas\s+of\b|\byear[\s-]+over[\s-]+year\b|\blast\s+year\b",
+        question,
+        flags=re.IGNORECASE,
+    ):
+        return None
+    return next(iter(years))
+
+
 class ExtractiveProvider:
-    """Demo only: quote supplied evidence, never simulate model reasoning."""
+    """Lexical demo, not semantic reasoning.
+
+    Single explicit-year questions require that year in a quoted sentence,
+    or an unambiguous document-title year for sentences without explicit years.
+    Comparative sentences retain their complete period/value attribution.
+    Publication dates never establish the financial reporting period.
+    Comparisons and temporal ranges retain the ordinary lexical selection.
+    """
 
     model = "extractive-demo"
 
@@ -58,10 +82,15 @@ class ExtractiveProvider:
                 break
             if not isinstance(data, dict):
                 break
+            question = str(data.get("question", ""))
+            requested_year = _single_period(question)
+            question_years = _years(question)
             words = {
                 word
-                for word in re.findall(r"\w+", str(data.get("question", "")).lower())
+                for word in re.findall(r"\w+", question.lower())
                 if len(word) > 2
+                and word not in question_years
+                and not re.fullmatch(r"fy(?:19|20)\d{2}", word)
                 and word
                 not in {
                     "the",
@@ -80,6 +109,8 @@ class ExtractiveProvider:
                     "from",
                     "this",
                     "about",
+                    "fiscal",
+                    "year",
                 }
             }
             candidates: list[tuple[int, str]] = []
@@ -94,7 +125,16 @@ class ExtractiveProvider:
                     continue
                 if not isinstance(text, str):
                     continue
+                title = item.get("title", "")
+                title_years = _years(title) if isinstance(title, str) else set()
                 for sentence in re.split(r"(?<=[.!?])\s+|\n+", text):
+                    if requested_year:
+                        sentence_years = _years(sentence)
+                        if sentence_years:
+                            if requested_year not in sentence_years:
+                                continue
+                        elif title_years != {requested_year}:
+                            continue
                     overlap = len(words & set(re.findall(r"\w+", sentence.lower())))
                     if overlap and sentence.strip():
                         candidates.append((overlap, f"{sentence.strip()} [{marker}]"))

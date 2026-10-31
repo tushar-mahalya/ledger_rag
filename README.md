@@ -85,7 +85,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy src/ledger_rag
 uv run pytest -q
-uv run python -m ledger_rag.evaluate --repeats 20 --output reports/smoke.json
+uv run python -m ledger_rag.evaluate --smoke --repeats 20 --output reports/smoke.json
 ```
 
 The included data is original, tiny, synthetic test data. Its scores measure smoke

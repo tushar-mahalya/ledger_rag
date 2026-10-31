@@ -272,6 +272,324 @@ async def test_extractive_quotes_evidence_or_abstains() -> None:
     await provider.close()
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What was revenue in 2025?",
+        "What was FY2025 revenue?",
+        "What was fiscal year 2025 revenue?",
+    ],
+)
+async def test_extractive_single_year_excludes_other_periods(question: str) -> None:
+    provider = ExtractiveProvider()
+    result = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": question,
+                        "evidence": [
+                            {"id": "C1", "text": "Revenue in 2024 was $100."},
+                            {"id": "C2", "text": "Revenue in 2025 was $120."},
+                            {
+                                "id": "C3",
+                                "text": "Revenue was $80.",
+                                "title": "2023 Results",
+                                "published_at": "2025-01-01",
+                            },
+                        ],
+                    }
+                ),
+            }
+        ]
+    )
+    assert result["content"] == "Revenue in 2025 was $120. [C2]"
+    await provider.close()
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        [{"id": "C1", "text": "Revenue was $100."}],
+        [{"id": "C1", "text": "Revenue was $100.", "published_at": "2025-01-01"}],
+        [{"id": "C1", "text": "Revenue was $100.", "title": "2024 and 2025 Results"}],
+        [{"id": "C1", "text": "Revenue was $100. Debt in 2024 was $20.", "title": "2025 Results"}],
+        [{"id": "C1", "text": "Revenue was $100. In 2025 management announced buybacks."}],
+        [
+            {
+                "id": "C1",
+                "text": "Revenue in 2025 was $100. Revenue in 2024 was $90.",
+                "title": "2025 Results",
+            }
+        ],
+    ],
+)
+async def test_extractive_single_year_handles_ambiguous_context(evidence: Any) -> None:
+    provider = ExtractiveProvider()
+    result = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": "What was revenue in 2025?",
+                        "evidence": evidence,
+                    }
+                ),
+            }
+        ]
+    )
+    if "Revenue in 2025" in evidence[0]["text"]:
+        assert result["content"] == "Revenue in 2025 was $100. [C1]"
+    elif evidence[0].get("title") == "2025 Results":
+        assert result["content"] == "Revenue was $100. [C1]"
+    else:
+        assert result["content"] == ""
+    await provider.close()
+
+
+async def test_extractive_unambiguous_title_preserves_multiple_document_evidence() -> None:
+    provider = ExtractiveProvider()
+    result = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": "What was Acme and Beta revenue in 2025?",
+                        "evidence": [
+                            {
+                                "id": "C1",
+                                "title": "Acme FY2025 Results",
+                                "text": "Acme revenue was $100.",
+                            },
+                            {
+                                "id": "C2",
+                                "title": "Beta 2025 Results",
+                                "text": "Beta revenue was $200.",
+                            },
+                            {
+                                "id": "C3",
+                                "title": "Acme 2024 Results",
+                                "text": "Acme revenue was $90.",
+                            },
+                        ],
+                    }
+                ),
+            }
+        ]
+    )
+    assert result["content"] == "Acme revenue was $100. [C1]\n\nBeta revenue was $200. [C2]"
+    await provider.close()
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Compare revenue in 2024 and 2025.",
+        "How did revenue change in 2025 versus the prior year?",
+        "What was revenue growth in 2025?",
+        "What revenue was reported as of 2025?",
+        "What was revenue before 2025?",
+    ],
+)
+async def test_extractive_comparisons_and_ranges_preserve_lexical_evidence(question: str) -> None:
+    provider = ExtractiveProvider()
+    result = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": question,
+                        "evidence": [
+                            {"id": "C1", "text": "Revenue in 2024 was $100."},
+                            {"id": "C2", "text": "Revenue in 2025 was $120."},
+                        ],
+                    }
+                ),
+            }
+        ]
+    )
+    assert "[C1]" in result["content"] and "[C2]" in result["content"]
+    await provider.close()
+
+
+async def test_extractive_year_overlap_alone_does_not_answer_unrelated_topic() -> None:
+    provider = ExtractiveProvider()
+    result = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": "What were dividends in 2025?",
+                        "evidence": [{"id": "C1", "text": "Revenue in 2025 was $120."}],
+                    }
+                ),
+            }
+        ]
+    )
+    assert result["content"] == ""
+    await provider.close()
+
+
+@pytest.mark.parametrize("year", [1998, 2021, 2028])
+async def test_extractive_period_rule_is_not_specific_to_one_year(year: int) -> None:
+    provider = ExtractiveProvider()
+    result = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": f"What was revenue in {year}?",
+                        "evidence": [
+                            {"id": "C1", "text": f"Revenue in {year - 1} was $100."},
+                            {"id": "C2", "text": f"Revenue in {year} was $120."},
+                        ],
+                    }
+                ),
+            }
+        ]
+    )
+    assert result["content"] == f"Revenue in {year} was $120. [C2]"
+    await provider.close()
+
+
+async def test_extractive_mixed_year_sentence_preserves_full_restatement_attribution() -> None:
+    provider = ExtractiveProvider()
+    evidence = [
+        {
+            "id": "C1",
+            "text": "In 2025 the company restated 2024 revenue to $100.",
+        }
+    ]
+    result = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": "What was revenue in 2025?",
+                        "evidence": evidence,
+                    }
+                ),
+            }
+        ]
+    )
+    assert result["content"] == "In 2025 the company restated 2024 revenue to $100. [C1]"
+    result = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": "Compare revenue reporting in 2024 and 2025.",
+                        "evidence": evidence,
+                    }
+                ),
+            }
+        ]
+    )
+    assert result["content"] == "In 2025 the company restated 2024 revenue to $100. [C1]"
+    await provider.close()
+
+
+@pytest.mark.parametrize("separator", [", compared with ", " compared to ", "; versus "])
+async def test_extractive_quotes_full_target_period_comparative_sentence(
+    separator: str,
+) -> None:
+    provider = ExtractiveProvider()
+    text = (
+        "In fiscal year 2024 Acme revenue was USD 120 million"
+        + separator
+        + "revenue of USD 100 million in fiscal year 2023."
+    )
+    evidence = [
+        {"id": "C1", "text": text},
+        {"id": "C2", "text": "Revenue in fiscal year 2023 was USD 100 million."},
+    ]
+    result = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": "What was Acme revenue in fiscal year 2024?",
+                        "evidence": evidence,
+                    }
+                ),
+            }
+        ]
+    )
+    assert result["content"] == f"{text} [C1]"
+    comparison = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": "Compare revenue in fiscal years 2023 and 2024.",
+                        "evidence": evidence[:1],
+                    }
+                ),
+            }
+        ]
+    )
+    assert comparison["content"] == f"{text} [C1]"
+    await provider.close()
+
+
+async def test_extractive_does_not_remove_prior_period_attribution_after_year_heading() -> None:
+    provider = ExtractiveProvider()
+    result = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": "What was revenue in 2025?",
+                        "evidence": [
+                            {
+                                "id": "C1",
+                                "text": "In 2025, the company restated revenue in 2024 to $100.",
+                            }
+                        ],
+                    }
+                ),
+            }
+        ]
+    )
+    assert result["content"] == ("In 2025, the company restated revenue in 2024 to $100. [C1]")
+    await provider.close()
+
+
+async def test_extractive_comparative_quote_preserves_numeric_thousands_separator() -> None:
+    provider = ExtractiveProvider()
+    result = await provider.complete(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": "What was revenue in 2025?",
+                        "evidence": [
+                            {
+                                "id": "C1",
+                                "text": "Revenue in 2025 was $1,200, compared with $900 in 2024.",
+                            }
+                        ],
+                    }
+                ),
+            }
+        ]
+    )
+    assert result["content"] == "Revenue in 2025 was $1,200, compared with $900 in 2024. [C1]"
+    await provider.close()
+
+
 async def test_factory() -> None:
     for name, cls in [
         ("extractive", ExtractiveProvider),
