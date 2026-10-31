@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 import httpx
 from opentelemetry import trace
@@ -77,6 +78,10 @@ class RerankingRetriever:
 
     async def ready(self) -> bool:
         return await self.inner.ready()
+
+    def collectors(self) -> list[Any]:
+        collectors = getattr(self.inner, "collectors", None)
+        return list(collectors()) if collectors is not None else []
 
     async def bootstrap(self) -> None:
         bootstrap = getattr(self.inner, "bootstrap", None)

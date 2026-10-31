@@ -231,7 +231,13 @@ JSON logs alone are not a compliance-grade audit trail.
 
 Available metrics: `ledger_http_requests_total`,
 `ledger_http_duration_seconds`, `ledger_retrieval_seconds`,
-`ledger_generation_seconds`, and `ledger_abstentions_total`.
+`ledger_generation_seconds`, `ledger_abstentions_total`, and (Qdrant backend)
+`ledger_qdrant_rejected_points_total{reason}`. The last counts retrieved points
+dropped as `invalid_payload` (schema corruption), `filter_violation` (tenant/ACL/
+as-of mismatch despite the server filter) or `invalid_score`; search refills
+`top_k` from the remaining fused candidates and logs `qdrant_points_rejected`
+with counts only, never payloads or point IDs. Any non-zero rate signals index
+corruption or a filter bug and should page.
 Alert on HTTP 5xx/429, p95/p99 latency, scrape failures, Vault sealed state,
 Qdrant disk exhaustion, rising abstentions, and provider timeouts. Prometheus
 retains 15 days; Loki/Tempo retain seven days with local storage in this reference.

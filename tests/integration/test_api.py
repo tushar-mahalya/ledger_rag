@@ -172,3 +172,19 @@ def test_collection_bootstrap_is_an_explicit_startup_step(
         for _ in range(3):
             assert test_client.get("/health/ready").status_code == 200
     assert store.bootstraps == int(enabled)
+
+
+def test_retriever_collectors_are_exported_on_metrics(settings: Settings) -> None:
+    from prometheus_client import Counter
+
+    rejected = Counter("ledger_qdrant_rejected_points", "test", ["reason"], registry=None)
+    rejected.labels("invalid_payload").inc(2)
+
+    class InstrumentedRetriever(MemoryRetriever):
+        def collectors(self) -> list[Counter]:
+            return [rejected]
+
+    app = create_app(settings, InstrumentedRetriever(), make_provider(settings))
+    with TestClient(app) as test_client:
+        body = test_client.get("/metrics", headers=AUTH).text
+    assert 'ledger_qdrant_rejected_points_total{reason="invalid_payload"} 2.0' in body

@@ -11,6 +11,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 from qdrant_client import AsyncQdrantClient, models
+from structlog.testing import capture_logs
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import Chunk, Principal, QueryRequest
@@ -392,6 +393,14 @@ async def test_incompatible_collection_is_rejected(mismatch: str) -> None:
     await retriever.close()
 
 
+def paged(points: list[models.ScoredPoint]) -> Any:
+    def query_points(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        offset = kwargs.get("offset") or 0
+        return SimpleNamespace(points=points[offset : offset + kwargs["limit"]])
+
+    return query_points
+
+
 async def test_hybrid_filters_before_retrieval_and_defense_in_depth() -> None:
     retriever, client, _ = await store()
     rows = [
@@ -401,8 +410,8 @@ async def test_hybrid_filters_before_retrieval_and_defense_in_depth() -> None:
         chunk("forbidden", allowed_groups=["admin"]),
         chunk("future", published_at=date(2025, 1, 1)),
     ]
-    client.query_points.return_value = SimpleNamespace(
-        points=[
+    client.query_points.side_effect = paged(
+        [
             models.ScoredPoint(id=i, version=1, score=1, payload=row.model_dump(mode="json"))
             for i, row in enumerate(rows)
         ]
@@ -853,3 +862,47 @@ async def test_abandoned_write_is_visible_to_other_and_restarted_instances() -> 
         await restarted._embedding_client.aclose()
     await writer._embedding_client.aclose()
     await reader.close()
+
+
+async def test_corrupt_points_are_counted_logged_without_content_and_refilled() -> None:
+    retriever, client, _ = await store()
+    secret = "Confidential merger terms"
+    valid = [chunk(f"valid-{i}", text=secret) for i in range(4)]
+    points = [
+        models.ScoredPoint(id=0, version=1, score=1, payload={"text": secret}),
+        models.ScoredPoint(id=1, version=1, score=1, payload=None),
+        models.ScoredPoint(
+            id=2,
+            version=1,
+            score=1,
+            payload=chunk("leak", tenant_id="other", text=secret).model_dump(mode="json"),
+        ),
+        *[
+            models.ScoredPoint(id=3 + i, version=1, score=1, payload=c.model_dump(mode="json"))
+            for i, c in enumerate(valid)
+        ],
+    ]
+    client.query_points.side_effect = paged(points)
+    with capture_logs() as logs:
+        hits = await retriever.search(
+            QueryRequest(question="revenue", top_k=3), Principal(subject="u", tenant_id="tenant")
+        )
+    assert [hit.chunk.id for hit in hits] == ["valid-0", "valid-1", "valid-2"]
+    pages = [(c.kwargs["offset"], c.kwargs["limit"]) for c in client.query_points.call_args_list]
+    assert pages == [(0, 3), (3, 3)]
+    counter = retriever.collectors()[0]
+    assert counter.labels("invalid_payload")._value.get() == 2
+    assert counter.labels("filter_violation")._value.get() == 1
+    assert [log["event"] for log in logs] == ["qdrant_points_rejected"]
+    assert logs[0]["reasons"] == {"invalid_payload": 2, "filter_violation": 1}
+    assert secret not in str(logs) and "leak" not in str(logs)
+
+    client.query_points.side_effect = paged(points[:3])
+    assert (
+        await retriever.search(
+            QueryRequest(question="revenue", top_k=3), Principal(subject="u", tenant_id="tenant")
+        )
+        == []
+    )
+    assert client.query_points.call_count == 4, "an exhausted candidate pool stops refilling"
+    await retriever.close()

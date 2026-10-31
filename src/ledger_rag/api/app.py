@@ -88,6 +88,8 @@ def create_app(
                 ]
                 await store.upsert([c for doc in documents for c in chunk_document(doc)])
             metrics = Metrics()
+            for collector in getattr(store, "collectors", list)():
+                metrics.registry.register(collector)
             if resolved.voice_enabled:
                 voice = make_voice_runtime(resolved, metrics.registry, stt, tts)
             app.state.runtime = Runtime(

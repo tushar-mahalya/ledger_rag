@@ -39,6 +39,8 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
+import structlog
+from prometheus_client import Counter as PrometheusCounter
 from pydantic import ValidationError
 from qdrant_client import AsyncQdrantClient, models
 
@@ -53,6 +55,7 @@ class RetrievalError(RuntimeError):
 
 
 WRITE_LEASE_KEY = "ledger_write_lease"
+logger = structlog.get_logger(__name__)
 
 
 def _sparse(text: str, *, document: bool) -> models.SparseVector:
@@ -136,6 +139,12 @@ class QdrantRetriever:
         self._writer_id = uuid4().hex
         self._lease_expires = 0.0
         self._staging_collection = False
+        self._rejected_points = PrometheusCounter(
+            "ledger_qdrant_rejected_points",
+            "Retrieved Qdrant points dropped as corrupt or filter-violating",
+            ["reason"],
+            registry=None,
+        )
         self._identity = {
             "ledger_schema": 2,
             "chunk_text": "title-header-v1",
@@ -512,30 +521,62 @@ class QdrantRetriever:
                     limit=limit,
                 )
             )
-        result = await self._client.query_points(
-            self._collection,
-            prefetch=prefetch,
-            query=models.FusionQuery(fusion=models.Fusion.RRF),
-            query_filter=query_filter,
-            limit=query.top_k,
-            with_payload=True,
-            with_vectors=False,
-        )
-        hits = []
-        for point in result.points:
-            try:
-                chunk = Chunk.model_validate(point.payload)
-            except ValidationError:
-                continue
-            if (
-                chunk.tenant_id != principal.tenant_id
-                or (chunk.allowed_groups and not set(chunk.allowed_groups) & set(principal.groups))
-                or (query.as_of and chunk.published_at > query.as_of)
-                or not math.isfinite(point.score)
-            ):
-                continue
-            hits.append(Hit(chunk=chunk, score=point.score))
+        hits: list[Hit] = []
+        rejected: Counter[str] = Counter()
+        offset = 0
+        # Refill past rejected points from the remaining fused candidates (bounded by the
+        # prefetch pool); the common, clean case still costs a single top_k request.
+        while len(hits) < query.top_k and offset < limit:
+            page = min(query.top_k - len(hits), limit - offset)
+            result = await self._client.query_points(
+                self._collection,
+                prefetch=prefetch,
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                query_filter=query_filter,
+                limit=page,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            offset += len(result.points)
+            for point in result.points:
+                try:
+                    chunk = Chunk.model_validate(point.payload)
+                except ValidationError:
+                    rejected["invalid_payload"] += 1
+                    continue
+                if (
+                    chunk.tenant_id != principal.tenant_id
+                    or (
+                        chunk.allowed_groups
+                        and not set(chunk.allowed_groups) & set(principal.groups)
+                    )
+                    or (query.as_of and chunk.published_at > query.as_of)
+                ):
+                    rejected["filter_violation"] += 1
+                    continue
+                if not math.isfinite(point.score):
+                    rejected["invalid_score"] += 1
+                    continue
+                hits.append(Hit(chunk=chunk, score=point.score))
+            if len(result.points) < page:
+                break
+        if rejected:
+            for reason, count in rejected.items():
+                self._rejected_points.labels(reason).inc(count)
+            # Counts only: payloads and point IDs may identify restricted documents.
+            logger.warning(
+                "qdrant_points_rejected",
+                collection=self._collection,
+                reasons=dict(rejected),
+                returned=len(hits),
+                requested=query.top_k,
+            )
         return hits[: query.top_k]
+
+    def collectors(self) -> list[PrometheusCounter]:
+        """Metrics owned by this retriever, for registration in the app registry."""
+        return [self._rejected_points]
 
     async def ready(self) -> bool:
         """Read-only and lock-free: never creates, alters or waits for writers."""
