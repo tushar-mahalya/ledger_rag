@@ -137,9 +137,12 @@ These are separate credential boundaries:
 |---|---|---|
 | Modal token ID + secret | CLI/SDK/job submitter | Deploy/manage apps and submit remote jobs |
 | `TEI_API_KEY` in `ledger-tei` | Modal TEI servers and authorized HTTP clients | Protect embedding/reranking endpoints |
+| Qdrant URL + key in `ledger-ingestion` | Modal ingestion/evaluation jobs | Direct vector database reads/writes |
+| LLM base URL + key in `ledger-llm` | Modal evaluation jobs | OpenAI-compatible answer generation |
 | Vault identity/token | Secret projection process | Read approved Vault paths |
 
-[Vault projection](../scripts/sync_modal_secrets.sh) provisions `ledger-tei`;
+[Vault projection](../scripts/sync_modal_secrets.sh) provisions `ledger-tei`,
+`ledger-ingestion` and `ledger-llm`;
 it does **not** log the CLI into Modal. HTTP clients of the deployed TEI endpoints
 use the TEI key, not platform credentials or browser login. A backend that also
 submits SDK jobs still needs platform authentication.
