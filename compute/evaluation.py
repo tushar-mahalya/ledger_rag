@@ -6,6 +6,12 @@ lineage and GPU wall time, are written to ``/data/evaluation/<run_id>.json``.
 
     uv run --locked --group compute modal run compute/evaluation.py --command all \\
         --limit 20 --answer-samples 20
+
+Self-hosted generation (``compute/llm.py``) reuses saved contexts and reads JSON arms:
+
+    uv run --locked --group compute modal run compute/evaluation.py --command answers \\
+        --contexts-run <run_id> --llm-endpoint-kind self-hosted \\
+        --arms-file evaluation/arms/qwen3.8-27b.json --llm-concurrency 64
 """
 
 from __future__ import annotations
@@ -46,7 +52,11 @@ SECRET_ENV = {
     "LEDGER_QDRANT_API_KEY",
     "LEDGER_LLM_BASE_URL",
     "LEDGER_LLM_API_KEY",
+    "LEDGER_LLM_SERVE_API_KEY",
 }
+# Deployed by compute/llm.py; its URL is resolved when no base URL is given.
+LLM_SERVE_APP, LLM_SERVE_FUNCTION = "ledger-llm-serve", "serve"
+ENDPOINT_KINDS = ("hosted", "self-hosted")
 
 image = (
     modal.Image.from_registry(TEI_IMAGE, add_python="3.12")
@@ -71,6 +81,9 @@ database_secret = modal.Secret.from_name(
 )
 llm_secret = modal.Secret.from_name(
     "ledger-llm", required_keys=["LEDGER_LLM_BASE_URL", "LEDGER_LLM_API_KEY"]
+)
+llm_serve_secret = modal.Secret.from_name(
+    "ledger-llm-serve", required_keys=["LEDGER_LLM_SERVE_API_KEY"]
 )
 
 
@@ -135,6 +148,28 @@ def benchmark_argv(
         "--git-sha",
         str(options.get("git_sha", "unknown")),
     ]
+    kind = str(options.get("llm_endpoint_kind", "hosted"))
+    if kind not in ENDPOINT_KINDS:
+        raise ValueError(f"llm_endpoint_kind must be one of {ENDPOINT_KINDS}")
+    argv += [
+        "--llm-endpoint-kind",
+        kind,
+        "--answer-sample-strategy",
+        str(options.get("answer_sample_strategy", "random")),
+    ]
+    for flag, name in (
+        ("--llm-request-timeout", "llm_request_timeout"),
+        ("--llm-deadline", "llm_deadline"),
+        ("--llm-ready-timeout", "llm_ready_timeout"),
+    ):
+        if options.get(name) is not None:
+            argv += [flag, str(float(options[name]))]
+    if options.get("llm_base_url"):
+        argv += ["--llm-url", str(options["llm_base_url"])]
+    if options.get("arms"):
+        argv.append("--llm-arms=" + json.dumps(options["arms"]))
+    if options.get("llm_model_revision"):
+        argv += ["--llm-model-revision", str(options["llm_model_revision"])]
     if options.get("llm_rpm"):
         argv += ["--llm-rpm", str(float(options["llm_rpm"]))]
     if contexts:
@@ -268,6 +303,7 @@ def summarize_report(report: dict[str, Any]) -> dict[str, Any]:
             for key, value in answers["summary"].items()
         }
         summary["llm_calls"] = answers["llm_calls"]
+        summary["llm_server"] = report.get("answers", {}).get("lineage", {}).get("llm_server")
     return summary
 
 
@@ -362,7 +398,7 @@ async def evaluate(commands: list[str], options: dict[str, Any]) -> dict[str, An
     cpu=2,
     memory=8192,
     volumes={"/data": data_volume},
-    secrets=[llm_secret],
+    secrets=[llm_secret, llm_serve_secret],
     timeout=4 * 3600,
     max_containers=1,
     single_use_containers=True,
@@ -380,6 +416,11 @@ async def generate(options: dict[str, Any], contexts_path: str) -> dict[str, Any
     started = time.perf_counter()
     if not re.fullmatch(r"/data/evaluation/[0-9a-f]{32}\.json", contexts_path):
         raise ValueError("contexts_path must be an evaluation report on the data volume")
+    if options.get("llm_endpoint_kind") == "self-hosted":
+        if not str(options.get("llm_base_url", "")).startswith("https://"):
+            raise ValueError("Self-hosted generation needs an HTTPS llm_base_url")
+        # The parser reads the key from the environment, so it never enters argv or reports.
+        os.environ["LEDGER_LLM_API_KEY"] = os.environ["LEDGER_LLM_SERVE_API_KEY"]
     source = Path(contexts_path)
     await data_volume.reload.aio()  # type: ignore[no-untyped-call]
     run_id = uuid4().hex
@@ -439,16 +480,34 @@ def main(
     retrieval_concurrency: int = 4,
     seed: int = 13,
     contexts_run: str = "",
+    llm_endpoint_kind: str = "hosted",
+    llm_base_url: str = "",
+    arms_file: str = "",
+    llm_model_revision: str = "",
+    answer_sample_strategy: str = "random",
+    llm_request_timeout: float = 120.0,
+    llm_deadline: float = 180.0,
+    llm_ready_timeout: float = 1200.0,
 ) -> None:
     """``--command retrieval|contexts|answers|all``.
 
     answers = GPU contexts stage then CPU LLM stage; contexts = the GPU stage only.
     ``--contexts-run <run_id>`` reuses saved contexts and skips the GPU stage.
+    ``--llm-endpoint-kind self-hosted`` targets ``--llm-base-url`` (default: the
+    deployed ``ledger-llm-serve`` endpoint) with the ``ledger-llm-serve`` key;
+    ``--arms-file`` holds JSON generation arms (see ``finqa --llm-arms``).
     """
     if command not in {"retrieval", "contexts", "answers", "all"}:
         raise SystemExit("--command must be retrieval, contexts, answers or all")
     if split == "test" and not unseal_test:
         raise SystemExit("the test split is sealed; pass --unseal-test after configuration freeze")
+    if llm_endpoint_kind not in ENDPOINT_KINDS:
+        raise SystemExit(f"--llm-endpoint-kind must be one of {ENDPOINT_KINDS}")
+    if llm_endpoint_kind == "self-hosted" and not llm_base_url and command in {"answers", "all"}:
+        web_url = modal.Function.from_name(LLM_SERVE_APP, LLM_SERVE_FUNCTION).get_web_url()
+        if not web_url:
+            raise SystemExit(f"{LLM_SERVE_APP} is not deployed; run modal deploy compute/llm.py")
+        llm_base_url = web_url.rstrip("/") + "/v1"
     options: dict[str, Any] = {
         "split": split,
         "unseal_test": unseal_test,
@@ -465,7 +524,18 @@ def main(
         "retrieval_concurrency": retrieval_concurrency,
         "seed": seed,
         "git_sha": _git_sha(),
+        "llm_endpoint_kind": llm_endpoint_kind,
+        "answer_sample_strategy": answer_sample_strategy,
+        "llm_request_timeout": llm_request_timeout,
+        "llm_deadline": llm_deadline,
+        "llm_ready_timeout": llm_ready_timeout,
     }
+    if llm_base_url:
+        options["llm_base_url"] = llm_base_url
+    if arms_file:
+        options["arms"] = json.loads(Path(arms_file).read_text())
+    if llm_model_revision:
+        options["llm_model_revision"] = llm_model_revision
     gpu_commands = []
     if command in {"retrieval", "all"}:
         gpu_commands.append("retrieval")

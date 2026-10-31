@@ -598,11 +598,46 @@ def build_parser() -> argparse.ArgumentParser:
         "--llm-models",
         nargs="+",
         default=["qwen2.5:3b"],
-        help="model or model:reasoning_effort entries",
+        help="model or model:reasoning_effort entries (ignored when arms are given)",
+    )
+    parser.add_argument(
+        "--llm-arms",
+        default="",
+        help='JSON list of arms: [{"label", "model", "temperature", "max_tokens", '
+        '"reasoning_effort", "top_p", "top_k", "presence_penalty", "seed", "extra_body"}]',
+    )
+    parser.add_argument("--llm-arms-file", type=Path, help="File holding --llm-arms JSON")
+    parser.add_argument(
+        "--llm-endpoint-kind",
+        choices=["hosted", "self-hosted"],
+        default="hosted",
+        help="hosted: metered API, concurrency <= 8, optional --llm-rpm pacing; "
+        "self-hosted: unpaced, concurrency <= 256, readiness probe and model check",
+    )
+    parser.add_argument(
+        "--llm-model-revision",
+        default="",
+        help="Expected weights revision; self-hosted servers must serve '<model>@<revision>'",
     )
     parser.add_argument("--llm-concurrency", type=int, default=8)
     parser.add_argument(
         "--llm-rpm", type=float, default=None, help="Client-side requests/minute per model"
+    )
+    parser.add_argument(
+        "--llm-stream",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Stream responses (SSE); default: on for self-hosted, off for hosted",
+    )
+    parser.add_argument("--llm-request-timeout", type=float, default=120)
+    parser.add_argument(
+        "--llm-deadline", type=float, default=180, help="Per-completion budget incl. retries"
+    )
+    parser.add_argument(
+        "--llm-ready-timeout",
+        type=float,
+        default=1200,
+        help="Self-hosted only: wait this long for a scale-to-zero server to start",
     )
     parser.add_argument(
         "--contexts", type=Path, help="Saved 'contexts' report; answers then skip retrieval"
@@ -616,6 +651,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--llm-seed", type=int, default=None)
     parser.add_argument("--answer-samples", type=int, default=100)
+    parser.add_argument(
+        "--answer-sample-strategy",
+        choices=["random", "stratified"],
+        default="random",
+        help="stratified: evidence source x program steps, proportional allocation",
+    )
     parser.add_argument(
         "--answer-modes",
         nargs="+",
@@ -636,20 +677,45 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         parser.error("the test split is sealed; pass --unseal-test after configuration freeze")
     if not 1 <= args.retrieval_concurrency <= 16:
         parser.error("--retrieval-concurrency must be between 1 and 16")
-    if not 1 <= args.llm_concurrency <= 8:
-        parser.error("--llm-concurrency must be between 1 and 8")
+    from ledger_rag.evaluation.llm import MAX_CONCURRENCY
+
+    limit = MAX_CONCURRENCY[args.llm_endpoint_kind]
+    if not 1 <= args.llm_concurrency <= limit:
+        parser.error(
+            f"--llm-concurrency must be between 1 and {limit} for {args.llm_endpoint_kind} "
+            "endpoints"
+        )
     if args.llm_rpm is not None and args.llm_rpm <= 0:
         parser.error("--llm-rpm must be positive")
+    if args.llm_endpoint_kind == "self-hosted" and args.llm_rpm is not None:
+        parser.error("--llm-rpm paces hosted APIs only; self-hosted endpoints are unpaced")
+    if args.llm_request_timeout <= 0 or args.llm_deadline <= 0 or args.llm_ready_timeout <= 0:
+        parser.error("LLM timeouts must be positive")
+    if args.llm_model_revision and not re.fullmatch(r"[0-9a-f]{40}", args.llm_model_revision):
+        parser.error("--llm-model-revision must be a full 40-character commit sha")
     try:
         for config in args.configs:
             arm_name(config)
-        from ledger_rag.evaluation.benchmarks.finqa_answers import parse_mode
+        from ledger_rag.evaluation.benchmarks.finqa_answers import generation_configs, parse_mode
 
         for mode in args.answer_modes:
             parse_mode(mode)
         arm_name(args.answer_retrieval)
-    except ValueError as exc:
+        if args.command == "answers":
+            generation_configs(args)
+    except (OSError, ValueError) as exc:
         parser.error(str(exc))
+
+
+def check_served_models(args: argparse.Namespace, served: list[str]) -> None:
+    """Every arm's model must be served; a pinned revision must be advertised as an alias."""
+    from ledger_rag.evaluation.benchmarks.finqa_answers import generation_configs
+
+    for model in sorted({config.model for config in generation_configs(args)}):
+        if model not in served:
+            raise ValueError(f"LLM endpoint does not serve {model!r} (serves {served})")
+        if args.llm_model_revision and f"{model}@{args.llm_model_revision}" not in served:
+            raise ValueError(f"LLM endpoint does not advertise {model}@{args.llm_model_revision}")
 
 
 async def execute(args: argparse.Namespace) -> dict[str, Any]:
@@ -737,25 +803,41 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                 "embedding_space_id": lineage["embedding_space_id"],
                 "reranker_revision": lineage["reranker_revision"],
             }
+        self_hosted = args.llm_endpoint_kind == "self-hosted"
+        stream = self_hosted if args.llm_stream is None else args.llm_stream
         client = ChatClient(
             args.llm_url,
             args.llm_key,
             concurrency=args.llm_concurrency,
+            endpoint_kind=args.llm_endpoint_kind,
+            stream=stream,
+            request_timeout=args.llm_request_timeout,
+            deadline_seconds=args.llm_deadline,
             requests_per_minute=args.llm_rpm,
         )
+        server: dict[str, Any] | None = None
         try:
+            if self_hosted:
+                server = await client.probe(ready_timeout=args.llm_ready_timeout)
+                check_served_models(args, server["models"])
             report["answers"] = await answers(args, corpus, cases, client, contexts)
         finally:
             await client.close()
         report["lineage"].update(
             {
                 "llm_endpoint_host": args.llm_url.split("/")[2] if "//" in args.llm_url else "",
+                "llm_endpoint_kind": args.llm_endpoint_kind,
+                "llm_model_revision": args.llm_model_revision or None,
+                "llm_server": server,
+                "llm_stream": stream,
                 "llm_models": report["answers"]["models"],
                 "temperature": args.temperature,
                 "max_tokens": args.max_tokens,
                 "llm_seed": args.llm_seed,
                 "llm_rpm_per_model": args.llm_rpm,
                 "llm_concurrency": args.llm_concurrency,
+                "llm_request_timeout": args.llm_request_timeout,
+                "llm_deadline": args.llm_deadline,
                 "prompt_sha256": report["answers"]["prompt_sha256"],
                 "rerank_candidates": args.rerank_candidates,
             }

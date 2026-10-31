@@ -1,5 +1,6 @@
 import ast
 import importlib.util
+import json
 import re
 from pathlib import Path
 from types import ModuleType
@@ -46,6 +47,42 @@ def test_evaluation_job_pins_revisions_and_builds_valid_read_only_argv(
         validate_args(parser, sealed)
     unsealed = job.benchmark_argv("answers", {"split": "test", "unseal_test": True}, "data", "k")
     validate_args(parser, parser.parse_args(unsealed))
+
+
+def test_evaluation_job_passes_self_hosted_arms_without_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job = _load("compute/evaluation.py", "local_evaluation_job_self_hosted")
+    monkeypatch.setenv("LEDGER_QDRANT_URL", "https://qdrant.test")
+    monkeypatch.setenv("LEDGER_LLM_API_KEY", "serve-key")
+    arms = [
+        {
+            "label": "q:nothink",
+            "model": "q",
+            "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+        }
+    ]
+    options = {
+        "llm_endpoint_kind": "self-hosted",
+        "llm_base_url": "https://ws--ledger-llm-serve-serve.modal.run/v1",
+        "arms": arms,
+        "llm_model_revision": "0" * 40,
+        "llm_concurrency": 64,
+        "answer_sample_strategy": "stratified",
+        "llm_deadline": 600.0,
+    }
+    parser = build_parser()
+    argv = job.benchmark_argv("answers", options, "data", "k", "/data/evaluation/x.json")
+    assert "serve-key" not in " ".join(argv)
+    args = parser.parse_args(argv)
+    validate_args(parser, args)
+    assert args.llm_endpoint_kind == "self-hosted" and args.llm_concurrency == 64
+    assert args.llm_url == options["llm_base_url"] and args.llm_key == "serve-key"
+    assert json.loads(args.llm_arms) == arms and args.llm_deadline == 600
+    assert args.answer_sample_strategy == "stratified" and args.llm_rpm is None
+    with pytest.raises(ValueError, match="llm_endpoint_kind"):
+        job.benchmark_argv("answers", {"llm_endpoint_kind": "cloud"}, "data", "k")
+    assert job.LLM_SERVE_APP == "ledger-llm-serve"
 
 
 def test_training_keeps_test_split_sealed_by_default() -> None:

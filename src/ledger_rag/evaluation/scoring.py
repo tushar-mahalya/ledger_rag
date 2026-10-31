@@ -11,12 +11,18 @@ number found in free text. Two primary metrics are reported separately:
 A percentage is converted to a ratio only when the prediction carries an explicit
 ``%`` sign. Matching ``gold * 100`` or ``gold / 100`` without a unit is reported as a
 separately named diagnostic (``percent_scale_diagnostic``), never as accuracy.
+
+Reasoning models may leak ``<think>...</think>`` text into the answer content (for
+example when a server runs without a reasoning parser). That text is removed before
+parsing, so an ``ANSWER:`` line inside reasoning is never scored.
 """
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
+
+from ledger_rag.generation.reasoning import split_reasoning
 
 ABSTAIN_TOKENS = frozenset({"insufficient", "unknown", "abstain", "n/a", "cannot determine"})
 _FIELD = re.compile(r"^\s*\**\s*(ANSWER|CONFIDENCE|CITATIONS)\s*\**\s*:\s*(.*?)\s*$", re.I | re.M)
@@ -42,6 +48,7 @@ class StructuredAnswer:
     confidence: float | None
     citations: tuple[int, ...]
     format_error: str | None
+    think_leak: bool = False
 
 
 def _clean_number(field: str) -> tuple[float | None, bool, str | None]:
@@ -73,7 +80,16 @@ def _clean_number(field: str) -> tuple[float | None, bool, str | None]:
 
 
 def parse_structured(text: str) -> StructuredAnswer:
-    """Parse the last ``ANSWER:``, ``CONFIDENCE:`` and ``CITATIONS:`` lines."""
+    """Parse the last ``ANSWER:``, ``CONFIDENCE:`` and ``CITATIONS:`` lines.
+
+    Leaked reasoning is stripped first (see ``split_reasoning``) and flagged.
+    """
+    answer, leaked = split_reasoning(text)
+    parsed = _parse_fields(answer)
+    return replace(parsed, think_leak=True) if leaked else parsed
+
+
+def _parse_fields(text: str) -> StructuredAnswer:
     fields: dict[str, str] = {}
     for match in _FIELD.finditer(text):
         fields[match.group(1).upper()] = match.group(2)
