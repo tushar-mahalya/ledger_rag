@@ -2,9 +2,9 @@ import math
 import re
 from collections import Counter
 
-from ledger_rag.config import Settings
-from ledger_rag.contracts import Retriever
-from ledger_rag.models import Chunk, Hit, Principal, QueryRequest
+from ledger_rag.core.config import Settings
+from ledger_rag.core.contracts import Retriever
+from ledger_rag.core.models import Chunk, Hit, Principal, QueryRequest
 
 
 def tokenize(text: str) -> list[str]:
@@ -70,13 +70,13 @@ class MemoryRetriever:
 def make_retriever(settings: Settings) -> Retriever:
     store: Retriever
     if settings.retrieval_backend == "qdrant":
-        from ledger_rag.qdrant_store import QdrantRetriever
+        from ledger_rag.retrieval.qdrant import QdrantRetriever
 
         store = QdrantRetriever(settings)
     else:
         store = MemoryRetriever()
     if settings.reranker_url:
-        from ledger_rag.reranking import RerankingRetriever
+        from ledger_rag.retrieval.reranking import RerankingRetriever
 
         return RerankingRetriever(store, settings)
     return store

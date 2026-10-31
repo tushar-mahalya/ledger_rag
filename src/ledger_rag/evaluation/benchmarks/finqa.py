@@ -32,10 +32,10 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from ledger_rag.chunking import chunk_document
-from ledger_rag.config import Settings
-from ledger_rag.contracts import Retriever
-from ledger_rag.models import Answer, Chunk, Document, Hit, Principal, Profile, QueryRequest
+from ledger_rag.core.config import Settings
+from ledger_rag.core.contracts import Retriever
+from ledger_rag.core.models import Answer, Chunk, Document, Hit, Principal, Profile, QueryRequest
+from ledger_rag.ingestion.chunking import chunk_document
 
 TENANT = "finqa"
 SOURCE = "https://github.com/czyssrs/FinQA"
@@ -236,7 +236,7 @@ def bench_settings(args: argparse.Namespace, **overrides: Any) -> Settings:
 
 
 async def ingest(args: argparse.Namespace, corpus: Corpus) -> dict[str, Any]:
-    from ledger_rag.qdrant_store import QdrantRetriever
+    from ledger_rag.retrieval.qdrant import QdrantRetriever
 
     store = QdrantRetriever(bench_settings(args))
     start = time.perf_counter()
@@ -264,8 +264,8 @@ async def ingest(args: argparse.Namespace, corpus: Corpus) -> dict[str, Any]:
 
 
 def make_store(args: argparse.Namespace, fusion: str, rerank: bool) -> Retriever:
-    from ledger_rag.qdrant_store import QdrantRetriever
-    from ledger_rag.reranking import RerankingRetriever
+    from ledger_rag.retrieval.qdrant import QdrantRetriever
+    from ledger_rag.retrieval.reranking import RerankingRetriever
 
     settings = bench_settings(
         args, retrieval_fusion=fusion, reranker_url=args.reranker_url if rerank else ""
@@ -303,8 +303,8 @@ async def retrieval(args: argparse.Namespace, corpus: Corpus, cases: list[Case])
 
 
 async def answers(args: argparse.Namespace, corpus: Corpus, cases: list[Case]) -> dict[str, Any]:
-    from ledger_rag.providers import make_provider
-    from ledger_rag.service import RagService
+    from ledger_rag.generation.providers import make_provider
+    from ledger_rag.orchestration.service import RagService
 
     settings = bench_settings(
         args,

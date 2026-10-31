@@ -24,7 +24,7 @@ jobs:
       - run: uv run --frozen ruff check src tests deploy/wait-for-secrets.py
       - run: uv run --frozen mypy src
       - run: uv run --frozen pytest -q
-      - run: uv run --frozen python -m ledger_rag.evaluate --smoke --repeats 3
+      - run: uv run --frozen python -m ledger_rag.evaluation.harness --smoke --repeats 3
       - run: uv build --no-sources
   image:
     runs-on: ubuntu-latest

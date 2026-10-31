@@ -11,14 +11,14 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from ledger_rag.api import create_app
-from ledger_rag.auth import Authenticator, RateLimiter
-from ledger_rag.chunking import chunk_document
-from ledger_rag.config import Settings
-from ledger_rag.models import Document, Hit, Principal, QueryRequest
-from ledger_rag.retrieval import MemoryRetriever
-from ledger_rag.service import RagService
-from tests.test_core import FakeProvider
+from ledger_rag.api.app import create_app
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Document, Hit, Principal, QueryRequest
+from ledger_rag.ingestion.chunking import chunk_document
+from ledger_rag.orchestration.service import RagService
+from ledger_rag.retrieval.memory import MemoryRetriever
+from ledger_rag.security.auth import Authenticator, RateLimiter
+from tests.unit.test_core import FakeProvider
 
 
 class FaultyRetriever(MemoryRetriever):

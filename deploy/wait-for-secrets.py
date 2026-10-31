@@ -13,5 +13,5 @@ while not all((directory / name).is_file() and (directory / name).stat().st_size
     time.sleep(1)
 os.execvp(
     "uvicorn",
-    ["uvicorn", "ledger_rag.api:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"],
+    ["uvicorn", "ledger_rag.api.app:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"],
 )

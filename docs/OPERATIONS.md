@@ -300,7 +300,7 @@ shared limiter explicit follow-up infrastructure, not assumed features.
 ## CI and verified baseline
 
 CI runs locked `uv sync`, Ruff, strict mypy, pytest on Python 3.11–3.13, package
-build, a threshold-gated synthetic evaluation (`ledger_rag.evaluate --smoke`),
+build, a threshold-gated synthetic evaluation (`ledger_rag.evaluation.harness --smoke`),
 image build and Compose schema validation. Synthetic smoke gates are not an
 independent real-world quality benchmark. The production Docker image
 uses frozen, no-dev, non-editable installation in a separate builder. Secret

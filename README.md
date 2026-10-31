@@ -46,7 +46,7 @@ Commands are run from this repository:
 uv sync --frozen
 export LEDGER_DEMO_TOKEN="$(openssl rand -hex 32)"
 export LEDGER_SEED_PATH=data/examples.jsonl
-uv run uvicorn ledger_rag.api:app --host 127.0.0.1 --port 8080 --no-access-log
+uv run uvicorn ledger_rag.api.app:app --host 127.0.0.1 --port 8080 --no-access-log
 ```
 
 In another terminal, set the same token securely and call:
@@ -85,7 +85,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy src/ledger_rag
 uv run pytest -q
-uv run python -m ledger_rag.evaluate --smoke --repeats 20 --output reports/smoke.json
+uv run python -m ledger_rag.evaluation.harness --smoke --repeats 20 --output reports/smoke.json
 ```
 
 The included data is original, tiny, synthetic test data. Its scores measure smoke

@@ -11,9 +11,9 @@ import pytest
 from pydantic import SecretStr
 from qdrant_client import AsyncQdrantClient, models
 
-from ledger_rag.config import Settings
-from ledger_rag.models import Chunk, Principal, QueryRequest
-from ledger_rag.qdrant_store import QdrantRetriever, RetrievalError, _sparse
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Chunk, Principal, QueryRequest
+from ledger_rag.retrieval.qdrant import QdrantRetriever, RetrievalError, _sparse
 
 
 def chunk(chunk_id: str = "tenant/doc/0", **updates: Any) -> Chunk:

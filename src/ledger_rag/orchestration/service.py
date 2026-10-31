@@ -6,11 +6,11 @@ from typing import Any
 import structlog
 from opentelemetry import trace
 
-from ledger_rag.config import Settings
-from ledger_rag.contracts import Provider, Retriever
-from ledger_rag.models import Answer, Citation, Hit, Principal, Profile, QueryRequest
-from ledger_rag.retrieval import authorized
-from ledger_rag.tools import CALCULATOR, SEARCH_EVIDENCE, calculate
+from ledger_rag.core.config import Settings
+from ledger_rag.core.contracts import Provider, Retriever
+from ledger_rag.core.models import Answer, Citation, Hit, Principal, Profile, QueryRequest
+from ledger_rag.generation.tools import CALCULATOR, SEARCH_EVIDENCE, calculate
+from ledger_rag.retrieval.memory import authorized
 
 logger = structlog.get_logger()
 tracer = trace.get_tracer(__name__)

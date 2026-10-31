@@ -2,7 +2,8 @@ from datetime import date
 
 import pytest
 
-from ledger_rag.benchmarks.finqa import (
+from ledger_rag.core.models import Chunk, Document, Hit
+from ledger_rag.evaluation.benchmarks.finqa import (
     Case,
     answer_correct,
     numbers,
@@ -11,8 +12,7 @@ from ledger_rag.benchmarks.finqa import (
     summarize,
     table_markdown,
 )
-from ledger_rag.chunking import chunk_document, contextual_text
-from ledger_rag.models import Chunk, Document, Hit
+from ledger_rag.ingestion.chunking import chunk_document, contextual_text
 
 
 def _doc(text: str) -> Document:

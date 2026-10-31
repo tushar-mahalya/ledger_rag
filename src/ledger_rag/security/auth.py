@@ -7,8 +7,8 @@ import jwt
 from fastapi import HTTPException
 from jwt import PyJWKClient
 
-from ledger_rag.config import Settings
-from ledger_rag.models import Principal
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Principal
 
 
 class Authenticator:

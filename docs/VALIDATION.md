@@ -10,7 +10,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy src/ledger_rag
 uv run pytest -q
-uv run python -m ledger_rag.evaluate --smoke --repeats 20 --output reports/smoke.json
+uv run python -m ledger_rag.evaluation.harness --smoke --repeats 20 --output reports/smoke.json
 uv build
 ```
 

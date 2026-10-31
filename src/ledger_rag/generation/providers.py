@@ -6,8 +6,8 @@ from typing import Any
 
 import httpx
 
-from ledger_rag.config import Settings
-from ledger_rag.contracts import Provider
+from ledger_rag.core.config import Settings
+from ledger_rag.core.contracts import Provider
 
 
 class ProviderError(RuntimeError):

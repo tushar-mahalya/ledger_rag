@@ -13,7 +13,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_client import CollectorRegistry, Counter, Histogram
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from ledger_rag.config import Settings
+from ledger_rag.core.config import Settings
 
 
 class BodyTooLarge(HTTPException):

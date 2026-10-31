@@ -1,6 +1,6 @@
 from typing import Any, Protocol
 
-from ledger_rag.models import Chunk, Hit, Principal, QueryRequest
+from ledger_rag.core.models import Chunk, Hit, Principal, QueryRequest
 
 
 class Retriever(Protocol):

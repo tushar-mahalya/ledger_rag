@@ -5,8 +5,8 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from ledger_rag.config import Settings
-from ledger_rag.providers import (
+from ledger_rag.core.config import Settings
+from ledger_rag.generation.providers import (
     AnthropicProvider,
     ExtractiveProvider,
     OpenAIProvider,

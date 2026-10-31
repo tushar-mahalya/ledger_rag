@@ -4,11 +4,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from ledger_rag.api import create_app
-from ledger_rag.config import Settings
-from ledger_rag.models import Document
-from ledger_rag.providers import make_provider
-from ledger_rag.retrieval import MemoryRetriever
+from ledger_rag.api.app import create_app
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Document
+from ledger_rag.generation.providers import make_provider
+from ledger_rag.retrieval.memory import MemoryRetriever
 
 AUTH = {"Authorization": "Bearer test-only-token"}
 
@@ -139,7 +139,7 @@ def test_endpoint_credentials_are_not_accepted(endpoint: str) -> None:
 def test_vault_secret_file(
     settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from ledger_rag.config import get_settings
+    from ledger_rag.core.config import get_settings
 
     (tmp_path / "LEDGER_DEMO_TOKEN").write_text("file-secret")
     monkeypatch.setenv("LEDGER_SECRETS_DIR", str(tmp_path))

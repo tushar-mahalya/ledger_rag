@@ -11,8 +11,9 @@ import httpx
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from ledger_rag.config import Settings
-from ledger_rag.evaluate import (
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Answer, Citation, Profile
+from ledger_rag.evaluation.harness import (
     Case,
     NumericalAssertion,
     Row,
@@ -26,10 +27,9 @@ from ledger_rag.evaluate import (
     score_answer,
     summarize,
 )
-from ledger_rag.models import Answer, Citation, Profile
 from scripts.benchmark_http import LoadConfig, benchmark, query_once
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_binary_metrics_known_ranks_and_duplicate_invariance() -> None:
@@ -387,7 +387,7 @@ async def test_remote_requires_scope_and_index_write_before_any_network(
         retrieval_backend="qdrant",
         embedding_api_key=SecretStr("never-print-this"),
     )
-    monkeypatch.setattr("ledger_rag.evaluate.get_settings", lambda: settings)
+    monkeypatch.setattr("ledger_rag.evaluation.harness.get_settings", lambda: settings)
     with pytest.raises(ValueError, match="allow-index-write"):
         await evaluate(
             ROOT / "data/examples.jsonl",

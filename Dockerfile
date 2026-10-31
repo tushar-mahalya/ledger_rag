@@ -19,4 +19,4 @@ USER 10001:10001
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=3)"
-CMD ["uvicorn", "ledger_rag.api:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]
+CMD ["uvicorn", "ledger_rag.api.app:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]

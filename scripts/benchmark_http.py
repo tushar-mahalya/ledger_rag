@@ -18,8 +18,8 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import ValidationError
 
-from ledger_rag.evaluate import latency_summary
-from ledger_rag.models import Answer, Profile, QueryRequest
+from ledger_rag.core.models import Answer, Profile, QueryRequest
+from ledger_rag.evaluation.harness import latency_summary
 
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 

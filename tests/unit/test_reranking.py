@@ -3,11 +3,11 @@ import json
 import httpx
 import pytest
 
-from ledger_rag.chunking import chunk_document
-from ledger_rag.config import Settings
-from ledger_rag.models import Document, Principal, Profile, QueryRequest
-from ledger_rag.reranking import RerankingRetriever
-from ledger_rag.retrieval import MemoryRetriever
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Document, Principal, Profile, QueryRequest
+from ledger_rag.ingestion.chunking import chunk_document
+from ledger_rag.retrieval.memory import MemoryRetriever
+from ledger_rag.retrieval.reranking import RerankingRetriever
 
 
 async def test_reranker_orders_candidates(

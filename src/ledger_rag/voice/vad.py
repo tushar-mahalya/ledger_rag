@@ -9,7 +9,7 @@ from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
 
-from ledger_rag.config import Settings
+from ledger_rag.core.config import Settings
 from ledger_rag.voice.codec import rms
 
 FRAME_MS = 20

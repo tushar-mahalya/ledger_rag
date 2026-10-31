@@ -22,12 +22,12 @@ import structlog
 from fastapi import HTTPException
 from opentelemetry import trace
 
-from ledger_rag.auth import RateLimiter
-from ledger_rag.config import Settings
-from ledger_rag.models import Answer, Principal, Profile, QueryRequest
-from ledger_rag.providers import ProviderError
-from ledger_rag.service import RagService
-from ledger_rag.telemetry import Metrics
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Answer, Principal, Profile, QueryRequest
+from ledger_rag.generation.providers import ProviderError
+from ledger_rag.observability.telemetry import Metrics
+from ledger_rag.orchestration.service import RagService
+from ledger_rag.security.auth import RateLimiter
 from ledger_rag.voice.codec import Resampler
 from ledger_rag.voice.metrics import VoiceMetrics
 from ledger_rag.voice.speech import SpeechError, SpeechToText, TextToSpeech

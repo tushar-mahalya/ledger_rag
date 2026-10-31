@@ -9,7 +9,7 @@ prose is split on sentence boundaries before falling back to overlapping windows
 import hashlib
 import re
 
-from ledger_rag.models import Chunk, Document
+from ledger_rag.core.models import Chunk, Document
 
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 

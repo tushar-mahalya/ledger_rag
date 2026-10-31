@@ -3,11 +3,11 @@ import math
 import httpx
 from opentelemetry import trace
 
-from ledger_rag.chunking import contextual_text
-from ledger_rag.config import Settings
-from ledger_rag.contracts import Retriever
-from ledger_rag.models import Chunk, Hit, Principal, Profile, QueryRequest
-from ledger_rag.retrieval import authorized
+from ledger_rag.core.config import Settings
+from ledger_rag.core.contracts import Retriever
+from ledger_rag.core.models import Chunk, Hit, Principal, Profile, QueryRequest
+from ledger_rag.ingestion.chunking import contextual_text
+from ledger_rag.retrieval.memory import authorized
 
 
 class RerankingRetriever:

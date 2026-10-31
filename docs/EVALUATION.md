@@ -11,8 +11,8 @@ Do not relabel its scores as FinanceBench, FinQA, or TAT-QA results.
 Run from the repository root:
 
 ```sh
-uv run python -m ledger_rag.evaluate --smoke
-uv run python -m ledger_rag.evaluate \
+uv run python -m ledger_rag.evaluation.harness --smoke
+uv run python -m ledger_rag.evaluation.harness \
   --corpus data/examples.jsonl --cases data/eval.jsonl \
   --repeats 3 --top-k 5 --seed 42 --bootstrap-samples 2000 \
   --output evaluation.json
@@ -203,7 +203,7 @@ that limitation and evaluate separately on a rights-cleared temporal holdout.
 
 ```sh
 # Configure deployment settings/credentials through environment or secret files first.
-uv run python -m ledger_rag.evaluate --remote \
+uv run python -m ledger_rag.evaluation.harness --remote \
   --tenant YOUR_AUTHORIZED_TEST_TENANT --groups YOUR_AUTHORIZED_TEST_GROUP \
   --allow-index-write --corpus your-corpus.jsonl --cases your-cases.jsonl \
   --repeats 3 --output remote-evaluation.json
@@ -316,7 +316,7 @@ uv run python scripts/prepare_financebench.py \
   --input licensed-financebench.jsonl --corpus independently-prepared-filings.jsonl \
   --mapping financebench-document-mapping.json --output financebench-cases-v1.jsonl \
   --accept-dataset-terms
-uv run python -m ledger_rag.evaluate \
+uv run python -m ledger_rag.evaluation.harness \
   --corpus independently-prepared-filings.jsonl --cases financebench-cases-v1.jsonl
 ```
 

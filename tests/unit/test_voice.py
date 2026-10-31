@@ -12,13 +12,13 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from starlette.websockets import WebSocketDisconnect
 
-from ledger_rag.api import create_app
-from ledger_rag.chunking import chunk_document
-from ledger_rag.config import Settings
-from ledger_rag.models import Answer, Document, Principal, Profile
-from ledger_rag.providers import make_provider
-from ledger_rag.retrieval import MemoryRetriever
-from ledger_rag.service import ABSTENTION, RagService
+from ledger_rag.api.app import create_app
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Answer, Document, Principal, Profile
+from ledger_rag.generation.providers import make_provider
+from ledger_rag.ingestion.chunking import chunk_document
+from ledger_rag.orchestration.service import ABSTENTION, RagService
+from ledger_rag.retrieval.memory import MemoryRetriever
 from ledger_rag.voice.codec import (
     Resampler,
     WavStreamParser,

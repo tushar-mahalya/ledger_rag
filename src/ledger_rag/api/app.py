@@ -11,14 +11,19 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from ledger_rag.auth import Authenticator, RateLimiter
-from ledger_rag.chunking import chunk_document
-from ledger_rag.config import Settings, get_settings
-from ledger_rag.contracts import Provider, Retriever
-from ledger_rag.models import Answer, Document, IngestRequest, Principal, QueryRequest
-from ledger_rag.retrieval import make_retriever
-from ledger_rag.service import RagService
-from ledger_rag.telemetry import BodyTooLarge, Metrics, RequestMiddleware, configure_telemetry
+from ledger_rag.core.config import Settings, get_settings
+from ledger_rag.core.contracts import Provider, Retriever
+from ledger_rag.core.models import Answer, Document, IngestRequest, Principal, QueryRequest
+from ledger_rag.ingestion.chunking import chunk_document
+from ledger_rag.observability.telemetry import (
+    BodyTooLarge,
+    Metrics,
+    RequestMiddleware,
+    configure_telemetry,
+)
+from ledger_rag.orchestration.service import RagService
+from ledger_rag.retrieval.memory import make_retriever
+from ledger_rag.security.auth import Authenticator, RateLimiter
 from ledger_rag.voice.speech import SpeechToText, TextToSpeech
 from ledger_rag.voice.transport import VoiceRuntime, make_voice_runtime
 from ledger_rag.voice.transport import router as voice_router
@@ -53,7 +58,7 @@ def create_app(
             store = make_retriever(resolved)
         backend = provider
         if backend is None:
-            from ledger_rag.providers import make_provider
+            from ledger_rag.generation.providers import make_provider
 
             backend = make_provider(resolved)
         voice: VoiceRuntime | None = None

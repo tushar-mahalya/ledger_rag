@@ -20,10 +20,10 @@ import httpx
 from pydantic import ValidationError
 from qdrant_client import AsyncQdrantClient, models
 
-from ledger_rag.chunking import contextual_text
-from ledger_rag.config import Settings
-from ledger_rag.models import Chunk, Hit, Principal, QueryRequest
-from ledger_rag.providers import _endpoint
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Chunk, Hit, Principal, QueryRequest
+from ledger_rag.generation.providers import _endpoint
+from ledger_rag.ingestion.chunking import contextual_text
 
 
 class RetrievalError(RuntimeError):

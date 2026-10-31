@@ -3,8 +3,8 @@ from datetime import date
 import pytest
 from pydantic import SecretStr
 
-from ledger_rag.config import Settings
-from ledger_rag.models import Document, Principal
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Document, Principal
 
 
 @pytest.fixture

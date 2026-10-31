@@ -4,12 +4,12 @@ from typing import Any
 
 import pytest
 
-from ledger_rag.chunking import chunk_document
-from ledger_rag.config import Settings
-from ledger_rag.models import Document, Principal, Profile, QueryRequest
-from ledger_rag.retrieval import MemoryRetriever
-from ledger_rag.service import RagService
-from ledger_rag.tools import calculate
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Document, Principal, Profile, QueryRequest
+from ledger_rag.generation.tools import calculate
+from ledger_rag.ingestion.chunking import chunk_document
+from ledger_rag.orchestration.service import RagService
+from ledger_rag.retrieval.memory import MemoryRetriever
 
 
 class FakeProvider:

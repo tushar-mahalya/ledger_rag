@@ -19,11 +19,11 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
-from ledger_rag.chunking import chunk_document
-from ledger_rag.config import Settings, get_settings
-from ledger_rag.models import Answer, Document, Principal, Profile, QueryRequest
-from ledger_rag.retrieval import make_retriever
-from ledger_rag.service import RagService
+from ledger_rag.core.config import Settings, get_settings
+from ledger_rag.core.models import Answer, Document, Principal, Profile, QueryRequest
+from ledger_rag.ingestion.chunking import chunk_document
+from ledger_rag.orchestration.service import RagService
+from ledger_rag.retrieval.memory import make_retriever
 
 Metric = float | None
 NUMBER = r"(?<![\w.])[-+]?(?:\d[\d,]*(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
@@ -314,9 +314,9 @@ def _local_settings() -> Settings:
 
 def _source_digest() -> str:
     digest = hashlib.sha256()
-    root = Path(__file__).parent
-    for path in sorted(root.glob("*.py")):
-        name = path.name.encode()
+    root = Path(__file__).resolve().parents[1]
+    for path in sorted(root.rglob("*.py")):
+        name = path.relative_to(root).as_posix().encode()
         content = path.read_bytes()
         # Length prefixes distinguish different file boundaries with equal concatenations.
         digest.update(len(name).to_bytes(8, "big") + name)
@@ -371,7 +371,7 @@ async def evaluate(
         for case in cases
     ):
         raise ValueError("Gold labels must reference corpus documents/chunks")
-    from ledger_rag.providers import make_provider
+    from ledger_rag.generation.providers import make_provider
 
     store = make_retriever(settings)
     provider = make_provider(settings)

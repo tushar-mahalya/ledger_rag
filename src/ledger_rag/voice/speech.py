@@ -7,8 +7,8 @@ from typing import Any, Protocol
 
 import httpx
 
-from ledger_rag.config import Settings
-from ledger_rag.providers import _endpoint
+from ledger_rag.core.config import Settings
+from ledger_rag.generation.providers import _endpoint
 from ledger_rag.voice.codec import MAX_RATE, MIN_RATE, WavStreamParser, build_wav
 
 MAX_TRANSCRIPT_CHARS = 4000

@@ -21,8 +21,8 @@ import structlog
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 from prometheus_client import CollectorRegistry
 
-from ledger_rag.config import Settings
-from ledger_rag.models import Principal
+from ledger_rag.core.config import Settings
+from ledger_rag.core.models import Principal
 from ledger_rag.voice.codec import mulaw_decode, mulaw_encode
 from ledger_rag.voice.gateway import (
     AnswerEvent,
@@ -45,7 +45,7 @@ from ledger_rag.voice.speech import (
 )
 
 if TYPE_CHECKING:
-    from ledger_rag.api import Runtime
+    from ledger_rag.api.app import Runtime
 
 logger = structlog.get_logger()
 router = APIRouter()
