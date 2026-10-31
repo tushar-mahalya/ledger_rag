@@ -21,19 +21,23 @@ not the number of frameworks in the diagram.
 | Provider portability | OpenAI chat-completions and Anthropic messages wire protocols, custom base URLs, normalized tool history |
 | Local, keyless demo | Deterministic lexical retrieval and extractive responses over **fictional** disclosures |
 | Persistent retrieval | Qdrant dense/sparse RRF retrieval with an OpenAI-compatible embedding endpoint |
-| Reranking | Optional TEI cross-encoder: ten authorized candidates to requested top-k; explicit failures, no silent bypass |
+| Reranking | Optional TEI cross-encoder over bounded authorized candidates; explicit failures, no silent bypass |
 | Ingestion | Paragraph-aware bounded chunks, neighboring parent metadata, content hashes and stable tenant-scoped IDs |
 | Identity and permissions | OIDC signature/issuer/audience/expiry validation; server-derived tenant and group ACLs, admin/reader roles |
 | Evidence contract | Source, disclosure date and exact retrieved quote; unknown or missing paragraph citations trigger abstention |
 | Tool harness | Allowlisted read-only retrieval and Decimal arithmetic; argument validation, cumulative tool budget, query deadline |
 | Operations | Structured redacted logs, request/trace IDs, OTLP traces, Prometheus metrics, Docker, Vault Agent templates, CI |
 | Evaluation | Retrieval/answer smoke tests, authorization/failure-path suites, reproducible evaluation and HTTP benchmarking |
+| Voice gateway | Generic PCM and Twilio Media Streams adapters, VAD and barge-in; synthetic lifecycle tests, not verified carrier calls |
+| Compute plane | Modal training/inference code, leakage-aware mining and model manifests; remote execution and serving promotion still need validation |
+| Agent workflows | Portable Agent Skills, shared working agreement, official Modal reference and CI validation |
 
 **Important boundaries:** valid citation markers do not establish semantic
 entailment. The default demo is not neural RAG. SSE sends evidence followed by a
 validated complete answer, **not** raw token streaming; this is deliberate to avoid
-speaking an answer before the citation gate. There is no telephony/STT/TTS frontend.
-GraphRAG, ColPali, late interaction, GPU serving, durable workflow orchestration,
+speaking an answer before the citation gate. Real telephony calls, signed webhook
+token minting and end-to-end voice latency remain unverified.
+GraphRAG, ColPali, late interaction, validated GPU serving, durable workflow orchestration,
 Postgres outbox, distributed quotas, and semantic faithfulness judges are
 architecture/experiment tracks, not pretend implementations.
 
@@ -102,6 +106,8 @@ of concurrency capacity.
 
 ## Architecture and research
 
+- [Coding-agent workflows and portable skills](docs/AGENT_WORKFLOWS.md)
+- [Current decisions, tradeoffs and open experiments](docs/research/2026-10-31-decisions.md)
 - [Architecture and execution paths](docs/ARCHITECTURE.md)
 - [Primary-source research and dataset decisions](docs/RESEARCH.md)
 - [Deployment, secrets, observability and recovery](docs/OPERATIONS.md)
@@ -133,7 +139,7 @@ Secrets are read at startup: rotate files, then roll the application instances.
 | Production identity | OIDC issuer, audience, JWKS URL and signed `tenant_id`, `roles`, `groups` claims |
 | Vault | Vault address, workload AppRole bootstrap or production workload identity, least-privilege policy |
 | Deployment | Target cloud/region/domain, TLS certificate, budget, CPU/GPU and model/data residency requirements |
-| IVR integration | Later: telephony provider credentials, streaming STT/TTS endpoints and language/turn-taking requirements |
+| IVR integration | Telephony credentials, signed-webhook/token-minting integration, STT/TTS endpoints and language/turn-taking requirements |
 
 Any model behind the supported **wire protocols** can be configured. Actual tool
 calling depends on that model/server's support; an arbitrary HTTP endpoint is not

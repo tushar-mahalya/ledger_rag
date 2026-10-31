@@ -20,7 +20,13 @@ dependencies = [
 compute = [
     "modal>=1.1,<2",
 ]
-dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1", "mypy>=1.15,<2"]
+dev = [
+    "pytest>=8,<10",
+    "pytest-asyncio>=0.25,<2",
+    "ruff>=0.11,<1",
+    "mypy>=1.15,<2",
+    "pyyaml>=6,<7",
+]
 train = [
     "datasets>=3,<5",
     "sentence-transformers[onnx,train]>=5,<6",

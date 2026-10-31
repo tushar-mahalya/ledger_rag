@@ -10,6 +10,7 @@ htmlcov/
 .env.*
 !.env.example
 secrets/
+.modal.toml
 data/raw/
 data/index/
 reports/

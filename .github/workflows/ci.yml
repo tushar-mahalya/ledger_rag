@@ -21,8 +21,9 @@ jobs:
           python-version: ${{ matrix.python }}
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run --frozen ruff check src tests compute deploy/wait-for-secrets.py
+      - run: uv run --frozen ruff check src tests compute deploy/wait-for-secrets.py scripts/check_agent_skills.py
       - run: uv run --frozen ruff format --check .
+      - run: uv run --frozen python scripts/check_agent_skills.py
       - run: uv run --frozen mypy src
       - run: uv run --frozen --group compute mypy --strict --ignore-missing-imports compute
       - run: uv run --frozen pytest -q
