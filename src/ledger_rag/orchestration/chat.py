@@ -1,5 +1,6 @@
+import json
 from dataclasses import dataclass
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 import structlog
 from langgraph.graph import END, START, StateGraph
@@ -7,10 +8,11 @@ from langgraph.runtime import Runtime
 from langsmith import tracing_context
 
 from ledger_rag.core.contracts import Provider
-from ledger_rag.core.models import Citation, Principal, QueryRequest
+from ledger_rag.core.models import Calculation, Citation, Principal, QueryRequest, Verification
 from ledger_rag.generation.chat_tools import Retrieve, execute_tool
 from ledger_rag.generation.evidence import validate_citations
 from ledger_rag.generation.tools import CALCULATOR, SEARCH_EVIDENCE
+from ledger_rag.generation.verification import AnswerVerifier
 from ledger_rag.observability.spans import safe_span
 from ledger_rag.orchestration.activity import ActivityCallback, activity
 
@@ -24,6 +26,9 @@ class ChatState(TypedDict):
     tool_count: int
     pending_calls: list[dict[str, Any]]
     content: str
+    calculations: NotRequired[list[Calculation]]
+    tool_errors: NotRequired[int]
+    verification: NotRequired[Verification | None]
 
 
 class ChatUpdate(TypedDict, total=False):
@@ -33,6 +38,9 @@ class ChatUpdate(TypedDict, total=False):
     tool_count: int
     pending_calls: list[dict[str, Any]]
     content: str
+    calculations: list[Calculation]
+    tool_errors: int
+    verification: Verification | None
 
 
 @dataclass(frozen=True)
@@ -43,6 +51,7 @@ class ChatContext:
     retrieve: Retrieve
     max_tool_calls: int
     on_activity: ActivityCallback | None
+    verifier: AnswerVerifier | None = None
 
 
 def entry(state: ChatState, runtime: Runtime[ChatContext]) -> Literal["model", "validation"]:
@@ -91,19 +100,22 @@ async def tools(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpdate:
     context = runtime.context
     messages, citations = list(state["messages"]), list(state["citations"])
     evidence_ids = set(state["evidence_ids"])
+    calculations = list(state.get("calculations", []))
+    errors = state.get("tool_errors", 0)
     with safe_span("rag.chat.tools") as span:
         for call in state["pending_calls"]:
-            messages.append(
-                await execute_tool(
-                    call,
-                    query=context.query,
-                    principal=context.principal,
-                    retrieve=context.retrieve,
-                    citations=citations,
-                    evidence_ids=evidence_ids,
-                    on_activity=context.on_activity,
-                )
+            message = await execute_tool(
+                call,
+                query=context.query,
+                principal=context.principal,
+                retrieve=context.retrieve,
+                citations=citations,
+                evidence_ids=evidence_ids,
+                on_activity=context.on_activity,
+                calculations=calculations,
             )
+            errors += "error" in json.loads(message["content"])
+            messages.append(message)
         count = state["tool_count"] + len(state["pending_calls"])
         span.set_attribute("rag.tool_calls", count)
     return {
@@ -112,17 +124,32 @@ async def tools(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpdate:
         "evidence_ids": evidence_ids,
         "tool_count": count,
         "pending_calls": [],
+        "calculations": calculations,
+        "tool_errors": errors,
     }
 
 
 async def validation(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpdate:
-    async with activity(
-        runtime.context.on_activity, "validation", span_name="rag.chat.validation"
-    ) as span:
+    context = runtime.context
+    calculations = state.get("calculations", [])
+    verification: Verification | None = None
+    async with activity(context.on_activity, "validation", span_name="rag.chat.validation") as span:
         content, citations = validate_citations(state["content"], state["citations"])
+        if context.verifier is not None:
+            verification = context.verifier.check(content, citations, calculations)
+            span.set_attribute("rag.verification", verification.status)
         span.set_attribute("rag.abstained", not bool(content))
         span.set_attribute("rag.citation_count", len(citations))
-        return {"content": content, "citations": citations}
+    if context.verifier is not None and verification is not None:
+        verification = await context.verifier.verify_model(
+            verification,
+            content=content,
+            question=context.query.question,
+            citations=citations,
+            profile=context.query.profile,
+            on_activity=context.on_activity,
+        )
+    return {"content": content, "citations": citations, "verification": verification}
 
 
 builder = StateGraph(ChatState, context_schema=ChatContext)
@@ -151,4 +178,7 @@ async def run_chat(state: ChatState, context: ChatContext) -> ChatState:
         tool_count=result["tool_count"],
         pending_calls=result["pending_calls"],
         content=result["content"],
+        calculations=result.get("calculations", []),
+        tool_errors=result.get("tool_errors", 0),
+        verification=result.get("verification"),
     )

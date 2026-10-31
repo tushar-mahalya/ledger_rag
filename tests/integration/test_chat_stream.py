@@ -79,7 +79,7 @@ def test_stream_activity_and_evidence_contract(settings: Settings, document: Doc
     assert evidence["sources"] == [document.source] and evidence["retrieval_ms"] >= 0
     assert evidence["citations"] == answer["citations"]
     assert evidence["request_id"] == answer["request_id"] == response.headers["x-request-id"]
-    assert set(answer) == {
+    assert set(answer) >= {
         "answer",
         "citations",
         "abstained",

@@ -73,6 +73,7 @@ def create_app(
 
             backend = make_provider(resolved)
         voice: VoiceRuntime | None = None
+        service: RagService | None = None
         try:
             bootstrap = getattr(store, "bootstrap", None)
             if resolved.qdrant_bootstrap_on_startup and bootstrap is not None:
@@ -94,9 +95,10 @@ def create_app(
                 metrics.registry.register(collector)
             if resolved.voice_enabled:
                 voice = make_voice_runtime(resolved, metrics.registry, stt, tts)
+            service = RagService(resolved, store, backend)
             app.state.runtime = Runtime(
                 settings=resolved,
-                service=RagService(resolved, store, backend),
+                service=service,
                 auth=Authenticator(resolved),
                 limiter=RateLimiter(resolved.rate_limit_per_minute),
                 slots=asyncio.Semaphore(resolved.max_concurrent_queries),
@@ -113,6 +115,8 @@ def create_app(
         finally:
             await store.close()
             await backend.close()
+            if service is not None:
+                await service.close()
             if voice is not None:
                 await voice.close()
             if telemetry:

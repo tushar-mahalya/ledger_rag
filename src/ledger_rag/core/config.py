@@ -90,6 +90,37 @@ class Settings(BaseSettings):
     upstream_max_retries: int = Field(default=2, ge=0, le=5)
     upstream_retry_base_seconds: float = Field(default=0.2, gt=0, le=10)
     upstream_retry_max_delay_seconds: float = Field(default=5, gt=0, le=60)
+    # Grounded answers: numeric provenance, optional model verifier and abstention policy.
+    # Abstention thresholds are uncalibrated placeholders until fitted on FinQA dev data.
+    verification_mode: Literal["off", "flag", "enforce"] = "enforce"
+    verification_relative_tolerance: float = Field(default=0.0, ge=0, le=0.05)
+    verification_max_rounding_ratio: float = Field(default=0.05, ge=0, le=0.5)
+    groundedness_verifier: Literal["off", "lettucedetect"] = "off"
+    groundedness_verifier_url: str = ""
+    groundedness_verifier_api_key: SecretStr | None = None
+    groundedness_verifier_timeout_seconds: float = Field(default=1.5, gt=0, le=10)
+    groundedness_verifier_min_score: float = Field(default=0.5, ge=0, le=1)
+    abstain_min_top_score: float | None = None
+    abstain_min_citation_coverage: float = Field(default=0.0, ge=0, le=1)
+    abstain_max_tool_errors: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_grounding(self) -> "Settings":
+        if self.groundedness_verifier == "off":
+            return self
+        parsed = urlsplit(self.groundedness_verifier_url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ) and not (self.environment == "development" and parsed.scheme == "http"):
+            raise ValueError("Groundedness verifier requires an HTTPS URL without credentials")
+        if not self.groundedness_verifier_api_key:
+            raise ValueError("Groundedness verifier requires an API key")
+        return self
 
     @model_validator(mode="after")
     def validate_deployment(self) -> "Settings":

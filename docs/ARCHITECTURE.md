@@ -107,10 +107,14 @@ index fallbacks. SSE failures emit `error`, not a success-shaped final answer.
 The UI accepts an answer only after `done`, validates event shapes, bounds memory
 and cancels abandoned requests. See [the wire contract](CHAT_API.md).
 
-Citation validation checks references and required citation structure. It does
-**not** prove semantic entailment, correct financial units or truthful arithmetic
-inputs. The calculator bounds Decimal expressions; the LLM still has to select
-the correct cited operands. A full semantic faithfulness gate remains unimplemented.
+Citation validation checks references and required citation structure, then
+numeric provenance: each number in a sentence must match that sentence's cited
+evidence or a program result bound to those citations. The calculator is an
+evidence-bound program: operands are exact cited spans, earlier steps or small
+constants, so the model cannot type its own inputs. This still does **not** prove
+semantic entailment or that the model chose the right operands; the optional
+LettuceDetect verifier is an unmeasured, chat-only signal, and the abstention
+thresholds are uncalibrated. See [grounded calculation](CHAT_API.md#grounded-calculation-and-verification).
 
 Sources: [API](../src/ledger_rag/api/app.py),
 [RAG service](../src/ledger_rag/orchestration/service.py),

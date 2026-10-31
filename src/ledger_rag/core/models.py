@@ -113,6 +113,7 @@ ActivityLabel = Literal[
     "Searching evidence",
     "Checking tool request",
     "Validating citations",
+    "Verifying grounding",
 ]
 
 
@@ -125,6 +126,76 @@ class Activity(BaseModel):
     tool: ActivityTool | None = None
 
 
+class CalculationOperand(BaseModel):
+    """A program input with provenance: an evidence span, a prior step or a constant."""
+
+    kind: Literal["evidence", "step", "constant"]
+    value: str
+    citation_id: str | None = None
+    quote: str | None = None
+    source_value: str | None = None
+    scale: str | None = None
+    unit: str | None = None
+    step: int | None = None
+
+
+CalculationKind = Literal["currency", "amount", "ratio", "percent", "boolean"]
+
+
+class CalculationStep(BaseModel):
+    index: int
+    op: str
+    operands: list[CalculationOperand]
+    result: str
+    # Additive provenance: ratio/percent/boolean results never support scaled amounts.
+    kind: CalculationKind | None = None
+    citation_ids: list[str] = Field(default_factory=list)
+    evidence_backed: bool = False
+
+
+class Calculation(BaseModel):
+    """A deterministic evidence-bound program trace; ``result`` is in base units."""
+
+    steps: list[CalculationStep]
+    result: str
+    citation_ids: list[str]
+
+
+VerificationStatus = Literal["verified", "unverified", "failed", "skipped"]
+
+
+class Verification(BaseModel):
+    status: VerificationStatus
+    mode: Literal["off", "flag", "enforce"]
+    checked_numbers: int = 0
+    unsupported_numbers: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+    verifier: str | None = None
+    verifier_score: float | None = None
+
+
+class AbstentionFeatures(BaseModel):
+    hit_count: int
+    top_score: float | None = None
+    mean_score: float | None = None
+    citation_coverage: float | None = None
+    checked_numbers: int = 0
+    unsupported_numbers: int = 0
+    verification_status: VerificationStatus = "skipped"
+    verifier_score: float | None = None
+    tool_calls: int = 0
+    tool_errors: int = 0
+
+
+class AbstentionDecision(BaseModel):
+    """Policy output and inputs; thresholds are uncalibrated until fitted on dev data."""
+
+    abstained: bool
+    reasons: list[str] = Field(default_factory=list)
+    features: AbstentionFeatures
+    calibrated: bool = False
+
+
 class Answer(BaseModel):
     answer: str
     citations: list[Citation]
@@ -135,6 +206,10 @@ class Answer(BaseModel):
     request_id: str
     model: str
     tool_calls: int = 0
+    calculation: Calculation | None = None
+    calculations: list[Calculation] = Field(default_factory=list)
+    verification: Verification | None = None
+    abstention: AbstentionDecision | None = None
 
 
 class IngestRequest(BaseModel):
