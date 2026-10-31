@@ -354,10 +354,11 @@ matches the uploaded chunk count. Each report's `input_sha256` equals the local
 `/data/ingestion/<run id>.json` in `ledger-data`. "Ingest s" is the report's
 ingest and verification time. "CLI wall s" is the local end-to-end `modal run` time, including startup.
 
-**Superseded:** `tatqa_gte_modernbert_v1` (run `e2fdb5ef94ee420da1868c44c28f42ec`,
-app `ap-vI9d5j3w8uSOLMsO3vv1SZ`) used adapter v1 input `3e513b5a…e422f1`. It has
-2,756 documents and 4,334 chunks, and its headers include the misdetected rows
-described above. Do not evaluate against it. Delete it after `feat/datasets` merges.
+**Superseded and deleted:** `tatqa_gte_modernbert_v1` (run `e2fdb5ef94ee420da1868c44c28f42ec`,
+app `ap-vI9d5j3w8uSOLMsO3vv1SZ`) used adapter v1 input `3e513b5a…e422f1`. It had
+2,756 documents and 4,334 chunks, and its headers included the misdetected rows
+described above. It was deleted from Qdrant Cloud after `feat/datasets` merged, once
+`tatqa_gte_modernbert_v1_1` was confirmed to hold 4,335 points.
 
 The first TAT-QA attempt, run `2f79a2ecd4a249c7b111c909412fff0e`
 (`ap-ouvljyNiq4vcZXp3rnsLYS`), failed before claiming a collection. Modal mounts
