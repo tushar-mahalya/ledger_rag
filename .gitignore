@@ -22,3 +22,6 @@ node_modules/
 web/test-results/
 web/playwright-report/
 *.tsbuildinfo
+data/convfinqa/
+data/tatqa/
+data/financebench/
