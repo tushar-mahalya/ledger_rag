@@ -113,11 +113,18 @@ class CalculationOperand(BaseModel):
     step: int | None = None
 
 
+CalculationKind = Literal["currency", "amount", "ratio", "percent", "boolean"]
+
+
 class CalculationStep(BaseModel):
     index: int
     op: str
     operands: list[CalculationOperand]
     result: str
+    # Additive provenance: ratio/percent/boolean results never support scaled amounts.
+    kind: CalculationKind | None = None
+    citation_ids: list[str] = Field(default_factory=list)
+    evidence_backed: bool = False
 
 
 class Calculation(BaseModel):

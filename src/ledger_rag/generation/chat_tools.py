@@ -67,6 +67,10 @@ async def execute_tool(
             except ProgramError as exc:
                 result = {"error": str(exc)}
                 logger.warning("tool_input_rejected")
+            except (TypeError, ValueError, ArithmeticError, KeyError, IndexError) as exc:
+                # Defense in depth: malformed arguments must never become a 500.
+                result = {"error": "calculator arguments could not be parsed; check the schema"}
+                logger.warning("tool_input_rejected", error_class=type(exc).__name__)
             else:
                 if calculations is not None:
                     calculations.append(calculation)

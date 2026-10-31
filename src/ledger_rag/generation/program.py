@@ -21,7 +21,13 @@ from decimal import (
 )
 from typing import Any, Literal
 
-from ledger_rag.core.models import Calculation, CalculationOperand, CalculationStep, Citation
+from ledger_rag.core.models import (
+    Calculation,
+    CalculationKind,
+    CalculationOperand,
+    CalculationStep,
+    Citation,
+)
 
 MAX_STEPS = 8
 MAX_ARGS = 16
@@ -95,6 +101,11 @@ _NUMBER = re.compile(
     re.IGNORECASE,
 )
 _YEAR = re.compile(r"(?:19|20)\d{2}")
+# Loose (answer-side) mode: numbers glued to letters such as "3.5x", "12k" or "40m".
+_GLUED = re.compile(
+    r"(?<![\w.,])(?P<core>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(?P<suffix>[A-Za-z]+)"
+)
+_GLUED_SCALES = {"k": "k", "m": "m", "mm": "m", "mn": "mn", "b": "b", "bn": "bn"}
 
 
 class ProgramError(ValueError):
@@ -133,14 +144,21 @@ def _mask(text: str) -> str:
     return _MASKS.sub(lambda match: " " * len(match.group(0)), text)
 
 
-def extract_numbers(text: str, *, include_years: bool = True) -> list[NumberMention]:
+def extract_numbers(
+    text: str, *, include_years: bool = True, loose: bool = False
+) -> list[NumberMention]:
     """Normalize financial numbers in text; offsets refer to the original string.
+
+    ``loose`` (used by answer verification) also returns numbers glued to letters
+    ("3.5x", "12k", "40m") so they are checked instead of silently skipped; the
+    program DSL uses strict mode so such tokens can never be quoted as operands.
 
     Parentheses mark a negative only around a bare amount, e.g. ``(1,234)`` or
     ``$(1,234)``; prose parentheticals with scale words or percentages stay positive.
     """
     mentions: list[NumberMention] = []
-    for match in _NUMBER.finditer(_mask(text)):
+    masked = _mask(text)
+    for match in _NUMBER.finditer(masked):
         core = match.group("core")
         unit_text = re.sub(r"\s+", " ", (match.group("unit") or "").strip().lower())
         bracketed = bool(match.group("open") and match.group("close"))
@@ -148,7 +166,7 @@ def extract_numbers(text: str, *, include_years: bool = True) -> list[NumberMent
         outer_scale = (match.group("scale2") or "").strip().lower() if bracketed else ""
         scale_key = inner_scale or outer_scale
         currency = bool(match.group("currency") or match.group("lead"))
-        if scale_key in {"k", "m", "b"} and not currency:
+        if scale_key in {"k", "m", "b"} and not currency and not loose:
             continue  # "10b-5" or "3m" without a currency is an identifier, not an amount.
         signed = bool(match.group("sign") or match.group("sign2"))
         year_like = bool(_YEAR.fullmatch(core)) and not (
@@ -192,7 +210,45 @@ def extract_numbers(text: str, *, include_years: bool = True) -> list[NumberMent
                 year_like=year_like,
             )
         )
+    if loose:
+        mentions.extend(_glued_numbers(text, masked, mentions, include_years))
+        mentions.sort(key=lambda mention: mention.start)
     return mentions
+
+
+def _glued_numbers(
+    text: str, masked: str, found: Sequence[NumberMention], include_years: bool
+) -> list[NumberMention]:
+    taken = [(mention.core_start, mention.core_end) for mention in found]
+    glued: list[NumberMention] = []
+    for match in _GLUED.finditer(masked):
+        start, end = match.span("core")
+        if any(start < taken_end and taken_start < end for taken_start, taken_end in taken):
+            continue
+        core = match.group("core")
+        year_like = bool(_YEAR.fullmatch(core))  # "1990s", "2009E"
+        if year_like and not include_years:
+            continue
+        scale_key = _GLUED_SCALES.get(match.group("suffix").lower(), "")
+        glued.append(
+            NumberMention(
+                start=start,
+                end=match.end(),
+                core_start=start,
+                core_end=end,
+                text=text[start : match.end()],
+                value=Decimal(core.replace(",", "")),
+                scale=_SCALES.get(scale_key, Decimal(1)),
+                scale_word=_SCALE_NAMES.get(scale_key, scale_key or None),
+                unit=None,
+                decimals=len(core.split(".", 1)[1]) if "." in core else 0,
+                year_like=year_like,
+            )
+        )
+    return glued
+
+
+_Kind = Literal["currency", "amount", "ratio", "percent", "boolean", "constant"]
 
 
 @dataclass(frozen=True)
@@ -200,6 +256,8 @@ class _Value:
     value: Decimal
     operand: CalculationOperand
     citation_ids: frozenset[str]
+    kind: _Kind
+    evidence_backed: bool
 
 
 def _context() -> Context:
@@ -272,6 +330,9 @@ def _bind_evidence(raw: Mapping[str, Any], step: int, citations: Mapping[str, Ci
             unit=mention.unit,
         ),
         citation_ids=frozenset({citation_id}),
+        # Percent-family evidence is converted to a fraction, i.e. a ratio.
+        kind="currency" if mention.unit == "currency" else "ratio" if mention.unit else "amount",
+        evidence_backed=True,
     )
 
 
@@ -295,6 +356,8 @@ def _operand(
             value=prior.value,
             operand=CalculationOperand(kind="step", value=format_decimal(prior.value), step=index),
             citation_ids=prior.citation_ids,
+            kind=prior.kind,
+            evidence_backed=prior.evidence_backed,
         )
     if keys == {"constant"}:
         constant = raw["constant"]
@@ -304,7 +367,8 @@ def _operand(
             value = Decimal(str(constant))
         except InvalidOperation:
             raise ProgramError(f"Step #{step}: constant must be a number") from None
-        if value not in CONSTANTS:
+        # sNaN cannot even be hashed for the membership test below.
+        if not value.is_finite() or value not in CONSTANTS:
             raise ProgramError(
                 f"Step #{step}: unbound literal; constants are limited to "
                 "1, 2, 4, 12, 100, 1000 and 1000000. Bind other numbers to evidence with "
@@ -314,11 +378,87 @@ def _operand(
             value=value,
             operand=CalculationOperand(kind="constant", value=format_decimal(value)),
             citation_ids=frozenset(),
+            kind="constant",
+            evidence_backed=False,
         )
     raise ProgramError(
         f"Step #{step}: argument must be exactly one of {{citation_id, quote}}, {{ref}} or "
         "{constant}"
     )
+
+
+_SCALING_OPS = frozenset({"add", "subtract", "multiply", "divide", "exp"})
+_AMOUNTS = frozenset({"currency", "amount"})
+
+
+def _same_kind(kinds: Sequence[_Kind], op: str, step: int) -> _Kind:
+    unique = set(kinds)
+    if unique <= _AMOUNTS:
+        return "currency" if "currency" in unique else "amount"
+    if len(unique) == 1:
+        return kinds[0]
+    raise ProgramError(
+        f"Step #{step}: {op} cannot mix percentages or ratios with amounts; convert first"
+    )
+
+
+def _result_kind(op: str, operands: Sequence[_Value], step: int) -> _Kind:
+    """Unit kind of a step result; also enforces evidence lineage and constant roles."""
+    constants = [operand for operand in operands if operand.kind == "constant"]
+    bound = [operand for operand in operands if operand.kind != "constant"]
+    if not any(operand.evidence_backed for operand in bound):
+        raise ProgramError(
+            f"Step #{step}: every step needs an evidence-bound argument (a cited quote or a "
+            "ref to an evidence-based step); constants cannot create values on their own"
+        )
+    if any(operand.kind == "boolean" for operand in operands):
+        raise ProgramError(f"Step #{step}: a 'greater' result is a yes/no flag, not a number")
+    if constants and (len(constants) > 1 or op not in _SCALING_OPS):
+        raise ProgramError(
+            f"Step #{step}: a constant may only be the single scaling or offset argument "
+            "of add, subtract, multiply, divide or exp"
+        )
+    if op == "greater":
+        _same_kind([operand.kind for operand in bound], op, step)
+        return "boolean"
+    if op == "percent_change":
+        _same_kind([operand.kind for operand in bound], op, step)
+        return "percent"
+    if constants:
+        constant, other = constants[0].value, bound[0].kind
+        if op in {"divide", "exp"} and operands[1].kind != "constant":
+            raise ProgramError(f"Step #{step}: in {op} a constant may only be the second argument")
+        if op in {"add", "subtract"} and (constant != 1 or other != "ratio"):
+            raise ProgramError(
+                f"Step #{step}: add/subtract only accept the constant 1 next to a percentage "
+                "or ratio (for example 1 + growth rate)"
+            )
+        if op == "multiply" and constant == 100 and other == "ratio":
+            return "percent"
+        if op == "divide" and constant == 100 and other == "percent":
+            return "ratio"
+        return other
+    kinds = [operand.kind for operand in bound]
+    if op in {"add", "subtract"} or op in TABLE_OPS:
+        return _same_kind(kinds, op, step)
+    if op == "exp":
+        return kinds[0]
+    if "percent" in kinds:
+        raise ProgramError(
+            f"Step #{step}: percent_change results are in percent; divide by 100 before "
+            f"using them in {op}"
+        )
+    left, right = kinds
+    if op == "multiply":
+        if right == "ratio":
+            return left
+        if left == "ratio":
+            return right
+        return "currency" if "currency" in kinds else "amount"
+    if right == "ratio" and left != "ratio":
+        return left  # amount / rate
+    _same_kind(kinds, op, step)
+    return "ratio"
 
 
 def _apply(op: str, values: list[Decimal], step: int) -> Decimal:
@@ -399,7 +539,15 @@ def run_program(arguments: Any, citations: Sequence[Citation]) -> Calculation:
                 raise ProgramError(f"Step #{index}: unsupported op; use one of {', '.join(OPS)}")
             if not isinstance(args, list) or not 1 <= len(args) <= MAX_ARGS:
                 raise ProgramError(f"Step #{index}: args must be a list of 1 to {MAX_ARGS} items")
-            operands = [_operand(arg, index, results, by_id) for arg in args]
+            try:
+                operands = [_operand(arg, index, results, by_id) for arg in args]
+            except ProgramError:
+                raise
+            except (TypeError, ValueError, ArithmeticError, KeyError, IndexError):
+                raise ProgramError(f"Step #{index}: an argument could not be parsed") from None
+            if op in BINARY_OPS and len(operands) != 2:
+                raise ProgramError(f"Step #{index}: {op} takes exactly two arguments")
+            kind = _result_kind(op, operands, index)
             value = _bounded(_apply(op, [operand.value for operand in operands], index), index)
             citation_ids = frozenset().union(*(operand.citation_ids for operand in operands))
             results.append(
@@ -409,6 +557,8 @@ def run_program(arguments: Any, citations: Sequence[Citation]) -> Calculation:
                         kind="step", value=format_decimal(value), step=index
                     ),
                     citation_ids=citation_ids,
+                    kind=kind,
+                    evidence_backed=True,
                 )
             )
             trace.append(
@@ -417,6 +567,9 @@ def run_program(arguments: Any, citations: Sequence[Citation]) -> Calculation:
                     op=op,
                     operands=[operand.operand for operand in operands],
                     result=format_decimal(value),
+                    kind=_public_kind(kind),
+                    citation_ids=sorted(citation_ids, key=lambda value: int(value[1:])),
+                    evidence_backed=True,
                 )
             )
     if not results[-1].citation_ids:
@@ -426,6 +579,12 @@ def run_program(arguments: Any, citations: Sequence[Citation]) -> Calculation:
         result=trace[-1].result,
         citation_ids=sorted(results[-1].citation_ids, key=lambda value: int(value[1:])),
     )
+
+
+def _public_kind(kind: _Kind) -> CalculationKind:
+    if kind == "constant":  # unreachable: _result_kind never returns a bare constant
+        raise ProgramError("constants cannot be step results")
+    return kind
 
 
 def program_tool_result(calculation: Calculation) -> dict[str, Any]:
@@ -438,6 +597,7 @@ def program_tool_result(calculation: Calculation) -> dict[str, Any]:
                 "op": step.op,
                 "inputs": [operand.value for operand in step.operands],
                 "result": step.result,
+                "kind": step.kind,
             }
             for step in calculation.steps
         ],

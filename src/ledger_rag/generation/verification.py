@@ -26,6 +26,7 @@ import structlog
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import (
     Calculation,
+    CalculationKind,
     Citation,
     Profile,
     Verification,
@@ -52,6 +53,7 @@ class NumericPolicy:
 class _Reference:
     mention: NumberMention | None = None
     program_value: Decimal | None = None
+    program_kind: CalculationKind | None = None
 
 
 @dataclass(frozen=True)
@@ -127,13 +129,23 @@ def matches(answer: NumberMention, reference: _Reference, policy: NumericPolicy)
             return True
         unscaled = answer.scale == 1 or evidence.scale == 1
         return unscaled and _close(answer.value, evidence.value, ulp, policy)
-    value = reference.program_value
-    if value is None:
+    value, kind = reference.program_value, reference.program_kind
+    if value is None or kind is None or kind == "boolean":
         return False
-    candidates = [(answer.absolute, ulp * answer.scale), (answer.value, ulp)]
-    if answer.unit in _PERCENT_UNITS:
-        candidates.append((answer.value / 100, ulp / 100))
-    return any(_close(number, value, tolerance, policy) for number, tolerance in candidates)
+    if kind == "percent":
+        return answer.unit in _PERCENT_UNITS and _close(answer.value, value, ulp, policy)
+    if kind == "ratio":
+        if answer.unit in _PERCENT_UNITS:
+            return _close(answer.value / 100, value, ulp / 100, policy)
+        if answer.unit == "bps":
+            return _close(answer.value / 10000, value, ulp / 10000, policy)
+        # A bare multiple such as "1.25x"; never a currency or scaled amount.
+        return (
+            answer.unit is None and answer.scale == 1 and _close(answer.value, value, ulp, policy)
+        )
+    if answer.unit in _PERCENT_UNITS or answer.unit == "bps":
+        return False
+    return _close(answer.absolute, value, ulp * answer.scale, policy)
 
 
 def check_numbers(
@@ -144,15 +156,20 @@ def check_numbers(
 ) -> NumericCheck:
     by_id = {citation.id: citation for citation in citations}
     evidence: dict[str, list[_Reference]] = {
-        citation.id: [_Reference(mention=mention) for mention in extract_numbers(citation.quote)]
+        citation.id: [
+            _Reference(mention=mention) for mention in extract_numbers(citation.quote, loose=True)
+        ]
         for citation in citations
     }
+    # Each step supports only sentences citing that step's own evidence lineage.
     programs = [
         (
-            frozenset(calculation.citation_ids),
-            [_Reference(program_value=Decimal(step.result)) for step in calculation.steps],
+            frozenset(step.citation_ids),
+            [_Reference(program_value=Decimal(step.result), program_kind=step.kind)],
         )
         for calculation in calculations
+        for step in calculation.steps
+        if step.evidence_backed and step.citation_ids and step.kind not in {None, "boolean"}
     ]
     check = NumericCheck(citation_coverage=citation_coverage(content))
     for segment in segments(content):
@@ -163,7 +180,7 @@ def check_numbers(
         for citation_ids, results in programs:
             if citation_ids & segment.citation_ids:
                 references.extend(results)
-        for mention in extract_numbers(segment.text, include_years=False):
+        for mention in extract_numbers(segment.text, include_years=False, loose=True):
             check.checked += 1
             if not any(matches(mention, reference, policy) for reference in references):
                 if len(check.unsupported) < MAX_REPORTED_NUMBERS:
@@ -185,6 +202,19 @@ class GroundednessVerifier(Protocol):
     ) -> GroundednessResult: ...
 
     async def close(self) -> None: ...
+
+
+def _number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _valid_span(span: Any) -> bool:
+    return (
+        isinstance(span, dict)
+        and _number(span.get("start"))
+        and _number(span.get("end"))
+        and isinstance(span.get("text", ""), str)
+    )
 
 
 class HttpGroundednessVerifier:
@@ -216,6 +246,7 @@ class HttpGroundednessVerifier:
             or not isinstance(score, (int, float))
             or not 0 <= score <= 1
             or not isinstance(spans, list)
+            or not all(_valid_span(span) for span in spans)
         ):
             raise ValueError("Invalid verifier response")
         return GroundednessResult(
@@ -305,8 +336,9 @@ class AnswerVerifier:
                         contexts=[citation.quote for citation in citations],
                         answer=_MARKER.sub("", content),
                     )
-            except (TimeoutError, httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            except Exception as exc:
                 # Fail open to the deterministic result; never block answers on the verifier.
+                # Only the exception class is logged: messages may echo remote content.
                 logger.warning("groundedness_verifier_unavailable", error_class=type(exc).__name__)
                 span.set_attribute("rag.verifier.available", False)
                 return verification.model_copy(

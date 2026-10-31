@@ -263,7 +263,10 @@ async def test_http_verifier_parses_and_rejects_bad_payloads() -> None:
     seen: list[httpx.Request] = []
     payloads = iter(
         [
-            {"supported_score": 0.75, "unsupported_spans": [{"text": "x" * 500}]},
+            {
+                "supported_score": 0.75,
+                "unsupported_spans": [{"start": 0, "end": 500, "text": "x" * 500}],
+            },
             {"supported_score": 2},
             {"supported_score": True},
         ]
@@ -428,3 +431,121 @@ async def test_voice_never_calls_model_verifier() -> None:
     chat = await answer_for("Revenue was USD 120 million. [C1]", Profile.CHAT, stub)
     assert len(stub.calls) == 1 and chat.verification is not None
     assert chat.verification.verifier_score == 0.9
+
+
+# --- Review regressions ------------------------------------------------------------------
+
+
+def step_calculation(*steps: tuple[str, str, list[str], bool]) -> Any:
+    from ledger_rag.core.models import Calculation, CalculationStep
+
+    return Calculation(
+        steps=[
+            CalculationStep(
+                index=index,
+                op="multiply",
+                operands=[],
+                result=result,
+                kind=kind,  # type: ignore[arg-type]
+                citation_ids=ids,
+                evidence_backed=backed,
+            )
+            for index, (result, kind, ids, backed) in enumerate(steps)
+        ],
+        result=steps[-1][0],
+        citation_ids=sorted({i for step in steps for i in step[2]}),
+    )
+
+
+def test_fabricated_constant_chain_cannot_verify() -> None:
+    evidence = "Net income was $120 million."
+    assert unsupported("Net income was $7 million [C1].", evidence) == ["$7 million"]
+    # Even a forged trace (e.g. from an older client) only helps via evidence-backed steps.
+    forged = step_calculation(
+        ("7", "amount", [], False),
+        ("7000000", "amount", ["C1"], False),
+        ("120000001", "currency", ["C1"], True),
+    )
+    assert unsupported("Net income was $7 million [C1].", evidence, calculations=[forged]) == [
+        "$7 million"
+    ]
+
+
+def test_intermediate_steps_only_support_their_own_citations() -> None:
+    calc = step_calculation(
+        ("7000000", "currency", ["C1"], True), ("9", "amount", ["C1", "C2"], True)
+    )
+    assert unsupported("Income was $7 million [C2].", "A 1", "B 2", calculations=[calc]) == [
+        "$7 million"
+    ]
+    assert unsupported("Income was $7 million [C1].", "A 1", "B 2", calculations=[calc]) == []
+
+
+@pytest.mark.parametrize(
+    "content,result,kind,ok",
+    [
+        ("Growth was 0.25%. [C1]", "0.25", "ratio", False),
+        ("Growth was 25%. [C1]", "0.25", "ratio", True),
+        ("Growth was 2,500 bps. [C1]", "0.25", "ratio", True),
+        ("Coverage was 1.25x. [C1]", "1.25", "ratio", True),
+        ("Revenue was $1.25 billion. [C1]", "1.25", "ratio", False),
+        ("Revenue was 1.25 million. [C1]", "1.25", "ratio", False),
+        ("Growth was 25%. [C1]", "25", "percent", True),
+        ("Growth was 25. [C1]", "25", "percent", False),
+        ("Growth was $25. [C1]", "25", "percent", False),
+        ("Income was $18 million. [C1]", "18000000", "currency", True),
+        ("Income was 18%. [C1]", "18", "currency", False),
+        ("Yes, 1 segment grew. [C1]", "1", "boolean", False),
+    ],
+)
+def test_program_results_carry_units(content: str, result: str, kind: str, ok: bool) -> None:
+    calc = step_calculation((result, kind, ["C1"], True))
+    assert (unsupported(content, "No numbers here.", calculations=[calc]) == []) is ok
+
+
+@pytest.mark.parametrize(
+    "content,evidence,ok",
+    [
+        ("Leverage was 3.5x. [C1]", "Debt was 7 and EBITDA 2.", False),
+        ("Leverage was 3.5x. [C1]", "Leverage ratio of 3.5 times.", True),
+        ("Headcount was 12k. [C1]", "Headcount 11,000.", False),
+        ("Headcount was 12k. [C1]", "Headcount 12,000.", True),
+        ("Revenue was 40m. [C1]", "Revenue was $41 million.", False),
+        ("Revenue was 40m. [C1]", "Revenue was $40 million.", True),
+        ("Growth since the 1990s. [C1]", "No numbers.", True),
+    ],
+)
+def test_numbers_glued_to_letters_are_checked(content: str, evidence: str, ok: bool) -> None:
+    result = check_numbers(content, [citation(evidence)], [], POLICY)
+    assert (result.unsupported == []) is ok
+    if "1990s" not in content:
+        assert result.checked == 1
+
+
+async def test_http_verifier_rejects_malformed_spans() -> None:
+    bad = [
+        ["x"],
+        [{"text": "x"}],
+        [{"start": "0", "end": 1}],
+        [{"start": True, "end": 1}],
+        [{"start": 0, "end": 1, "text": 5}],
+    ]
+    responses = iter(bad)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"supported_score": 0.9, "unsupported_spans": next(responses)}
+        )
+
+    client = HttpGroundednessVerifier("https://verifier.example", "k", 1.0, "lettucedetect")
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    for _ in bad:
+        with pytest.raises(ValueError):
+            await client.verify(question="q", contexts=["c"], answer="a")
+    await client.close()
+
+
+@pytest.mark.parametrize("error", [AttributeError("x"), RuntimeError("x"), LookupError("x")])
+async def test_model_verifier_fails_open_on_any_error(error: Exception) -> None:
+    result, _ = await run_model(StubVerifier(error=error))
+    assert result.status == "verified" and result.reasons == ["verifier_unavailable"]

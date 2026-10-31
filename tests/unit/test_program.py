@@ -201,12 +201,12 @@ def test_program_rejects_unbound_or_malformed_inputs(arguments: Any, message: st
 def test_ambiguous_quote_requires_more_context() -> None:
     text = "Segment A was 120 million and segment B was 120 thousand."
     with pytest.raises(ProgramError, match="ambiguous"):
-        run_program(program(("add", [ev("120"), {"constant": 1}])), [citation(text)])
+        run_program(program(("multiply", [ev("120"), {"constant": 1}])), [citation(text)])
     assert (
         run_program(
-            program(("add", [ev("120 thousand"), {"constant": 1}])), [citation(text)]
+            program(("multiply", [ev("120 thousand"), {"constant": 1}])), [citation(text)]
         ).result
-        == "120001"
+        == "120000"
     )
 
 
@@ -290,3 +290,111 @@ def test_tool_schema_is_portable_to_openai_and_anthropic() -> None:
     for unsupported in ("oneOf", "anyOf", "$ref", "pattern"):
         assert unsupported not in rendered
     assert json.loads(rendered) == parameters
+
+
+# --- Review regressions: constants cannot seed values; malformed constants -------------
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        # The reported chain: constants -> scale -> offset onto cited evidence.
+        [
+            ("table_sum", [{"constant": 4}, {"constant": 2}, {"constant": 1}]),
+            ("multiply", [{"ref": "#0"}, {"constant": 1000000}]),
+            ("add", [ev("USD 120 million"), {"constant": 1}]),
+        ],
+        [("multiply", [{"constant": 4}, {"constant": 1000000}])],
+        [("add", [ev("USD 120 million"), {"constant": 1}])],
+        [("subtract", [ev("2,500"), {"constant": 1}])],
+        [("add", [ev("15 percent"), {"constant": 100}])],
+        [("table_sum", [ev("2,500"), {"constant": 1000}])],
+        [("percent_change", [ev("2,500"), {"constant": 1000}])],
+        [("greater", [ev("2,500"), {"constant": 1}])],
+        [("divide", [{"constant": 1000000}, ev("2,500")])],
+        [("exp", [{"constant": 12}, ev("2,500")])],
+        # Sibling: an evidence step followed by a constants-only step.
+        [
+            ("multiply", [ev("USD 120 million"), {"constant": 1}]),
+            ("table_sum", [{"constant": 4}, {"constant": 2}, {"constant": 1}]),
+        ],
+        # Sibling: a yes/no result scaled into an amount.
+        [
+            ("greater", [ev("3,100"), ev("2,900")]),
+            ("multiply", [{"ref": "#0"}, {"constant": 1000000}]),
+        ],
+        # Sibling: mixing percentages and amounts.
+        [("add", [ev("15 percent"), ev("2,500")])],
+        [
+            ("percent_change", [ev("2,900"), ev("3,100")]),
+            ("multiply", [{"ref": "#0"}, ev("2,500")]),
+        ],
+    ],
+)
+def test_constants_cannot_seed_or_offset_values(steps: list[tuple[str, list[Any]]]) -> None:
+    with pytest.raises(ProgramError):
+        run_program(program(*steps), [citation()])
+
+
+def test_allowed_constant_roles_keep_lineage_and_kind() -> None:
+    result = run_program(
+        program(
+            ("divide", [ev("USD 150 million"), ev("USD 120 million")]),
+            ("subtract", [{"ref": "#0"}, {"constant": 1}]),
+            ("multiply", [{"ref": "#1"}, {"constant": 100}]),
+            ("divide", [ev("USD 120 million"), {"constant": 1000}]),
+            ("percent_change", [ev("2,900"), ev("3,100")]),
+            ("greater", [ev("3,100"), ev("2,900")]),
+        ),
+        [citation()],
+    )
+    assert [step.kind for step in result.steps] == [
+        "ratio",
+        "ratio",
+        "percent",
+        "currency",
+        "percent",
+        "boolean",
+    ]
+    assert all(step.evidence_backed and step.citation_ids == ["C1"] for step in result.steps)
+
+
+@pytest.mark.parametrize("constant", ["sNaN", "-sNaN", "NaN", "Infinity", "-inf", float("nan")])
+def test_non_finite_constants_are_program_errors(constant: Any) -> None:
+    with pytest.raises(ProgramError, match="Step #0"):
+        run_program(program(("multiply", [ev("2,500"), {"constant": constant}])), [citation()])
+
+
+async def test_execute_tool_turns_malformed_operands_into_tool_errors() -> None:
+    from ledger_rag.core.models import QueryRequest
+    from ledger_rag.generation.chat_tools import execute_tool
+
+    async def retrieve(*_: Any) -> Any:
+        raise AssertionError("not called")
+
+    calculations: list[Any] = []
+    result = await execute_tool(
+        {
+            "id": "t1",
+            "name": "calculator",
+            "arguments": program(("multiply", [ev("2,500"), {"constant": "sNaN"}])),
+        },
+        query=QueryRequest(question="q"),
+        principal=None,
+        retrieve=retrieve,
+        citations=[citation()],
+        evidence_ids={"C1"},
+        on_activity=None,
+        calculations=calculations,
+    )
+    payload = json.loads(result["content"])
+    assert "error" in payload and "sNaN" not in payload["error"] and calculations == []
+
+
+def test_strict_mode_still_rejects_glued_numbers_as_operands() -> None:
+    text = "Leverage was 3.5x and headcount 12k."
+    for quote in ("3.5x", "12k"):
+        with pytest.raises(ProgramError, match="not an exact span"):
+            run_program(program(("multiply", [ev(quote), {"constant": 1}])), [citation(text)])
+    loose = [(m.text, m.value, m.scale) for m in extract_numbers(text, loose=True)]
+    assert loose == [("3.5x", Decimal("3.5"), 1), ("12k", Decimal(12), 1000)]
