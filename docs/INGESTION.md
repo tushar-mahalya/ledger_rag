@@ -111,6 +111,33 @@ there is no transactional snapshot of a concurrently edited Volume file.
 Blank/malformed lines, duplicate document identities, wrong tenants and empty
 corpora fail explicitly without including document bodies in validation errors.
 
+## Evaluation dataset corpora
+
+ConvFinQA, TAT-QA and FinanceBench are fetched, checksum-verified and normalized
+offline into `data/<dataset>/normalized/documents.jsonl`, which uses the same
+Document JSONL contract. See [DATASETS.md](DATASETS.md) for provenance,
+licenses, measured statistics and recorded runs. Upload each corpus to a
+content-addressed path, named by its SHA-256, so the report's `input_sha256` can
+be checked against the local file:
+
+```bash
+SHA=$(sha256sum data/tatqa/normalized/documents.jsonl | cut -d' ' -f1)
+uv run --locked --group compute modal volume put ledger-data \
+  data/tatqa/normalized/documents.jsonl /datasets/tatqa/$SHA/documents.jsonl
+uv run --locked --group compute modal run compute/ingestion.py \
+  --source jsonl --input-path /data/datasets/tatqa/$SHA/documents.jsonl \
+  --tenant-id tatqa --collection tatqa_gte_modernbert_v1 \
+  --model-revision e7f32e3c00f91d699e8c43b53106206bcc72bb22
+```
+
+- ConvFinQA pages are byte-identical FinQA pages, so they reuse
+  `finqa_gte_modernbert_v1` and are never re-ingested.
+- FinanceBench is **evaluation-only** (CC-BY-NC-4.0).
+- JSONL reports record `input_path` and `input_sha256`, which is the digest of
+  the uploaded file. FinQA reports leave both `null`.
+- Modal mounts `/data` through a symlink. The input guard therefore compares
+  fully resolved paths.
+
 ## Integrity and failure behavior
 
 ```mermaid
