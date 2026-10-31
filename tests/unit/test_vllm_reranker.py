@@ -2,10 +2,12 @@ import importlib.util
 import json
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import Document, Principal, Profile, QueryRequest
@@ -88,13 +90,70 @@ async def test_voice_bypasses_without_voice_endpoint(
 async def test_invalid_scores_fail(
     settings: Settings, document: Document, principal: Principal, payload: object
 ) -> None:
-    wrapper = VllmRerankingRetriever(await _store(document), settings)
+    wrapper = VllmRerankingRetriever(
+        await _store(document), settings.model_copy(update={"reranker_url": "http://large"})
+    )
     await wrapper.client.aclose()
     wrapper.client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
     )
     with pytest.raises(ValueError):
         await wrapper.search(QueryRequest(question="Revenue"), principal)
+    await wrapper.close()
+
+
+PRODUCTION: dict[str, Any] = {
+    "environment": "production",
+    "auth_mode": "oidc",
+    "oidc_issuer": "https://issuer.example",
+    "oidc_audience": "ledger",
+    "oidc_jwks_url": "https://issuer.example/jwks",
+    "retrieval_backend": "qdrant",
+    "embedding_api_key": SecretStr("k"),
+    "provider": "openai",
+    "llm_api_key": SecretStr("k"),
+    "llm_model": "m",
+    "reranker_url": "https://large.example",
+}
+
+
+def test_production_rejects_plain_http_voice_endpoint() -> None:
+    production = Settings(**PRODUCTION, reranker_voice_url="https://small.example")
+    with pytest.raises(ValueError, match="must use HTTPS"):
+        Settings(**PRODUCTION, reranker_voice_url="http://small.internal")
+    with pytest.raises(ValueError, match="must use HTTPS"):
+        VllmRerankingRetriever(MemoryRetriever(), production, voice_url="http://small.internal")
+    with pytest.raises(ValueError, match="embedded credentials"):
+        VllmRerankingRetriever(MemoryRetriever(), production, voice_url="ftp://small.example")
+    wrapper = VllmRerankingRetriever(MemoryRetriever(), production)
+    assert wrapper.voice_url == "https://small.example"
+
+
+def test_development_still_validates_voice_endpoint_shape(settings: Settings) -> None:
+    with pytest.raises(ValueError, match="embedded credentials"):
+        Settings(demo_token=SecretStr("test-only-token"), reranker_voice_url="small.internal")
+    with pytest.raises(ValueError, match="embedded credentials"):
+        VllmRerankingRetriever(MemoryRetriever(), settings, voice_url="https://u:p@small")
+
+
+async def test_chat_bypasses_reranking_without_chat_endpoint(
+    settings: Settings, document: Document, principal: Principal
+) -> None:
+    store = await _store(document)
+    wrapper = VllmRerankingRetriever(store, settings, voice_url="http://small", voice_candidates=5)
+    hosts: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        hosts.append(request.url.host)
+        return httpx.Response(200, json=[{"index": 1, "score": 0.9}, {"index": 0, "score": 0.1}])
+
+    await wrapper.client.aclose()
+    wrapper.client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    query = QueryRequest(question="Revenue")
+    chat = await wrapper.search(query, principal)
+    assert [h.chunk.id for h in chat] == [h.chunk.id for h in await store.search(query, principal)]
+    await wrapper.search(QueryRequest(question="Revenue", profile=Profile.VOICE), principal)
+    assert hosts == ["small"]
     await wrapper.close()
 
 

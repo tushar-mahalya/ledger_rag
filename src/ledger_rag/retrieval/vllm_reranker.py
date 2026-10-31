@@ -1,8 +1,15 @@
 """Client for the Qwen3-Reranker vLLM proxy (``compute/reranker.py``).
 
 Same ``Retriever`` interface as ``RerankingRetriever``. Unlike the TEI wrapper,
-voice is not forced to bypass reranking: when ``voice_url`` is set (e.g. the 0.6B
-endpoint), voice requests use it with ``voice_candidates``. Chat uses ``url`` (e.g. 4B).
+voice is not forced to bypass reranking: when ``voice_url`` (default
+``settings.reranker_voice_url``) is set, e.g. to the 0.6B endpoint, voice requests use
+it with ``voice_candidates``. Chat uses ``settings.reranker_url`` (e.g. 4B).
+
+An empty URL means "no reranking" for that profile, as an empty ``reranker_url``
+does for the TEI wrapper (``make_retriever`` does not wrap the store): such
+requests return the inner retriever's results unchanged. Both URLs carry the same
+bearer key, so both are validated like ``Settings`` endpoints and must use HTTPS in
+production.
 """
 
 import math
@@ -10,7 +17,7 @@ import math
 import httpx
 from opentelemetry import trace
 
-from ledger_rag.core.config import Settings
+from ledger_rag.core.config import Settings, validate_service_url
 from ledger_rag.core.contracts import Retriever
 from ledger_rag.core.models import Chunk, Hit, Principal, Profile, QueryRequest
 from ledger_rag.ingestion.chunking import contextual_text
@@ -30,7 +37,7 @@ class VllmRerankingRetriever:
         inner: Retriever,
         settings: Settings,
         *,
-        voice_url: str = "",
+        voice_url: str | None = None,
         voice_candidates: int = 20,
         instruction: str = DEFAULT_INSTRUCTION,
     ) -> None:
@@ -38,6 +45,11 @@ class VllmRerankingRetriever:
             raise ValueError("voice_candidates must be between 1 and 100")
         if not instruction.strip() or len(instruction) > 500:
             raise ValueError("instruction must be nonempty and at most 500 characters")
+        voice_url = settings.reranker_voice_url if voice_url is None else voice_url
+        production = settings.environment == "production"
+        for endpoint in [settings.reranker_url, voice_url]:
+            if endpoint:
+                validate_service_url(endpoint, https=production)
         self.inner = inner
         self.url = settings.reranker_url.rstrip("/")
         self.voice_url = voice_url.rstrip("/")
@@ -53,7 +65,7 @@ class VllmRerankingRetriever:
     def _route(self, query: QueryRequest) -> tuple[str, int] | None:
         if query.profile == Profile.VOICE:
             return (self.voice_url, self.voice_candidates) if self.voice_url else None
-        return self.url, self.candidates
+        return (self.url, self.candidates) if self.url else None
 
     async def search(self, query: QueryRequest, principal: Principal) -> list[Hit]:
         route = self._route(query)

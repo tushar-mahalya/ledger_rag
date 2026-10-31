@@ -8,6 +8,22 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def validate_service_url(endpoint: str, *, https: bool = False) -> None:
+    """Reject non-HTTP(S) URLs and URLs carrying credentials, queries or fragments."""
+    parsed = urlsplit(endpoint)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Service endpoints must be HTTP URLs without embedded credentials")
+    if https and parsed.scheme != "https":
+        raise ValueError("Production reranker endpoints must use HTTPS")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LEDGER_",
@@ -39,6 +55,8 @@ class Settings(BaseSettings):
     qdrant_quantization: Literal["none", "scalar", "binary"] = "none"
     qdrant_oversampling: float = Field(default=2.0, ge=1.0, le=16.0)
     reranker_url: str = ""
+    # Optional voice-profile endpoint for VllmRerankingRetriever; receives the same key.
+    reranker_voice_url: str = ""
     reranker_api_key: SecretStr | None = None
     reranker_timeout_seconds: float = Field(default=3, gt=0, le=60)
     rerank_candidates: int = Field(default=20, ge=1, le=100)
@@ -86,24 +104,15 @@ class Settings(BaseSettings):
             self.llm_base_url,
             self.embedding_base_url,
             self.reranker_url,
+            self.reranker_voice_url,
             self.qdrant_url,
             self.oidc_jwks_url,
             self.otlp_endpoint,
             self.stt_base_url,
             self.tts_base_url,
         ]:
-            if not endpoint:
-                continue
-            parsed = urlsplit(endpoint)
-            if (
-                parsed.scheme not in {"http", "https"}
-                or not parsed.hostname
-                or parsed.username
-                or parsed.password
-                or parsed.query
-                or parsed.fragment
-            ):
-                raise ValueError("Service endpoints must be HTTP URLs without embedded credentials")
+            if endpoint:
+                validate_service_url(endpoint)
         if self.auth_mode == "demo" and (
             self.demo_token is None or len(self.demo_token.get_secret_value()) < 8
         ):
@@ -125,8 +134,9 @@ class Settings(BaseSettings):
                 raise ValueError("Production LLM endpoint must use HTTPS")
             if not self.embedding_base_url.startswith("https://"):
                 raise ValueError("Production embedding endpoint must use HTTPS")
-            if self.reranker_url and not self.reranker_url.startswith("https://"):
-                raise ValueError("Production reranker endpoint must use HTTPS")
+            for reranker in [self.reranker_url, self.reranker_voice_url]:
+                if reranker and not reranker.startswith("https://"):
+                    raise ValueError("Production reranker endpoints must use HTTPS")
             if not self.stt_base_url.startswith("https://") or not self.tts_base_url.startswith(
                 "https://"
             ):
