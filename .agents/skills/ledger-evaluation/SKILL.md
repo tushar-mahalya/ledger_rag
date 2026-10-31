@@ -30,6 +30,8 @@ description: "Use when running FinQA/FinanceBench benchmarks, retrieval ablation
 4. For real data, verify the fetch script's pinned checksums, complete ingestion
    and expected corpus/chunk counts before scoring. A partially populated index
    is not a valid baseline. Inspect existing job/results before restarting work.
+   FinQA `--limit` limits evaluation cases, **not ingestion**. There is no ingest
+   resume/dry-run flag; restarting attempts full-corpus upserts and embedding cost.
 5. Compare sparse, dense, hybrid and hybrid:rerank with identical queries. FinQA
    supports `--configs`, `--scopes company global`, `--limit`, and
    `--answer-modes`; confirm accepted values in current CLI/source.
