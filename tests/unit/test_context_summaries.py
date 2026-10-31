@@ -81,7 +81,13 @@ async def test_summaries_fail_fast_on_client_errors_and_bound_concurrency(tmp_pa
         stats = await summarize_documents(
             [page("bad"), page("empty")], tmp_path, client, attempts=2, base_delay=0
         )
-        assert stats == {"cached": 0, "generated": 0, "failed": 2}
+        assert stats == {
+            "cached": 0,
+            "generated": 0,
+            "failed": 2,
+            "failed: LLM returned HTTP 400": 1,
+            "failed: Empty summary": 1,
+        }
         with pytest.raises(ValueError, match="concurrency"):
             await summarize_documents([], tmp_path, client, concurrency=9)
     assert load_summaries(tmp_path) == {}

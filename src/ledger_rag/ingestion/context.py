@@ -276,8 +276,10 @@ async def summarize_documents(
         async with semaphore:
             try:
                 summary = await request(document)
-            except (SummaryError, KeyError, IndexError, TypeError, ValueError):
+            except (SummaryError, KeyError, IndexError, TypeError, ValueError) as error:
                 stats["failed"] += 1
+                reason = str(error) if isinstance(error, SummaryError) else type(error).__name__
+                stats[f"failed: {reason}"] = stats.get(f"failed: {reason}", 0) + 1
                 return
         target = _summary_file(cache_dir, key)
         record = {
