@@ -35,7 +35,8 @@ RERANKER_REVISION = "f7481e6055501a30fb19d090657df9ec1f79ab2c"
 CORPUS_SHA256 = "9b455b1b21167b4fee7592f9cc2a68e5d12a336473156137b5ef0692e442ae9d"
 EXPECTED_CHUNKS = 8611
 EMBED_PORT, RERANK_PORT = 8000, 8001
-GPU = "L4"
+# L4 preferred; fall back when L4 capacity is unavailable. The actual device is recorded.
+GPU = ["L4", "A10G", "L40S"]
 COMMANDS = ("retrieval", "answers")
 SECRET_ENV = {
     "LEDGER_QDRANT_URL",
@@ -194,6 +195,15 @@ async def tei_server(
                 await process.wait()
 
 
+def _gpu_name() -> str:
+    try:
+        return subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], text=True
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
 def _write_report(output: Path, report: dict[str, Any]) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(".tmp")
@@ -281,7 +291,8 @@ async def evaluate(commands: list[str], options: dict[str, Any]) -> dict[str, An
         "run_id": run_id,
         "started_at": datetime.now(UTC).isoformat(),
         "git_sha": options.get("git_sha", "unknown"),
-        "gpu": GPU,
+        "gpu": _gpu_name(),
+        "gpu_preference": GPU,
         "tei_image": TEI_IMAGE,
         "read_only": True,
         "options": {k: v for k, v in options.items() if "key" not in k},
