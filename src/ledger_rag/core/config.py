@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -79,6 +79,50 @@ class Settings(BaseSettings):
     vad_trailing_silence_ms: int = Field(default=500, ge=100, le=5000)
     vad_max_utterance_seconds: float = Field(default=15, ge=1, le=60)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    # Query planning (planning/*). planner_enabled=false restores single-query retrieval.
+    planner_enabled: bool = True
+    planner_rewrite_mode: Literal["llm", "deterministic"] = "llm"
+    planner_rewrite_timeout_seconds: float = Field(default=1.5, gt=0, le=10)
+    planner_rewrite_max_chars: int = Field(default=400, ge=50, le=1000)
+    planner_decompose: bool = True
+    planner_llm_decompose: bool = False
+    planner_max_subqueries: int = Field(default=4, ge=1, le=4)
+    planner_voice_max_subqueries: int = Field(default=2, ge=1, le=4)
+    planner_max_concurrency: int = Field(default=4, ge=1, le=8)
+    planner_rrf_k: int = Field(default=60, ge=1, le=1000)
+    planner_gazetteer_path: Path | None = None
+    planner_company_group_prefix: str = Field(default="company:", max_length=64)
+    planner_hard_company_filter: bool = False
+    decision_backend: Literal["heuristic", "laya"] = "heuristic"
+    decision_url: str = ""
+    decision_api_key: SecretStr | None = None
+    decision_chat_timeout_seconds: float = Field(default=0.4, gt=0, le=0.4)
+    decision_voice_timeout_seconds: float = Field(default=0.15, gt=0, le=0.15)
+    decision_min_confidence: float = Field(default=0.6, ge=0, le=1)
+
+    @field_validator("planner_gazetteer_path", mode="before")
+    @classmethod
+    def empty_gazetteer_path(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @model_validator(mode="after")
+    def validate_planner(self) -> "Settings":
+        if self.decision_backend == "laya":
+            parsed = urlsplit(self.decision_url)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("Laya decisions require an HTTP URL without credentials")
+            if self.decision_api_key is None:
+                raise ValueError("Laya decisions require LEDGER_DECISION_API_KEY")
+            if self.environment == "production" and parsed.scheme != "https":
+                raise ValueError("Production decision endpoint must use HTTPS")
+        return self
 
     @model_validator(mode="after")
     def validate_deployment(self) -> "Settings":
