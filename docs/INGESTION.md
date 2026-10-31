@@ -126,7 +126,7 @@ uv run --locked --group compute modal volume put ledger-data \
   data/tatqa/normalized/documents.jsonl /datasets/tatqa/$SHA/documents.jsonl
 uv run --locked --group compute modal run compute/ingestion.py \
   --source jsonl --input-path /data/datasets/tatqa/$SHA/documents.jsonl \
-  --tenant-id tatqa --collection tatqa_gte_modernbert_v1 \
+  --tenant-id tatqa --collection tatqa_gte_modernbert_v1_1 \
   --model-revision e7f32e3c00f91d699e8c43b53106206bcc72bb22
 ```
 

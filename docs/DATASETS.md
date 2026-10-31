@@ -11,7 +11,7 @@ on 2026-10-31.
 | Dataset | License (verified) | Usage | Ledger corpus | Qdrant collection |
 |---|---|---|---|---|
 | ConvFinQA | MIT | `train_ok` | FinQA pages (100% reuse) | `finqa_gte_modernbert_v1` (existing, untouched) |
-| TAT-QA | CC-BY-4.0 (attribution) | `train_ok` | 2,756 hybrid contexts | `tatqa_gte_modernbert_v1` |
+| TAT-QA | CC-BY-4.0 (attribution) | `train_ok` | 2,756 hybrid contexts | `tatqa_gte_modernbert_v1_1` |
 | FinanceBench open 150 | CC-BY-NC-4.0 | **`eval_only`** | 168 evidence pages | `financebench_gte_modernbert_v1` |
 
 > **FinanceBench is evaluation-only.** Its CC-BY-NC-4.0 license forbids
@@ -37,7 +37,7 @@ flowchart LR
     Normalize --> QA["normalized/questions.jsonl<br/>QAItem (gold labels only here)"]
     Docs -->|"modal volume put"| Volume["Modal Volume ledger-data<br/>/datasets/&lt;dataset&gt;/&lt;sha256&gt;/documents.jsonl"]
     Volume --> Ingest["compute/ingestion.py --source jsonl<br/>GPU TEI gte-modernbert-base@e7f32e3"]
-    Ingest --> TQC[("tatqa_gte_modernbert_v1")]
+    Ingest --> TQC[("tatqa_gte_modernbert_v1_1")]
     Ingest --> FBC[("financebench_gte_modernbert_v1")]
     FQ --> FinQAIngest["compute/ingestion.py --source finqa"] --> FQC[("finqa_gte_modernbert_v1")]
     Docs -. "ConvFinQA: 2,066/2,066 pages identical, no re-ingestion" .-> FQC
@@ -120,10 +120,12 @@ counts. Outputs are deterministic: rebuilding gives byte-identical files.
 | Output | `documents.jsonl` SHA-256 | `questions.jsonl` SHA-256 |
 |---|---|---|
 | ConvFinQA | `84a5891e93ec3226b2d770604ab50a52c0a8e5a753fa72ff35d75ffcec493231` | `b840c22424baad67a3db499789aedde9edc38c4abbab03487d24223113b468d9` |
-| TAT-QA | `3e513b5a28cb224d7a422f8aa15204a66a82c0d3df8fc58f8d2758d1abe422f1` | `615588aa90f6ceb0ce7d93d9d0c8aaf03f720223e44fd4db0d430ebe655ead65` |
+| TAT-QA | `7ead97b1522a9c50a0e113fb9e1ad2af10102acb4493b002b1f63eb50b607fcb` | `615588aa90f6ceb0ce7d93d9d0c8aaf03f720223e44fd4db0d430ebe655ead65` |
 | FinanceBench | `7e6c4fa1a8c5a7e7834cf327a8fd1f6428dc3237d5acb5681cdc2d329eacd212` | `6f10edceeaabfbe9cf054b87aecff9308ff0e1b24de2636ea197163adb6e986d` |
 
-These digests are for adapter version 1. A change to an adapter changes them.
+These digests are for adapter version 2. Version 2 changed only TAT-QA table
+header detection; the ConvFinQA and FinanceBench outputs are identical to
+version 1. A change to an adapter changes them.
 
 ## Normalized schema
 
@@ -211,9 +213,56 @@ latest year found in the detected header rows. `published_at` approximates it as
 31 December, following the FinQA convention. Contexts without a header year use
 1970-01-01, so `as_of` filters never hide them.
 
-- 2,392 of 2,756 contexts have a header year. 2,203 of them are 2019.
+- 2,389 of 2,756 contexts have a header year. 2,204 of them are 2019.
 - 15 contexts get a year of 2021 or later. These are probably maturity-schedule
   columns, so treat their dates as heuristic.
+
+TAT-QA tables carry no header flag, so `header_rows` is inferred. Header rows are
+the leading rows whose non-empty value cells (every column after the first) are
+all labels or period tokens. The first row with any data value starts the body,
+and so does a label-only section row such as `Current:`.
+
+- Data values are numbers with optional currency, sign, parentheses, percent,
+  unit suffixes (`3,460.0p`, `2.5x`) and trailing footnote markers (`$29,146 *`,
+  `74,100 (1)`, `97.28 (ii)`).
+- Value ranges with a percent, decimal, currency or separator (`64% - 69%`) are
+  data, and so are year-less ordinal dates (`11th June`).
+- Dash and nil cells are data: `-`, `—`, `–`, `- -`, `$—`, `n/a`, `nil`, `None`.
+- Header tokens are bare years, `FY2019`, `2019 vs 2018`, spaced or footnoted
+  years (`2 0 1 8`, `2018 1`), integer year or maturity ranges (`2021-2022`,
+  `1 - 3`), `December 31`, `Q1`, `%` and other labels.
+
+Adapter version 1 used a narrower numeric pattern that let footnoted, suffixed,
+dash and range cells pass as header labels. For example, the "Global Technology
+Services external revenue" row of `tatqa/d37c6159-…` was merged into the header.
+Version 2 changed `header_rows` for **28 of 2,756 tables**: 24 shrank and 4 grew
+because a spaced or footnoted year row is now kept in the header. These tables are
+gold evidence for 132 questions (118 train, 11 dev, 3 test).
+
+| `header_rows` | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| v1 tables | 803 | 1,502 | 383 | 50 | 10 | 5 | 2 | 1 |
+| v2 tables | 813 | 1,507 | 374 | 49 | 9 | 1 | 2 | 1 |
+
+The changes from v1 to v2 were:
+
+| From → to | Tables |
+|---|---|
+| 3 → 2 | 10 |
+| 2 → 1 | 6 |
+| 6 → 1 | 3 |
+| 1 → 3 | 2 |
+| 3 → 1 | 2 |
+| 1 → 2 | 1 |
+| 2 → 3 | 1 |
+| 4 → 1 | 1 |
+| 5 → 1 | 1 |
+| 6 → 2 | 1 |
+
+All 28 changed tables were reviewed by hand. One known limitation remains: full
+dates with a year in a body row, such as the `30 Nov 2018` "Grant date" row of
+`tatqa/000abf67-…`, look exactly like period headers such as
+`31 December 2019`, so they can still join the header.
 
 Question mapping:
 
@@ -233,7 +282,7 @@ Question mapping:
 The upstream README advertises 16,552 questions and 2,757 contexts. The pinned
 files contain the counts shown above. Table uids and question uids are unique
 across splits. The corpus has 2,756 table units, 13,154 paragraph units and
-4,334 production chunks.
+4,335 production chunks.
 
 ### FinanceBench open 150: evidence-page pool (eval only)
 
@@ -273,36 +322,42 @@ converter remains the path for independently prepared filing corpora.
 
 ## Modal ingestion runs (2026-10-31)
 
-Both runs used the same configuration:
+The current runs used the same configuration:
 
 - Command: `compute/ingestion.py --source jsonl`.
 - Embedding space: `tei-1.8-float16:Alibaba-NLP/gte-modernbert-base@e7f32e3c00f91d699e8c43b53106206bcc72bb22`.
 - Image: TEI image `ghcr.io/huggingface/text-embeddings-inference:89-1.8`.
 - Quantization: `none`.
-- Code: git `924d4f69dc1c08aa62aa9b247cea84a68d074a25`.
+- Code: TAT-QA at git `02181149db8956a27eeced627d7143b8ac70cc75` (adapter v2) and
+  FinanceBench at `924d4f69dc1c08aa62aa9b247cea84a68d074a25`.
 
 Inputs were uploaded to content-addressed Volume paths:
 
 ```bash
 uv run --locked --group compute modal volume put ledger-data \
   data/tatqa/normalized/documents.jsonl \
-  /datasets/tatqa/3e513b5a28cb224d7a422f8aa15204a66a82c0d3df8fc58f8d2758d1abe422f1/documents.jsonl
+  /datasets/tatqa/7ead97b1522a9c50a0e113fb9e1ad2af10102acb4493b002b1f63eb50b607fcb/documents.jsonl
 uv run --locked --group compute modal run compute/ingestion.py --source jsonl \
-  --input-path /data/datasets/tatqa/3e513b5a28cb224d7a422f8aa15204a66a82c0d3df8fc58f8d2758d1abe422f1/documents.jsonl \
-  --tenant-id tatqa --collection tatqa_gte_modernbert_v1 \
+  --input-path /data/datasets/tatqa/7ead97b1522a9c50a0e113fb9e1ad2af10102acb4493b002b1f63eb50b607fcb/documents.jsonl \
+  --tenant-id tatqa --collection tatqa_gte_modernbert_v1_1 \
   --model-revision e7f32e3c00f91d699e8c43b53106206bcc72bb22
 ```
 
 | Collection | Modal app | Run id | Docs | Chunks (expected) | Batches | Ingest s | CLI wall s | Corpus fingerprint |
 |---|---|---|---|---|---|---|---|---|
-| `tatqa_gte_modernbert_v1` | `ap-vI9d5j3w8uSOLMsO3vv1SZ` | `e2fdb5ef94ee420da1868c44c28f42ec` | 2,756 | 4,334 (4,334) | 35 | 192.51 | 220 | `3e688b890ce8bb96495046539c3509be94a211fd08712325750fc1c269ee5623` |
+| `tatqa_gte_modernbert_v1_1` | `ap-MTVYcKA3N4YHF1W8G4DAJB` | `2dedd39b6dcc45dc807dd343d80c24c7` | 2,756 | 4,335 (4,335) | 35 | 81.34 | 106 | `ffa637d962eaef85b96f332e98bffaff9202ee632633513bbe57d9ec9587fca2` |
 | `financebench_gte_modernbert_v1` | `ap-BNuGLYjAkM7b37Eq1HfWMp` | `aa350ca78ffc46078e89d5c45f9617cb` | 168 | 338 (338) | 3 | 7.61 | 31 | `5a616956c0b97f5fe1565aff3b74681ecb13d2ad4a7933e1f3d59e3af63ecf98` |
 
-Both reports have `status: verified`, meaning the Qdrant point count exactly
+Both current reports have `status: verified`, meaning the Qdrant point count exactly
 matches the uploaded chunk count. Each report's `input_sha256` equals the local
 `documents.jsonl` digest. The reports are stored at
 `/data/ingestion/<run id>.json` in `ledger-data`. "Ingest s" is the report's
 ingest and verification time. "CLI wall s" is the local end-to-end `modal run` time, including startup.
+
+**Superseded:** `tatqa_gte_modernbert_v1` (run `e2fdb5ef94ee420da1868c44c28f42ec`,
+app `ap-vI9d5j3w8uSOLMsO3vv1SZ`) used adapter v1 input `3e513b5a…e422f1`. It has
+2,756 documents and 4,334 chunks, and its headers include the misdetected rows
+described above. Do not evaluate against it. Delete it after `feat/datasets` merges.
 
 The first TAT-QA attempt, run `2f79a2ecd4a249c7b111c909412fff0e`
 (`ap-ouvljyNiq4vcZXp3rnsLYS`), failed before claiming a collection. Modal mounts
@@ -327,7 +382,7 @@ recreated or deleted.
     percentages, so FinQA's ×100 tolerance applies.
   - For a non-teacher-forced setting, replace the assistant turns with model outputs.
 - **TAT-QA:**
-  - Use tenant `tatqa` and collection `tatqa_gte_modernbert_v1`. No company
+  - Use tenant `tatqa` and collection `tatqa_gte_modernbert_v1_1`. No company
     scope exists, so only global retrieval is meaningful.
   - Combine `scale` and `answer_type` for numeric checks. For example, `percent`
     with answer `2` means 2%, and `million` scales magnitudes.
