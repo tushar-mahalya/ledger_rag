@@ -148,6 +148,32 @@ These are **design targets to measure against**, not claims about the current bo
 
 ## 7. Summary of explicit gaps and uncertainties (do not treat as resolved)
 
+### Implementation update: optional Qdrant quantization (2026-10-31)
+
+`LEDGER_QDRANT_QUANTIZATION=scalar` provisions INT8 scalar quantization (quantile
+0.99); `binary` provisions binary quantization. New compressed collections keep
+original dense vectors on disk and quantized vectors in RAM. Dense prefetch uses
+full-precision rescoring with `LEDGER_QDRANT_OVERSAMPLING` (default 2.0, range
+1.0-16.0). Sparse retrieval and tenant/ACL/publication filters are unchanged.
+`none` explicitly bypasses any quantized index, permitting a full-precision
+baseline on the same collection.
+
+Existing collections are **never reconfigured by readiness checks or ingestion**.
+If an enabled mode disagrees with the effective dense-vector configuration
+(including named-vector overrides), requests fail before embedding/search.
+Provision a separate versioned collection or perform an operator-controlled
+migration, wait for optimizer completion, then switch configuration. Do not have
+replicas with conflicting settings rewrite a shared index on startup.
+
+[Qdrant's quantization documentation](https://qdrant.tech/documentation/guides/quantization/)
+describes the mechanism, not a measured improvement for this corpus. Rescoring
+can add disk I/O and latency. Binary quantization is experimental for 768-dimensional
+ModernBERT vectors: compare Recall@k/nDCG, p95/p99, RAM and disk against `none`
+on the same frozen dev set before promotion. Unit/wire tests do not establish
+compression quality, ANN utilization, or FinQA accuracy.
+
+### Outstanding research caveats
+
 1. Live `sec.gov` pages returned 403 in this research session; SEC facts rely on a Wayback Archive mirror (~1 month old at access time) rather than a live fetch.
 2. FinanceMath's exact license string is unconfirmed (secondary-sourced only).
 3. FinDER's association with a named academic shared task (ICAIF/ACM) is unconfirmed from a primary conference source.

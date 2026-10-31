@@ -54,6 +54,7 @@ async def store() -> tuple[QdrantRetriever, AsyncMock, list[httpx.Request]]:
                 sparse_vectors={"sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)},
             ),
             metadata=dict(retriever._identity),
+            quantization_config=None,
         )
     )
     client.retrieve.return_value = []
@@ -140,7 +141,97 @@ async def test_collection_creation_and_readiness_reachability() -> None:
     assert kwargs["metadata"]["embedding_model"] == "test-embedding"
     client.get_collection.side_effect = RuntimeError("unreachable")
     assert not await retriever.ready()
+    client.update_collection.assert_not_called()
     await retriever.close()
+
+
+@pytest.mark.parametrize("mode", ["none", "scalar", "binary"])
+async def test_quantization_creation_and_dense_only_rescoring(mode: str) -> None:
+    retriever, client, _ = await store()
+    retriever._settings = retriever._settings.model_copy(
+        update={"qdrant_quantization": mode, "qdrant_oversampling": 3.0}
+    )
+    client.collection_exists.return_value = False
+    expected = retriever._quantization()
+    client.get_collection.return_value.config.quantization_config = expected
+    try:
+        assert await retriever.ready()
+        kwargs = client.create_collection.call_args.kwargs
+        assert kwargs["quantization_config"] == expected
+        assert kwargs["vectors_config"]["dense"].on_disk == (True if mode != "none" else None)
+        if mode == "scalar":
+            assert isinstance(expected, models.ScalarQuantization)
+            assert expected.scalar.type == models.ScalarType.INT8
+            assert expected.scalar.quantile == 0.99
+            assert expected.scalar.always_ram
+        elif mode == "binary":
+            assert isinstance(expected, models.BinaryQuantization)
+            assert expected.binary.always_ram
+        else:
+            assert expected is None
+        await retriever.search(
+            QueryRequest(question="revenue"), Principal(subject="user", tenant_id="tenant")
+        )
+        dense, sparse = client.query_points.call_args.kwargs["prefetch"]
+        assert dense.params.quantization.ignore == (mode == "none")
+        assert dense.params.quantization.rescore is True
+        assert dense.params.quantization.oversampling == 3.0
+        assert sparse.params is None
+        assert dense.filter == sparse.filter
+        client.update_collection.assert_not_called()
+    finally:
+        await retriever.close()
+
+
+@pytest.mark.parametrize("named_override", [None, models.Disabled.DISABLED])
+async def test_quantization_mismatch_fails_without_mutating_collection(
+    named_override: models.Disabled | None,
+) -> None:
+    retriever, client, requests = await store()
+    retriever._settings = retriever._settings.model_copy(update={"qdrant_quantization": "scalar"})
+    config = client.get_collection.return_value.config
+    if named_override is not None:
+        config.quantization_config = retriever._quantization()
+        config.params.vectors["dense"].quantization_config = named_override
+    try:
+        with pytest.raises(RetrievalError, match="migrate the collection explicitly"):
+            await retriever.search(
+                QueryRequest(question="revenue"), Principal(subject="user", tenant_id="tenant")
+            )
+        assert not await retriever.ready()
+        assert not requests
+        client.update_collection.assert_not_called()
+        client.query_points.assert_not_called()
+    finally:
+        await retriever.close()
+
+
+async def test_named_quantization_overrides_global_and_none_can_bypass_it() -> None:
+    retriever, client, _ = await store()
+    retriever._settings = retriever._settings.model_copy(update={"qdrant_quantization": "scalar"})
+    config = client.get_collection.return_value.config
+    config.params.vectors["dense"].quantization_config = retriever._quantization()
+    config.quantization_config = models.BinaryQuantization(
+        binary=models.BinaryQuantizationConfig(always_ram=True)
+    )
+    try:
+        assert await retriever.ready()
+        retriever._settings = retriever._settings.model_copy(update={"qdrant_quantization": "none"})
+        assert await retriever.ready()
+        await retriever.search(
+            QueryRequest(question="revenue"), Principal(subject="user", tenant_id="tenant")
+        )
+        dense = client.query_points.call_args.kwargs["prefetch"][0]
+        assert dense.params.quantization.ignore is True
+        client.update_collection.assert_not_called()
+    finally:
+        await retriever.close()
+
+
+@pytest.mark.parametrize("oversampling", [0.5, 17.0, float("nan"), float("inf")])
+def test_quantization_rejects_invalid_oversampling(oversampling: float) -> None:
+    with pytest.raises(ValueError):
+        Settings(demo_token=SecretStr("demo-test-token"), qdrant_oversampling=oversampling)
 
 
 @pytest.mark.parametrize("mismatch", ["dimensions", "model", "identity", "sparse"])

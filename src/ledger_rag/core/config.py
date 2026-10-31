@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     embedding_query_prefix: str = Field(default="", max_length=200)
     retrieval_fusion: Literal["hybrid", "dense", "sparse"] = "hybrid"
     embedding_batch_size: int = Field(default=32, ge=1, le=2048)
+    qdrant_quantization: Literal["none", "scalar", "binary"] = "none"
+    qdrant_oversampling: float = Field(default=2.0, ge=1.0, le=16.0)
     reranker_url: str = ""
     reranker_api_key: SecretStr | None = None
     reranker_timeout_seconds: float = Field(default=3, gt=0, le=60)

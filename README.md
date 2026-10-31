@@ -128,6 +128,7 @@ Secrets are read at startup: rotate files, then roll the application instances.
 | Anthropic-compatible LLM | `LEDGER_PROVIDER=anthropic`, messages-compatible base URL, model and key |
 | Dense embeddings | `LEDGER_EMBEDDING_BASE_URL`, model, matching dimensions and API key |
 | Persistent index | `LEDGER_RETRIEVAL_BACKEND=qdrant`, URL/collection and optional API key |
+| Dense index compression | `LEDGER_QDRANT_QUANTIZATION=none` (default), `scalar`, or experimental `binary`; `LEDGER_QDRANT_OVERSAMPLING=2.0` |
 | Cross-encoder | Optional `LEDGER_RERANKER_URL` (TEI base URL) and API key |
 | Production identity | OIDC issuer, audience, JWKS URL and signed `tenant_id`, `roles`, `groups` claims |
 | Vault | Vault address, workload AppRole bootstrap or production workload identity, least-privilege policy |

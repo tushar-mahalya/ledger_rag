@@ -80,11 +80,13 @@ class QdrantRetriever:
                         "dense": models.VectorParams(
                             size=self._settings.embedding_dimensions,
                             distance=models.Distance.COSINE,
+                            on_disk=True if self._settings.qdrant_quantization != "none" else None,
                         )
                     },
                     sparse_vectors_config={
                         "sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)
                     },
+                    quantization_config=self._quantization(),
                     metadata=self._identity,
                 )
             info = await self._client.get_collection(self._collection)
@@ -103,6 +105,29 @@ class QdrantRetriever:
                 or any(metadata.get(key) != value for key, value in self._identity.items())
             ):
                 raise RetrievalError("Qdrant collection embedding/schema identity is incompatible")
+            if self._settings.qdrant_quantization != "none":
+                quantization = vectors["dense"].quantization_config
+                if quantization is None:
+                    quantization = info.config.quantization_config
+                if quantization != self._quantization():
+                    raise RetrievalError(
+                        "Qdrant quantization configuration is incompatible; "
+                        "provision or migrate the collection explicitly"
+                    )
+
+    def _quantization(self) -> models.QuantizationConfig | None:
+        mode = self._settings.qdrant_quantization
+        if mode == "scalar":
+            return models.ScalarQuantization(
+                scalar=models.ScalarQuantizationConfig(
+                    type=models.ScalarType.INT8, quantile=0.99, always_ram=True
+                )
+            )
+        if mode == "binary":
+            return models.BinaryQuantization(
+                binary=models.BinaryQuantizationConfig(always_ram=True)
+            )
+        return None
 
     async def _embed(self, texts: list[str]) -> list[list[float]]:
         size = self._settings.embedding_batch_size
@@ -271,8 +296,17 @@ class QdrantRetriever:
         prefetch: list[models.Prefetch] = []
         if fusion in {"hybrid", "dense"}:
             dense = (await self._embed([self._settings.embedding_query_prefix + query.question]))[0]
+            params = models.SearchParams(
+                quantization=models.QuantizationSearchParams(
+                    ignore=self._settings.qdrant_quantization == "none",
+                    rescore=True,
+                    oversampling=self._settings.qdrant_oversampling,
+                )
+            )
             prefetch.append(
-                models.Prefetch(query=dense, using="dense", filter=query_filter, limit=limit)
+                models.Prefetch(
+                    query=dense, using="dense", filter=query_filter, limit=limit, params=params
+                )
             )
         if fusion in {"hybrid", "sparse"}:
             prefetch.append(
