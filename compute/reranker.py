@@ -237,14 +237,20 @@ def _percentile(values: list[float], fraction: float) -> float:
     secrets=SECRETS, cpu=1, timeout=1800, image=modal.Image.debian_slim().pip_install("httpx")
 )
 def measure(
-    url: str, queries: list[str], documents: list[str], sizes: list[int], samples: int
+    url: str,
+    queries: list[str],
+    documents: list[str],
+    sizes: list[int],
+    samples: int,
+    probes: list[tuple[str, list[str]]] | None = None,
 ) -> dict[str, Any]:
     """Client-observed latency from inside Modal (no local secret handling)."""
     import httpx
 
     headers = {"Authorization": f"Bearer {os.environ['TEI_API_KEY']}"}
     report: dict[str, Any] = {}
-    with httpx.Client(base_url=url, headers=headers, timeout=900) as client:
+    # Modal answers requests still pending after ~150 s (cold start) with 303 redirects.
+    with httpx.Client(base_url=url, headers=headers, timeout=900, follow_redirects=True) as client:
         start = time.perf_counter()
         client.post(
             "/rerank", json={"query": queries[0], "texts": documents[:2]}
@@ -256,6 +262,20 @@ def measure(
             headers={"Authorization": "Bearer wrong"},
         )
         report["unauthorized_status"] = unauthorized.status_code
+        # Sanity probe: position 0 holds a chunk of the question's gold page.
+        ranks = []
+        for question, texts in probes or []:
+            response = client.post("/rerank", json={"query": question, "texts": texts})
+            response.raise_for_status()
+            order = [item["index"] for item in response.json()]
+            ranks.append(order.index(0) + 1)
+        if ranks:
+            report["probe"] = {
+                "cases": len(ranks),
+                "candidates": len(probes[0][1]) if probes else 0,
+                "gold_top1": round(sum(rank == 1 for rank in ranks) / len(ranks), 3),
+                "gold_mrr": round(sum(1 / rank for rank in ranks) / len(ranks), 3),
+            }
         for size in sizes:
             totals: list[float] = []
             upstream: list[float] = []
@@ -297,7 +317,12 @@ def bench(models: str = "0.6b,4b", samples: int = 30, sizes: str = "20,50") -> N
         if 1650 <= len(chunk.text) <= 1800
     ][:400]
     queries = [case.question for case in cases[:100]]
-    size_list = [int(size) for size in sizes.split(",")]
+    probes = []
+    for number, case in enumerate(cases[:40]):
+        gold = chunk_document(corpus.documents[case.document_id])
+        distractors = documents[number * 5 : number * 5 + 19]
+        probes.append((case.question, [contextual_text(gold[0]), *distractors]))
+    size_list = [int(size) for size in sizes.split(",") if size]
     servers = {"0.6b": Qwen3Reranker06B, "4b": Qwen3Reranker4B}
     results: dict[str, Any] = {
         "document_chars_mean": round(sum(map(len, documents)) / len(documents)),
@@ -309,7 +334,7 @@ def bench(models: str = "0.6b,4b", samples: int = 30, sizes: str = "20,50") -> N
             raise SystemExit("Reranker web endpoint has no URL")
         results[key] = {
             "gpu": GPU[key],
-            **measure.remote(url, queries, documents, size_list, samples),
+            **measure.remote(url, queries, documents, size_list, samples, probes),
         }
         print(json.dumps({key: results[key]}, indent=2), flush=True)
     print(json.dumps(results, indent=2))
