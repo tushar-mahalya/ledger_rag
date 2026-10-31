@@ -10,12 +10,16 @@ from pydantic import SecretStr
 from ledger_rag.core.models import Chunk, Document, Hit
 from ledger_rag.evaluation.benchmarks.finqa import (
     Case,
-    answer_correct,
+    Corpus,
     bench_settings,
+    corpus_sha256,
+    gold_label_audit,
+    holdout_views,
+    load,
     main,
-    numbers,
     page_document,
     page_metrics,
+    require_valid_gold,
     summarize,
     table_markdown,
 )
@@ -103,43 +107,83 @@ def _hit(document_id: str, text: str) -> Hit:
     )
 
 
-def test_page_metrics_rank_and_evidence() -> None:
-    case = Case("q", "?", "gold", "ACME", ["row a", "row b"], 1.0, "")
-    hits = [_hit("other", "row a"), _hit("other", "x"), _hit("gold", "row a and more")]
-    metrics = page_metrics(hits, case)
-    assert metrics["page_hit@1"] == 0.0
-    assert metrics["page_hit@3"] == 1.0
-    assert metrics["page_mrr@10"] == pytest.approx(0.5)
-    assert metrics["evidence_recall@5"] == 0.5
-    assert page_metrics([], case)["page_mrr@10"] == 0.0
+def test_page_metrics_rank_and_gold_unit_evidence() -> None:
+    document, units = page_document(EXAMPLE)
+    corpus = Corpus(documents={document.id: document}, units={document.id: units})
+    evidence = corpus.evidence(document.id)
+    gold = evidence.chunks[0]
+    case = Case("q", "?", document.id, "ACME", [units["table_1"]], 1.0, "", gold_keys=["table_1"])
+    other = _hit("other", "| net sales | $ 120 | $ 100 |")  # same text, wrong chunk identity
+    hits = [other, _hit("x", "x"), Hit(chunk=gold, score=1.0)]
+    metrics = page_metrics(hits, case, evidence)
+    assert metrics["page_recall@1"] == 0.0
+    assert metrics["page_recall@3"] == 1.0
+    assert metrics["page_mrr@10"] == pytest.approx(1 / 3)
+    # Substring matches in a different chunk earn no credit; identity does.
+    assert metrics["evidence_recall@1"] == 0.0
+    assert metrics["evidence_recall@3"] == 1.0
+    assert metrics["evidence_precision@3"] == pytest.approx(1 / 3)
+    assert metrics["evidence_mrr@10"] == pytest.approx(1 / 3)
+    assert page_metrics([], case, evidence)["page_mrr@10"] == 0.0
+    no_gold = Case("q", "?", document.id, "ACME", [], 1.0, "")
+    assert page_metrics(hits, no_gold, evidence)["evidence_recall@5"] is None
 
 
-@pytest.mark.parametrize(
-    "text,gold,expected",
-    [
-        ("20.0% [C1]. Inputs were 120 and 100.", 0.2, True),
-        ("The change was 14.14 percent [C1]", 14.1422, True),
-        ("$1,234.5 million [C1]", 1234.5, True),
-        ("-3.2% decline [C1]", -0.032, True),
-        ("100 and then 20% [C1]", 0.2, False),
-        ("yes, it increased [C1]", "yes", True),
-        ("no [C1]", "yes", False),
-        ("no numbers here", 3.0, False),
-    ],
-)
-def test_answer_correct(text: str, gold: float | str, expected: bool) -> None:
-    assert answer_correct(text, gold) is expected
-
-
-def test_numbers_ignore_citation_markers() -> None:
-    assert numbers("[C12] total 1,000 and 2.5") == [1000.0, 2.5]
-
-
-def test_summarize_bootstrap_bounds() -> None:
-    result = summarize([{"m": 1.0}, {"m": 0.0}, {"m": 1.0}, {"m": 1.0}])
-    assert result["m"]["mean"] == 0.75
+def test_summarize_clusters_by_report() -> None:
+    result = summarize([{"m": 1.0}, {"m": 0.0}, {"m": 1.0}, {"m": None}], ["a", "a", "b", "b"])
+    assert result["m"]["mean"] == pytest.approx(2 / 3, abs=1e-4)
+    assert result["m"]["clusters"] == 2
+    assert result["m"]["ineligible"] == 1
     low, high = result["m"]["ci95"]
-    assert 0 <= low <= 0.75 <= high <= 1
+    assert 0 <= low <= result["m"]["mean"] <= high <= 1
+
+
+def _write_splits(tmp_path: Path, gold_inds: dict[str, str] | None) -> None:
+    for page, split in enumerate(("train", "dev", "test"), 1):
+        qa: dict[str, object] = {"question": f"{split}?", "exe_ans": 1.0, "answer": "1"}
+        if gold_inds is not None:
+            qa["gold_inds"] = gold_inds
+        company = "ACME" if split != "dev" else "NEWCO"
+        row = {**EXAMPLE, "filename": f"{company}/2020/page_{page}.pdf", "id": split, "qa": qa}
+        (tmp_path / f"{split}.json").write_text(json.dumps([row]))
+
+
+def test_unknown_and_missing_gold_keys_are_counted_and_fail_loudly(tmp_path: Path) -> None:
+    _write_splits(tmp_path, {"text_0": "x", "table_9": "missing row"})
+    _, cases = load(tmp_path, "dev")
+    assert cases[0].gold_keys == ["text_0"]
+    assert cases[0].unknown_gold_keys == ["table_9"]
+    audit = gold_label_audit(cases)
+    assert audit["unknown_gold_keys"] == 1
+    assert audit["cases_with_unknown_gold_keys"] == ["dev"]
+    with pytest.raises(ValueError, match="unknown keys"):
+        require_valid_gold(cases)
+    _write_splits(tmp_path, None)
+    _, cases = load(tmp_path, "dev")
+    assert gold_label_audit(cases)["cases_missing_gold_inds"] == 1
+    with pytest.raises(ValueError, match="missing gold_inds"):
+        require_valid_gold(cases)
+
+
+def test_holdout_views_are_company_and_report_disjoint(tmp_path: Path) -> None:
+    _write_splits(tmp_path, {"text_0": "x"})
+    corpus, cases = load(tmp_path, "dev")
+    views = holdout_views(corpus, cases)
+    assert views["company_unseen_in_train"] == {"dev"}
+    assert views["report_unseen_in_train"] == {"dev"}
+    assert views["company_fold_holdout"] | views["company_fold_selection"] == {"dev"}
+    assert cases[0].report == "NEWCO/2020"
+
+
+def test_rebuilt_corpus_fingerprint_matches_bulk_ingestion_definition(tmp_path: Path) -> None:
+    import hashlib
+
+    _write_splits(tmp_path, {"text_0": "x"})
+    corpus, _ = load(tmp_path, "dev")
+    digest = hashlib.sha256()
+    for document in corpus.documents.values():
+        digest.update(document.model_dump_json().encode() + b"\n")
+    assert corpus_sha256(corpus) == digest.hexdigest()
 
 
 @pytest.mark.parametrize(
@@ -187,14 +231,17 @@ def test_cli_split_selects_questions_but_preserves_full_corpus(
     argv = ["finqa", "stats", "--data", str(tmp_path), "--output", str(output), "--limit", "1"]
     if selected_split is not None:
         argv.extend(["--split", selected_split])
+    if selected_split == "test":
+        argv.append("--unseal-test")
     monkeypatch.setattr(sys, "argv", argv)
     main()
     dataset = json.loads(output.read_text())["dataset"]
-    effective_split = selected_split or "test"
+    effective_split = selected_split or "dev"
     assert dataset["corpus_pages"] == 3
     assert dataset["question_split"] == effective_split
     assert dataset["split_questions"] == sizes[effective_split]
     assert dataset["selected_questions"] == 1
+    assert dataset["test_split_unsealed"] is (effective_split == "test")
     if effective_split == "test":
         assert dataset["test_questions"] == 1
     else:
@@ -203,6 +250,26 @@ def test_cli_split_selects_questions_but_preserves_full_corpus(
 
 def test_cli_rejects_negative_case_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["finqa", "stats", "--limit", "-1"])
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2
+
+
+def test_cli_test_split_is_sealed_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["finqa", "stats", "--split", "test"])
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [["--configs", "hybrid:bogus"], ["--answer-modes", "retrieved@0"], ["--llm-concurrency", "9"]],
+)
+def test_cli_rejects_invalid_arms_modes_and_concurrency(
+    extra: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["finqa", "stats", *extra])
     with pytest.raises(SystemExit) as error:
         main()
     assert error.value.code == 2

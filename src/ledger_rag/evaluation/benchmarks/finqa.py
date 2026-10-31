@@ -5,8 +5,9 @@ written by finance experts over real S&P 500 earnings-report pages (prose + tabl
 
 Corpus: every unique report page from train, dev and test is ingested, so held-out
 test questions compete against thousands of real distractor pages.
-Questions: select train/dev/test with --split (default test for compatibility).
-Use dev for architecture selection; held-out test is reporting-only.
+Questions: select train/dev/test with --split (default dev). The test split is
+sealed: selecting it requires --unseal-test and is recorded in the report. Use dev
+for architecture selection; held-out test is reporting-only.
 
 Retrieval scopes (see docs/EVALUATION.md):
 - ``global``: open retrieval over the whole corpus. Many FinQA questions do not name
@@ -14,18 +15,19 @@ Retrieval scopes (see docs/EVALUATION.md):
 - ``company``: retrieval scoped to the filer, as a product would after the caller or
   chat session selects a company. Scoping reuses the production ACL group filter.
 
-Answer accuracy runs the real RagService harness (system prompt, citation validation,
-calculator tool loop) against any OpenAI- or Anthropic-compatible endpoint.
+Answer accuracy (see finqa_answers.py) sends retrieved or oracle context to an
+OpenAI-compatible endpoint with a structured final-answer contract and scores only
+the parsed ``ANSWER:`` line.
 """
 
 import argparse
 import asyncio
+import hashlib
 import json
-import math
 import os
-import random
 import re
-import statistics
+import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import date
@@ -36,13 +38,17 @@ from pydantic import SecretStr
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.contracts import Retriever
-from ledger_rag.core.models import Answer, Chunk, Document, Hit, Principal, Profile, QueryRequest
+from ledger_rag.core.models import Chunk, Document, Hit, Principal, QueryRequest
+from ledger_rag.evaluation.evidence import DocumentEvidence, evidence_metrics, map_units
+from ledger_rag.evaluation.uncertainty import latency, paired_cluster_difference, summarize_rows
 from ledger_rag.ingestion.chunking import chunk_document
 
 TENANT = "finqa"
 SOURCE = "https://github.com/czyssrs/FinQA"
 DATASET_COMMIT = "0f16e2867befa6840783e58be38c9efb9229d742"
-ANSWER_FORMAT = " Begin the answer with the final numeric result."
+SPLITS = ("train", "dev", "test")
+# Deterministic company folds: ~20% of companies form a company-disjoint holdout view.
+HOLDOUT_FOLDS = 5
 
 
 @dataclass
@@ -54,6 +60,15 @@ class Case:
     gold_units: list[str]
     answer: float | str
     program: str
+    gold_keys: list[str] = field(default_factory=list)
+    unknown_gold_keys: list[str] = field(default_factory=list)
+    gold_inds_missing: bool = False
+    answer_text: str = ""
+
+    @property
+    def report(self) -> str:
+        """Bootstrap cluster: one annual report (``company/year``)."""
+        return "/".join(self.document_id.split("/")[:2])
 
 
 @dataclass
@@ -61,6 +76,31 @@ class Corpus:
     documents: dict[str, Document] = field(default_factory=dict)
     units: dict[str, dict[str, str]] = field(default_factory=dict)
     companies: set[str] = field(default_factory=set)
+    split_reports: dict[str, set[str]] = field(default_factory=dict)
+    split_companies: dict[str, set[str]] = field(default_factory=dict)
+    _evidence: dict[str, DocumentEvidence] = field(default_factory=dict, repr=False)
+
+    def evidence(self, document_id: str) -> DocumentEvidence:
+        """Chunks rebuilt exactly as ingested, plus the gold-unit -> chunk mapping."""
+        if document_id not in self._evidence:
+            chunks = chunk_document(self.documents[document_id])
+            self._evidence[document_id] = DocumentEvidence(
+                chunks, map_units(self.units[document_id], chunks)
+            )
+        return self._evidence[document_id]
+
+
+def corpus_sha256(corpus: Corpus) -> str:
+    """Same fingerprint as bulk ingestion's ``corpus_sha256`` (documents in load order)."""
+    digest = hashlib.sha256()
+    for document in corpus.documents.values():
+        digest.update(document.model_dump_json().encode())
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def company_fold(company: str) -> int:
+    return int(hashlib.sha256(company.encode()).hexdigest(), 16) % HOLDOUT_FOLDS
 
 
 def _clean(cell: str) -> str:
@@ -102,39 +142,106 @@ def page_document(example: dict[str, Any]) -> tuple[Document, dict[str, str]]:
     return document, units
 
 
-def load(data_dir: Path, question_split: str = "test") -> tuple[Corpus, list[Case]]:
-    """Index pages from every split; return questions from ``question_split`` only."""
-    if question_split not in {"train", "dev", "test"}:
+def load(data_dir: Path, question_split: str = "dev") -> tuple[Corpus, list[Case]]:
+    """Index pages from every split; return questions from ``question_split`` only.
+
+    Gold evidence keys absent from the page (``unknown_gold_keys``) and missing
+    ``gold_inds`` are recorded on each case, never silently dropped; see
+    :func:`gold_label_audit` and :func:`require_valid_gold`.
+    """
+    if question_split not in SPLITS:
         raise ValueError("question_split must be train, dev or test")
     corpus = Corpus()
     cases: list[Case] = []
-    for split in ["train", "dev", "test"]:
+    for split in SPLITS:
+        reports = corpus.split_reports.setdefault(split, set())
+        companies = corpus.split_companies.setdefault(split, set())
         for example in json.loads((data_dir / f"{split}.json").read_text()):
             document, units = page_document(example)
             corpus.documents.setdefault(document.id, document)
             corpus.units.setdefault(document.id, units)
-            corpus.companies.add(document.id.split("/")[0])
+            company = document.id.split("/")[0]
+            corpus.companies.add(company)
+            companies.add(company)
+            reports.add("/".join(document.id.split("/")[:2]))
             if split != question_split:
                 continue
             qa = example["qa"]
-            gold = [
-                corpus.units[document.id][key]
-                for key in qa.get("gold_inds", {})
-                if key in corpus.units[document.id]
-            ]
+            page_units = corpus.units[document.id]
+            gold_inds = qa.get("gold_inds")
+            keys = list(gold_inds or {})
             answer = qa["exe_ans"]
             cases.append(
                 Case(
                     id=example["id"],
                     question=qa["question"],
                     document_id=document.id,
-                    company=document.id.split("/")[0],
-                    gold_units=gold,
+                    company=company,
+                    gold_units=[page_units[key] for key in keys if key in page_units],
                     answer=answer if isinstance(answer, str) else float(answer),
                     program=qa.get("program", ""),
+                    gold_keys=[key for key in keys if key in page_units],
+                    unknown_gold_keys=[key for key in keys if key not in page_units],
+                    gold_inds_missing=gold_inds is None,
+                    answer_text=str(qa.get("answer", "")),
                 )
             )
     return corpus, cases
+
+
+def gold_label_audit(cases: list[Case]) -> dict[str, Any]:
+    unknown = [case for case in cases if case.unknown_gold_keys]
+    return {
+        "cases": len(cases),
+        "gold_keys": sum(len(case.gold_keys) for case in cases),
+        "unknown_gold_keys": sum(len(case.unknown_gold_keys) for case in cases),
+        "cases_with_unknown_gold_keys": [case.id for case in unknown][:50],
+        "cases_missing_gold_inds": sum(case.gold_inds_missing for case in cases),
+        "cases_without_gold_keys": sum(not case.gold_keys for case in cases),
+    }
+
+
+def require_valid_gold(cases: list[Case]) -> None:
+    """Fail loudly: evaluating with unresolvable gold labels would bias evidence metrics."""
+    audit = gold_label_audit(cases)
+    if audit["unknown_gold_keys"] or audit["cases_missing_gold_inds"]:
+        raise ValueError(
+            f"Invalid FinQA gold labels: {audit['unknown_gold_keys']} unknown keys, "
+            f"{audit['cases_missing_gold_inds']} cases missing gold_inds "
+            f"(e.g. {audit['cases_with_unknown_gold_keys'][:5]})"
+        )
+
+
+def evidence_audit(corpus: Corpus, cases: list[Case]) -> dict[str, Any]:
+    methods: dict[str, int] = {}
+    for case in cases:
+        mapping = corpus.evidence(case.document_id).units
+        for key in case.gold_keys:
+            method = mapping[key].method
+            methods[method] = methods.get(method, 0) + 1
+    return {
+        "method": "normalized unit-text containment in deterministically rebuilt chunks",
+        "gold_units_by_mapping": methods,
+    }
+
+
+def holdout_views(corpus: Corpus, cases: list[Case]) -> dict[str, set[str]]:
+    """Case-ID subsets for company/report-disjoint reporting.
+
+    FinQA's native splits share companies and reports, so the default split is a
+    question-level holdout only. ``*_unseen_in_train`` subsets are strictly disjoint
+    from training pages' companies/reports; ``company_fold_holdout`` is a
+    deterministic ~20% company partition for company-disjoint selection studies.
+    """
+    train_companies = corpus.split_companies.get("train", set())
+    train_reports = corpus.split_reports.get("train", set())
+    return {
+        "all": {case.id for case in cases},
+        "company_unseen_in_train": {c.id for c in cases if c.company not in train_companies},
+        "report_unseen_in_train": {c.id for c in cases if c.report not in train_reports},
+        "company_fold_holdout": {c.id for c in cases if company_fold(c.company) == 0},
+        "company_fold_selection": {c.id for c in cases if company_fold(c.company) != 0},
+    }
 
 
 def principal(case: Case, scope: str, corpus: Corpus) -> Principal:
@@ -145,79 +252,36 @@ def principal(case: Case, scope: str, corpus: Corpus) -> Principal:
 
 
 def page_metrics(
-    hits: list[Hit], case: Case, ks: tuple[int, ...] = (1, 3, 5, 10)
-) -> dict[str, float]:
+    hits: list[Hit],
+    case: Case,
+    evidence: DocumentEvidence | None = None,
+    ks: tuple[int, ...] = (1, 3, 5, 10),
+) -> dict[str, float | None]:
+    """Page hit/MRR plus gold-unit evidence metrics (see ledger_rag.evaluation.evidence)."""
     pages: list[str] = []
     for hit in hits:
         if hit.chunk.document_id not in pages:
             pages.append(hit.chunk.document_id)
     rank = pages.index(case.document_id) + 1 if case.document_id in pages else None
-    metrics = {f"page_hit@{k}": float(rank is not None and rank <= k) for k in ks}
+    metrics: dict[str, float | None] = {
+        f"page_recall@{k}": float(rank is not None and rank <= k) for k in ks
+    }
     metrics["page_mrr@10"] = 1 / rank if rank and rank <= 10 else 0.0
-    if case.gold_units:
-        for k in (3, 5):
-            texts = [h.chunk.text for h in hits[:k] if h.chunk.document_id == case.document_id]
-            found = sum(1 for unit in case.gold_units if any(unit in text for text in texts))
-            metrics[f"evidence_recall@{k}"] = found / len(case.gold_units)
+    if evidence is not None:
+        gold = [evidence.units[key] for key in case.gold_keys]
+        metrics.update(evidence_metrics([hit.chunk.id for hit in hits], gold, ks))
     return metrics
 
 
-_NUMBER = re.compile(r"(?<![\w.])[-−]?\$?\s?\d[\d,]*(?:\.\d+)?")
-
-
-def numbers(text: str) -> list[float]:
-    text = re.sub(r"\[C\d+\]", " ", text)
-    values = []
-    for match in _NUMBER.findall(text):
-        cleaned = re.sub(r"[$,\s]", "", match).replace("−", "-")
-        try:
-            values.append(float(cleaned))
-        except ValueError:
-            continue
-    return values
-
-
-def answer_correct(text: str, gold: float | str, *, rel_tol: float = 0.01) -> bool:
-    """FinQA-style execution match on the first number, tolerant to percent/ratio scale."""
-    if isinstance(gold, str):
-        return text.strip().lower().startswith(gold.lower())
-    values = numbers(text)
-    if not values:
-        return False
-    value = values[0]
-    for target in (gold, gold * 100, gold / 100):
-        if math.isclose(value, target, rel_tol=rel_tol, abs_tol=0.005):
-            return True
-        if round(value, 1) == round(target, 1) and abs(target) >= 0.05:
-            return True
-    return False
-
-
-def summarize(rows: list[dict[str, float]], seed: int = 7, samples: int = 1000) -> dict[str, Any]:
-    keys = sorted({key for row in rows for key in row})
-    rng = random.Random(seed)
-    out: dict[str, Any] = {}
-    for key in keys:
-        values = [row[key] for row in rows if key in row]
-        mean = sum(values) / len(values)
-        boot = sorted(sum(rng.choices(values, k=len(values))) / len(values) for _ in range(samples))
-        out[key] = {
-            "mean": round(mean, 4),
-            "ci95": [round(boot[int(0.025 * samples)], 4), round(boot[int(0.975 * samples)], 4)],
-            "n": len(values),
-        }
-    return out
-
-
-def latency(values: list[float]) -> dict[str, float]:
-    ordered = sorted(values)
-    if not ordered:
-        return {}
-    return {
-        "p50_ms": round(statistics.median(ordered), 1),
-        "p95_ms": round(ordered[min(len(ordered) - 1, math.ceil(0.95 * len(ordered)) - 1)], 1),
-        "mean_ms": round(sum(ordered) / len(ordered), 1),
-    }
+def summarize(
+    rows: list[dict[str, float | None]],
+    clusters: list[str] | None = None,
+    seed: int = 7,
+    samples: int = 2000,
+) -> dict[str, Any]:
+    """Report-cluster bootstrap; i.i.d. per-row resampling only if no clusters are given."""
+    labels = clusters if clusters is not None else [str(i) for i in range(len(rows))]
+    return summarize_rows(rows, labels, seed=seed, samples=samples)
 
 
 def bench_settings(args: argparse.Namespace, **overrides: Any) -> Settings:
@@ -239,6 +303,12 @@ def bench_settings(args: argparse.Namespace, **overrides: Any) -> Settings:
         "reranker_timeout_seconds": 60,
         "rerank_candidates": args.rerank_candidates,
     }
+    qdrant_key = getattr(args, "qdrant_api_key", "") or os.environ.get("LEDGER_QDRANT_API_KEY", "")
+    if qdrant_key:
+        values["qdrant_api_key"] = SecretStr(qdrant_key)
+    reranker_key = getattr(args, "reranker_key", "")
+    if reranker_key:
+        values["reranker_api_key"] = SecretStr(reranker_key)
     values.update(overrides)
     return Settings(**values)
 
@@ -282,140 +352,198 @@ def make_store(args: argparse.Namespace, fusion: str, rerank: bool) -> Retriever
     return RerankingRetriever(store, settings) if rerank else store
 
 
-async def retrieval(args: argparse.Namespace, corpus: Corpus, cases: list[Case]) -> dict[str, Any]:
-    results: dict[str, Any] = {}
-    for config in args.configs:
-        fusion, _, rerank_flag = config.partition(":")
-        rerank = rerank_flag == "rerank"
-        name = f"{fusion}{'+rerank' if rerank else ''}"
+def arm_name(config: str) -> tuple[str, bool, str]:
+    fusion, _, rerank_flag = config.partition(":")
+    if fusion not in {"sparse", "dense", "hybrid"} or rerank_flag not in {"", "rerank"}:
+        raise ValueError(f"Unknown retrieval arm {config!r}")
+    rerank = rerank_flag == "rerank"
+    return fusion, rerank, f"{fusion}{'+rerank' if rerank else ''}"
+
+
+async def search_all(
+    args: argparse.Namespace,
+    fusion: str,
+    rerank: bool,
+    queries: list[tuple[QueryRequest, Principal]],
+    label: str,
+) -> list[tuple[list[Hit], float]]:
+    """Run queries with one store per worker (each store serializes its own requests)."""
+    workers = max(1, min(int(getattr(args, "retrieval_concurrency", 1)), len(queries) or 1))
+    results: list[tuple[list[Hit], float] | None] = [None] * len(queries)
+    queue: asyncio.Queue[int] = asyncio.Queue()
+    for index in range(len(queries)):
+        queue.put_nowait(index)
+    done = 0
+
+    async def worker() -> None:
+        nonlocal done
         store = make_store(args, fusion, rerank)
         try:
-            for scope in args.scopes:
-                rows: list[dict[str, float]] = []
-                times: list[float] = []
-                for index, case in enumerate(cases):
-                    query = QueryRequest(question=case.question, top_k=10)
-                    start = time.perf_counter()
-                    hits = await store.search(query, principal(case, scope, corpus))
-                    times.append((time.perf_counter() - start) * 1000)
-                    rows.append(page_metrics(hits, case))
-                    if index % 50 == 0:
-                        print(f"\r{name}/{scope}: {index}/{len(cases)}", end="", flush=True)
-                print()
-                results[f"{name}/{scope}"] = {"metrics": summarize(rows), "latency": latency(times)}
-                brief = {k: v["mean"] for k, v in results[f"{name}/{scope}"]["metrics"].items()}
-                print(name, scope, json.dumps(brief), json.dumps(latency(times)))
+            while not queue.empty():
+                index = queue.get_nowait()
+                query, who = queries[index]
+                start = time.perf_counter()
+                hits = await store.search(query, who)
+                results[index] = (hits, (time.perf_counter() - start) * 1000)
+                done += 1
+                if done % 100 == 0:
+                    print(f"{label}: {done}/{len(queries)}", file=sys.stderr, flush=True)
         finally:
             await store.close()
-    return results
+
+    await asyncio.gather(*(worker() for _ in range(workers)))
+    return [result for result in results if result is not None]
 
 
-async def answers(args: argparse.Namespace, corpus: Corpus, cases: list[Case]) -> dict[str, Any]:
-    from ledger_rag.generation.providers import make_provider
-    from ledger_rag.orchestration.service import RagService
+def _metric_values(rows: dict[str, dict[str, float | None]], metric: str) -> dict[str, float]:
+    return {key: value for key, row in rows.items() if (value := row.get(metric)) is not None}
 
-    settings = bench_settings(
-        args,
-        provider=args.provider,
-        llm_base_url=args.llm_url,
-        llm_api_key=SecretStr(args.llm_key),
-        llm_model=args.llm_model,
-        reranker_url=args.reranker_url if args.rerank_answers else "",
-        max_tool_rounds=3,
-    )
-    provider = make_provider(settings)
-    store = make_store(args, "hybrid", args.rerank_answers)
-    service = RagService(settings, store, provider)
-    sample = random.Random(args.seed).sample(cases, min(args.answer_samples, len(cases)))
-    records: list[dict[str, Any]] = []
-    try:
-        for index, case in enumerate(sample):
-            for mode in args.answer_modes:
-                query = QueryRequest(
-                    question=case.question + ANSWER_FORMAT,
-                    profile=Profile(args.profile),
-                    top_k=args.answer_top_k,
-                )
-                who = principal(case, "company", corpus)
-                start = time.perf_counter()
-                if mode == "oracle":
-                    hits = [
-                        Hit(chunk=chunk, score=1.0)
-                        for chunk in chunk_document(corpus.documents[case.document_id])
-                    ]
-                    retrieval_ms = 0.0
-                else:
-                    hits, retrieval_ms = await service.retrieve(query, who)
-                error = ""
-                answer: Answer | None = None
-                try:
-                    answer = await service.generate(
-                        query, hits, retrieval_ms, f"finqa-{index}", who
+
+async def retrieval(args: argparse.Namespace, corpus: Corpus, cases: list[Case]) -> dict[str, Any]:
+    """Every arm x scope on identical cases; report-cluster CIs and holdout views."""
+    clusters = {case.id: case.report for case in cases}
+    views = holdout_views(corpus, cases)
+    seed = getattr(args, "seed", 13)
+    samples = getattr(args, "bootstrap_samples", 2000)
+    results: dict[str, Any] = {}
+    per_case: dict[str, dict[str, dict[str, float | None]]] = {}
+    records: dict[str, list[dict[str, Any]]] = {}
+    unknown_chunks = 0
+    for config in args.configs:
+        fusion, rerank, name = arm_name(config)
+        for scope in args.scopes:
+            label = f"{name}/{scope}"
+            queries = [
+                (QueryRequest(question=case.question, top_k=10), principal(case, scope, corpus))
+                for case in cases
+            ]
+            started = time.perf_counter()
+            outcomes = await search_all(args, fusion, rerank, queries, label)
+            rows: list[dict[str, float | None]] = []
+            times: list[float] = []
+            arm_records: list[dict[str, Any]] = []
+            for case, (hits, elapsed) in zip(cases, outcomes, strict=True):
+                for hit in hits:
+                    known = corpus.documents.get(hit.chunk.document_id) is not None and any(
+                        chunk.id == hit.chunk.id
+                        for chunk in corpus.evidence(hit.chunk.document_id).chunks
                     )
-                except Exception as exc:  # record upstream failures instead of aborting
-                    error = type(exc).__name__
-                total_ms = (time.perf_counter() - start) * 1000
-                text = answer.answer if answer and not answer.abstained else ""
-                records.append(
+                    unknown_chunks += not known
+                rows.append(page_metrics(hits, case, corpus.evidence(case.document_id)))
+                times.append(elapsed)
+                arm_records.append(
                     {
                         "id": case.id,
-                        "mode": mode,
-                        "question": case.question,
-                        "gold": case.answer,
-                        "answer": text[:600],
-                        "correct": bool(text) and answer_correct(text, case.answer),
-                        "abstained": answer.abstained if answer else True,
-                        "error": error,
-                        "gold_page_in_context": any(
-                            h.chunk.document_id == case.document_id for h in hits
-                        ),
-                        "tool_calls": answer.tool_calls if answer else 0,
-                        "retrieval_ms": round(retrieval_ms, 1),
-                        "generation_ms": answer.generation_ms if answer else 0.0,
-                        "total_ms": round(total_ms, 1),
+                        "hits": [f"{h.chunk.document_id}#{h.chunk.ordinal}" for h in hits],
+                        "scores": [round(h.score, 5) for h in hits],
                     }
                 )
-            first = [r for r in records if r["mode"] == args.answer_modes[0]]
-            accuracy = sum(r["correct"] for r in first) / len(first)
-            print(f"\ranswers {index + 1}/{len(sample)} acc={accuracy:.3f}", end="", flush=True)
-        print()
-    finally:
-        await store.close()
-        await provider.close()
-    summary: dict[str, Any] = {}
-    for mode in args.answer_modes:
-        subset = [r for r in records if r["mode"] == mode]
-        rows = [
-            {
-                "execution_accuracy": float(r["correct"]),
-                "abstention_rate": float(r["abstained"]),
-                "error_rate": float(bool(r["error"])),
-                "gold_page_in_context": float(r["gold_page_in_context"]),
-                "tool_call_rate": float(r["tool_calls"] > 0),
+            per_case[label] = {case.id: row for case, row in zip(cases, rows, strict=True)}
+            records[label] = arm_records
+            view_metrics = {}
+            for view, members in views.items():
+                if view == "all" or not members:
+                    continue
+                subset = [
+                    (row, case.report)
+                    for row, case in zip(rows, cases, strict=True)
+                    if case.id in members
+                ]
+                view_metrics[view] = summarize(
+                    [row for row, _ in subset], [c for _, c in subset], seed, samples
+                )
+            results[label] = {
+                "metrics": summarize(rows, [case.report for case in cases], seed, samples),
+                "views": view_metrics,
+                "latency": latency(times),
+                "wall_seconds": round(time.perf_counter() - started, 1),
             }
-            for r in subset
-        ]
-        answered = [r for r in subset if not r["abstained"]]
-        summary[mode] = {
-            "metrics": summarize(rows),
-            "precision_when_answered": (
-                round(sum(r["correct"] for r in answered) / len(answered), 4) if answered else None
-            ),
-            "latency_total": latency([r["total_ms"] for r in subset]),
-            "latency_generation": latency([r["generation_ms"] for r in subset]),
-        }
-    return {"summary": summary, "records": records}
+            brief = {
+                key: value["mean"]
+                for key, value in results[label]["metrics"].items()
+                if key in {"page_recall@1", "page_recall@5", "page_mrr@10", "evidence_recall@5"}
+            }
+            print(label, json.dumps(brief), json.dumps(latency(times)), file=sys.stderr)
+    comparisons: dict[str, Any] = {}
+    for scope in args.scopes:
+        base = f"hybrid/{scope}"
+        if base not in per_case:
+            continue
+        for label in per_case:
+            if label == base or not label.endswith(f"/{scope}"):
+                continue
+            comparisons[f"{label} - {base}"] = {
+                metric: paired_cluster_difference(
+                    _metric_values(per_case[base], metric),
+                    _metric_values(per_case[label], metric),
+                    clusters,
+                    seed=seed,
+                    samples=samples,
+                )
+                for metric in ("page_recall@5", "evidence_recall@5", "evidence_mrr@10")
+            }
+    return {
+        "arms": results,
+        "paired_differences": comparisons,
+        "views": {view: len(members) for view, members in views.items()},
+        "integrity": {"unknown_retrieved_chunk_ids": unknown_chunks},
+        "records": records,
+    }
 
 
-def main() -> None:
+def _git_sha() -> str:
+    try:
+        root = Path(__file__).resolve().parents[4]
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return f"{sha}-dirty" if dirty else sha
+
+
+def evaluation_source_sha256() -> str:
+    """Digest of the evaluation package source that produced a report."""
+    digest = hashlib.sha256()
+    root = Path(__file__).resolve().parents[1]
+    for path in sorted(root.rglob("*.py")):
+        name = path.relative_to(root).as_posix().encode()
+        content = path.read_bytes()
+        digest.update(len(name).to_bytes(8, "big") + name)
+        digest.update(len(content).to_bytes(8, "big") + content)
+    return digest.hexdigest()
+
+
+def _temperature(value: str) -> float | None:
+    if value == "default":
+        return None
+    temperature = float(value)
+    if not 0 <= temperature <= 2:
+        raise argparse.ArgumentTypeError("temperature must be within [0, 2] or 'default'")
+    return temperature
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="FinQA benchmark on production code paths")
     parser.add_argument("command", choices=["stats", "ingest", "retrieval", "answers"])
     parser.add_argument("--data", type=Path, default=Path("data/finqa"))
     parser.add_argument(
         "--split",
-        choices=["train", "dev", "test"],
-        default="test",
-        help="Question split only; use dev for comparisons, test for final reporting",
+        choices=list(SPLITS),
+        default="dev",
+        help="Question split only; dev for comparisons. test is sealed (see --unseal-test)",
+    )
+    parser.add_argument(
+        "--unseal-test",
+        action="store_true",
+        help="Required for --split test; only after configuration freeze. Logged in reports",
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--qdrant-url", default="http://localhost:6333")
@@ -425,6 +553,7 @@ def main() -> None:
         "--embedding-key", default=os.environ.get("LEDGER_EMBEDDING_API_KEY", "local-unused")
     )
     parser.add_argument("--embedding-model", default="Alibaba-NLP/gte-modernbert-base")
+    parser.add_argument("--embedding-revision", default="", help="Recorded for lineage only")
     parser.add_argument(
         "--embedding-space-id", default=os.environ.get("LEDGER_EMBEDDING_SPACE_ID", "")
     )
@@ -438,6 +567,8 @@ def main() -> None:
     )
     parser.add_argument("--oversampling", type=float, default=2.0)
     parser.add_argument("--reranker-url", default="http://localhost:8081")
+    parser.add_argument("--reranker-model", default="Alibaba-NLP/gte-reranker-modernbert-base")
+    parser.add_argument("--reranker-revision", default="", help="Recorded for lineage only")
     parser.add_argument("--rerank-candidates", type=int, default=20)
     parser.add_argument(
         "--limit", type=int, default=0, help="First N selected-split cases (0 = all)"
@@ -449,25 +580,92 @@ def main() -> None:
         help="fusion[:rerank] entries",
     )
     parser.add_argument("--scopes", nargs="+", default=["company", "global"])
-    parser.add_argument("--provider", choices=["openai", "anthropic"], default="openai")
-    parser.add_argument("--llm-url", default="http://localhost:11434/v1")
-    parser.add_argument("--llm-key", default="local-unused")
-    parser.add_argument("--llm-model", default="qwen2.5:3b")
-    parser.add_argument("--profile", choices=["chat", "voice"], default="chat")
+    parser.add_argument("--retrieval-concurrency", type=int, default=4)
+    parser.add_argument(
+        "--expected-corpus-sha256", default="", help="Fail unless the rebuilt corpus matches"
+    )
+    parser.add_argument(
+        "--llm-url",
+        default=os.environ.get("LEDGER_LLM_BASE_URL", "http://localhost:11434/v1"),
+    )
+    parser.add_argument("--llm-key", default=os.environ.get("LEDGER_LLM_API_KEY", "local-unused"))
+    parser.add_argument(
+        "--llm-models",
+        nargs="+",
+        default=["qwen2.5:3b"],
+        help="model or model:reasoning_effort entries",
+    )
+    parser.add_argument("--llm-concurrency", type=int, default=8)
+    parser.add_argument(
+        "--temperature",
+        type=_temperature,
+        default=0.0,
+        help="Sampling temperature, or 'default' to omit it (Gemini 3 guidance)",
+    )
+    parser.add_argument("--max-tokens", type=int, default=2048)
+    parser.add_argument("--llm-seed", type=int, default=None)
     parser.add_argument("--answer-samples", type=int, default=100)
-    parser.add_argument("--answer-top-k", type=int, default=3)
-    parser.add_argument("--answer-modes", nargs="+", default=["retrieved", "oracle"])
-    parser.add_argument("--rerank-answers", action="store_true")
+    parser.add_argument(
+        "--answer-modes",
+        nargs="+",
+        default=["retrieved@3", "retrieved@5", "oracle"],
+        help="oracle and/or retrieved@k entries",
+    )
+    parser.add_argument("--answer-retrieval", default="hybrid:rerank")
     parser.add_argument("--seed", type=int, default=13)
-    args = parser.parse_args()
+    parser.add_argument("--bootstrap-samples", type=int, default=2000)
+    parser.add_argument("--git-sha", default="", help="Override detected Git revision")
+    return parser
+
+
+def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if args.limit < 0:
         parser.error("--limit must be zero or positive")
+    if args.split == "test" and not args.unseal_test:
+        parser.error("the test split is sealed; pass --unseal-test after configuration freeze")
+    if not 1 <= args.retrieval_concurrency <= 16:
+        parser.error("--retrieval-concurrency must be between 1 and 16")
+    if not 1 <= args.llm_concurrency <= 8:
+        parser.error("--llm-concurrency must be between 1 and 8")
+    try:
+        for config in args.configs:
+            arm_name(config)
+        from ledger_rag.evaluation.benchmarks.finqa_answers import parse_mode
 
+        for mode in args.answer_modes:
+            parse_mode(mode)
+        arm_name(args.answer_retrieval)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+
+async def execute(args: argparse.Namespace) -> dict[str, Any]:
+    """Build the report for one command; shared by the CLI and the Modal job."""
+    if args.split == "test":
+        print("WARNING: evaluating the sealed FinQA test split (--unseal-test)", file=sys.stderr)
     corpus, cases = load(args.data, args.split)
     split_questions = len(cases)
     if args.limit:
         cases = cases[: args.limit]
+    fingerprint = corpus_sha256(corpus)
+    if args.expected_corpus_sha256 and fingerprint != args.expected_corpus_sha256:
+        raise ValueError("Rebuilt FinQA corpus does not match the expected ingestion fingerprint")
     report: dict[str, Any] = {
+        "lineage": {
+            "git_sha": args.git_sha or _git_sha(),
+            "evaluation_source_sha256": evaluation_source_sha256(),
+            "python": sys.version.split()[0],
+            "collection": args.collection,
+            "embedding_model": args.embedding_model,
+            "embedding_revision": args.embedding_revision or None,
+            "embedding_space_id": args.embedding_space_id,
+            "reranker_model": args.reranker_model,
+            "reranker_revision": args.reranker_revision or None,
+            "corpus_sha256": fingerprint,
+            "seed": args.seed,
+            "bootstrap_samples": args.bootstrap_samples,
+            "bootstrap_unit": "report (company/year)",
+        },
         "dataset": {
             "name": "FinQA",
             "license": "MIT",
@@ -476,29 +674,70 @@ def main() -> None:
             "corpus_chunks": sum(len(chunk_document(d)) for d in corpus.documents.values()),
             "companies": len(corpus.companies),
             "question_split": args.split,
+            "test_split_unsealed": args.split == "test",
             "split_questions": split_questions,
             "selected_questions": len(cases),
+            "selection": "first N rows (--limit)" if args.limit else "full split",
+            "gold_labels": gold_label_audit(cases),
             **({"test_questions": len(cases)} if args.split == "test" else {}),
         },
         "embedding_model": args.embedding_model,
         "embedding_space_id": args.embedding_space_id,
-        "reranker": args.reranker_url and "gte-reranker-modernbert-base",
         "quantization": args.quantization,
         "oversampling": args.oversampling,
     }
+    if args.command in {"retrieval", "answers"}:
+        require_valid_gold(cases)
+        report["dataset"]["evidence_mapping"] = evidence_audit(corpus, cases)
     if args.command == "ingest":
-        report["ingest"] = asyncio.run(ingest(args, corpus))
+        report["ingest"] = await ingest(args, corpus)
     elif args.command == "retrieval":
-        report["rerank_candidates"] = args.rerank_candidates
-        report["retrieval"] = asyncio.run(retrieval(args, corpus, cases))
-    elif args.command == "answers":
-        report["llm"] = {
-            "provider": args.provider,
-            "model": args.llm_model,
-            "profile": args.profile,
+        report["retrieval_config"] = {
+            "top_k": 10,
+            "rerank_candidates": args.rerank_candidates,
+            "configs": args.configs,
+            "scopes": args.scopes,
         }
-        report["answers"] = asyncio.run(answers(args, corpus, cases))
-    print(json.dumps({k: v for k, v in report.items() if k != "answers"}, indent=2)[:3000])
+        report["retrieval"] = await retrieval(args, corpus, cases)
+    elif args.command == "answers":
+        from ledger_rag.evaluation.benchmarks.finqa_answers import answers
+        from ledger_rag.evaluation.llm import ChatClient
+
+        client = ChatClient(args.llm_url, args.llm_key, concurrency=args.llm_concurrency)
+        try:
+            report["answers"] = await answers(args, corpus, cases, client)
+        finally:
+            await client.close()
+        report["lineage"].update(
+            {
+                "llm_endpoint_host": args.llm_url.split("/")[2] if "//" in args.llm_url else "",
+                "llm_models": report["answers"]["models"],
+                "temperature": args.temperature,
+                "max_tokens": args.max_tokens,
+                "llm_seed": args.llm_seed,
+                "prompt_sha256": report["answers"]["prompt_sha256"],
+                "rerank_candidates": args.rerank_candidates,
+            }
+        )
+    return report
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+    validate_args(parser, args)
+    report = asyncio.run(execute(args))
+    print(
+        json.dumps(
+            {k: v for k, v in report.items() if k not in {"answers", "retrieval"}}, indent=2
+        )[:3000]
+    )
+    if "retrieval" in report:
+        print(json.dumps({k: v["metrics"] for k, v in report["retrieval"]["arms"].items()})[:3000])
+    if "answers" in report:
+        from ledger_rag.evaluation.benchmarks.finqa_answers import brief
+
+        print(brief(report["answers"]))
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2))
