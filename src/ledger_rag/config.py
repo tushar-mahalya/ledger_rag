@@ -48,6 +48,30 @@ class Settings(BaseSettings):
     query_deadline_seconds: float = Field(default=25, gt=0, le=180)
     max_tool_rounds: int = Field(default=3, ge=1, le=5)
     otlp_endpoint: str = ""
+    voice_enabled: bool = False
+    stt_base_url: str = "https://api.openai.com/v1"
+    stt_api_key: SecretStr | None = None
+    stt_model: str = "whisper-1"
+    stt_language: str = Field(default="en", pattern=r"^$|^[a-z]{2,3}$")
+    stt_timeout_seconds: float = Field(default=10, gt=0, le=60)
+    tts_base_url: str = "https://api.openai.com/v1"
+    tts_api_key: SecretStr | None = None
+    tts_model: str = "gpt-4o-mini-tts"
+    tts_voice: str = "alloy"
+    tts_format: Literal["pcm", "wav"] = "pcm"
+    tts_pcm_sample_rate: int = Field(default=24000, ge=8000, le=48000)
+    tts_speed: float = Field(default=1.0, ge=0.25, le=4.0)
+    tts_timeout_seconds: float = Field(default=10, gt=0, le=60)
+    max_voice_sessions: int = Field(default=16, ge=1, le=1000)
+    voice_max_session_seconds: float = Field(default=900, gt=0, le=7200)
+    voice_max_frame_bytes: int = Field(default=32768, ge=1024, le=1_048_576)
+    voice_max_response_seconds: float = Field(default=60, gt=0, le=600)
+    voice_max_answer_chars: int = Field(default=400, ge=40, le=4000)
+    vad_speech_rms: int = Field(default=500, ge=1, le=32767)
+    vad_min_speech_ms: int = Field(default=200, ge=20, le=2000)
+    vad_barge_in_ms: int = Field(default=300, ge=20, le=2000)
+    vad_trailing_silence_ms: int = Field(default=500, ge=100, le=5000)
+    vad_max_utterance_seconds: float = Field(default=15, ge=1, le=60)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     @model_validator(mode="after")
@@ -59,6 +83,8 @@ class Settings(BaseSettings):
             self.qdrant_url,
             self.oidc_jwks_url,
             self.otlp_endpoint,
+            self.stt_base_url,
+            self.tts_base_url,
         ]:
             if not endpoint:
                 continue
@@ -95,6 +121,10 @@ class Settings(BaseSettings):
                 raise ValueError("Production embedding endpoint must use HTTPS")
             if self.reranker_url and not self.reranker_url.startswith("https://"):
                 raise ValueError("Production reranker endpoint must use HTTPS")
+            if not self.stt_base_url.startswith("https://") or not self.tts_base_url.startswith(
+                "https://"
+            ):
+                raise ValueError("Production speech endpoints must use HTTPS")
         if self.provider != "extractive" and (not self.llm_api_key or not self.llm_model):
             raise ValueError("Remote LLM requires model and API key")
         if self.retrieval_backend == "qdrant" and not self.embedding_api_key:

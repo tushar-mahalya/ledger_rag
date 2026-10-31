@@ -19,6 +19,9 @@ from ledger_rag.models import Answer, Document, IngestRequest, Principal, QueryR
 from ledger_rag.retrieval import make_retriever
 from ledger_rag.service import RagService
 from ledger_rag.telemetry import BodyTooLarge, Metrics, RequestMiddleware, configure_telemetry
+from ledger_rag.voice.speech import SpeechToText, TextToSpeech
+from ledger_rag.voice.transport import VoiceRuntime, make_voice_runtime
+from ledger_rag.voice.transport import router as voice_router
 
 logger = structlog.get_logger()
 
@@ -31,12 +34,15 @@ class Runtime:
     limiter: RateLimiter
     slots: asyncio.Semaphore
     metrics: Metrics
+    voice: VoiceRuntime | None = None
 
 
 def create_app(
     settings: Settings | None = None,
     retriever: Retriever | None = None,
     provider: Provider | None = None,
+    stt: SpeechToText | None = None,
+    tts: TextToSpeech | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -50,6 +56,7 @@ def create_app(
             from ledger_rag.providers import make_provider
 
             backend = make_provider(resolved)
+        voice: VoiceRuntime | None = None
         try:
             if resolved.seed_path:
                 if resolved.environment == "production":
@@ -62,13 +69,17 @@ def create_app(
                     if line.strip()
                 ]
                 await store.upsert([c for doc in documents for c in chunk_document(doc)])
+            metrics = Metrics()
+            if resolved.voice_enabled:
+                voice = make_voice_runtime(resolved, metrics.registry, stt, tts)
             app.state.runtime = Runtime(
                 settings=resolved,
                 service=RagService(resolved, store, backend),
                 auth=Authenticator(resolved),
                 limiter=RateLimiter(resolved.rate_limit_per_minute),
                 slots=asyncio.Semaphore(resolved.max_concurrent_queries),
-                metrics=Metrics(),
+                metrics=metrics,
+                voice=voice,
             )
             logger.info(
                 "service_started",
@@ -80,11 +91,14 @@ def create_app(
         finally:
             await store.close()
             await backend.close()
+            if voice is not None:
+                await voice.close()
             if telemetry:
                 await asyncio.to_thread(telemetry.shutdown)
 
     app = FastAPI(title="Ledger RAG", version="0.1.0", lifespan=lifespan)
     app.add_middleware(RequestMiddleware)
+    app.include_router(voice_router)
 
     def runtime(request: Request) -> Runtime:
         state: Runtime = request.app.state.runtime

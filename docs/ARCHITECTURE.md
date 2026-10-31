@@ -148,8 +148,47 @@ Per RESEARCH.md's evidence-gated-upgrade philosophy, the following are intention
 - GraphRAG / LightRAG / HippoRAG graph-based retrieval (§3 of RESEARCH.md) — gated on a measured multi-hop-query ablation.
 - ColBERT/ColPali late-interaction or vision-based table retrieval — requires GPU/VLM infrastructure, explicitly out of scope for the no-GPU/no-keys bounded reference.
 - Anthropic-style Contextual Retrieval chunk augmentation at indexing time — a [TARGET] identified as high-value (49%/67% reported failure-rate reduction, RESEARCH.md §2) but not yet implemented.
-- Real STT/TTS/telephony IVR integration — only the latency-budget-aware tool-capping behavior exists today.
+- Direct SIP/RTP termination, neural VAD, LLM token streaming into TTS, and executing the offered agent transfer (a Twilio `<Dial>` redirect) — the streaming voice gateway itself is [IMPLEMENTED], see §10.
 - Token streaming, automatic HTTP retry/backoff, cross-process transactional document replacement, full OIDC/Postgres-RLS stack, a complete Grafana dashboard/alerting layer atop the already-implemented OTel/Prometheus signal export, Vault dynamic leasing.
 - **Clarification:** real Qdrant-backed hybrid retrieval and the response **citation structure** (chunk IDs/evidence attached to answers) are **already [IMPLEMENTED]**, per §3/§4 above — these are not on this deferred list. What remains deferred is a **semantic faithfulness verifier** (an explicit check that a generated answer is actually, semantically supported by its cited citations, beyond the citation structure merely existing) — that verification layer is [TARGET]/[FUTURE], distinct from the already-implemented act of attaching citations.
 
 This list exists specifically so that this document cannot be read as claiming more capability than is actually built — per the user's explicit requirement to distinguish implemented baseline from future production integrations.
+
+---
+
+## 10. Voice gateway [IMPLEMENTED]
+
+Package `ledger_rag.voice` (disabled unless `LEDGER_VOICE_ENABLED=true`; endpoints close with 1008 otherwise). Pure-Python G.711 mu-law, resampling and WAV handling (no `audioop`, which Python 3.13 removed), an energy VAD, OpenAI-compatible STT/TTS adapters (OpenAI, Groq STT, speaches / faster-whisper-server, Kokoro-FastAPI) and a per-call `VoiceSession` state machine.
+
+```
+ Caller ── PSTN ── Twilio <Connect><Stream> ──wss── /v1/voice/twilio      (/v1/voice/stream: PCM16 16 kHz + JSON)
+                                                     │ base64 mu-law 8 kHz, 20 ms frames
+                                                     ▼
+ LISTENING ── EnergyVad (20 ms RMS frames, 500 ms trailing silence, 15 s cap) ── end of utterance
+     ▲                                               ▼
+     │                         TRANSCRIBING  POST {stt}/audio/transcriptions (WAV, span voice.stt)
+     │                                               ▼
+     │                         THINKING      RagService.retrieve + generate (Profile.VOICE, caller principal,
+     │                                       citation-validated; abstention -> polite transfer offer)
+     │                                               ▼
+     │ mark echoed /           SPEAKING      POST {tts}/audio/speech, streamed (span voice.tts)
+     │ barge-in "clear"                      24 kHz PCM/WAV -> 8 kHz -> mu-law 160-byte media frames + mark
+     └───────────────────────────────────────────────┘
+```
+
+**Latency budget** (targets for a well-provisioned deployment, not measured guarantees; every turn reports actuals via `turn_metrics`, Prometheus `ledger_voice_*` histograms, structured logs and the `voice.turn`/`voice.stt`/`voice.tts` spans):
+
+| Stage | Budget | Notes |
+|---|---|---|
+| VAD endpoint (trailing silence) | ~500 ms | `LEDGER_VAD_TRAILING_SILENCE_MS`; the dominant fixed cost, trade against cutting callers off |
+| STT (short utterance) | 150–400 ms | `ledger_voice_stt_seconds`; Groq / GPU faster-whisper at the low end |
+| Retrieval | 20–150 ms | voice caps `top_k` at 3 and bypasses reranking |
+| LLM answer | 300–900 ms | full (not token-streamed) answer: citations are validated before anything is spoken |
+| TTS first byte | 100–300 ms | `ledger_voice_tts_first_byte_seconds`; response body is streamed, first chunk forwarded immediately |
+| **End-of-utterance → first audio** | **≈1.0–1.7 s** (+ VAD hangover ≈ perceived 1.5–2.2 s) | `ledger_voice_first_audio_seconds` |
+
+**Barge-in.** While SPEAKING (until Twilio echoes the turn's `mark`, i.e. until playback actually finished), caller speech lasting `LEDGER_VAD_BARGE_IN_MS` cancels the TTS task, sends Twilio `clear` (drops its playback buffer) and returns to LISTENING. Speech during TRANSCRIBING/THINKING is treated as a premature endpoint: the turn is cancelled and its audio is prepended to the next utterance.
+
+**Security and bounds.** No media is processed before authentication. `/v1/voice/stream` requires `Authorization: Bearer` on the handshake. Twilio cannot set headers on its stream, so `/v1/voice/twilio` also accepts the token as `<Parameter name="token">` (`start.customParameters.token`); in production this must be a short-lived, single-call token minted by the TwiML webhook after validating `X-Twilio-Signature` — never a long-lived user credential. Requests carrying an `Origin` header (browsers) are rejected to prevent cross-site WebSocket hijacking; the `start` event must arrive within 10 s. Both endpoints require the `reader` role and the rate limiter; sessions are capped by `LEDGER_MAX_VOICE_SESSIONS` (1013 when full), session duration, frame size (1009), utterance length, per-turn agent audio and answer length, and each RAG turn still takes a shared query slot. Sends to slow clients time out; disconnects cancel in-flight STT/RAG/TTS tasks. Transcripts and answers are never logged — only lengths and timings. STT/TTS errors are sanitized `SpeechError`s; clients never follow redirects; production requires HTTPS speech endpoints.
+
+**Limitations.** Energy VAD is sensitive to line noise (tune `LEDGER_VAD_SPEECH_RMS` or swap in a neural VAD behind `EnergyVad.process`); resampling is linear with a boxcar anti-alias filter (telephony grade); voice concurrency and rate limits are per process.
