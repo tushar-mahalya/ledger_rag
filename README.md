@@ -106,6 +106,7 @@ of concurrency capacity.
 - [Primary-source research and dataset decisions](docs/RESEARCH.md)
 - [Deployment, secrets, observability and recovery](docs/OPERATIONS.md)
 - [Evaluation and experiment design](docs/EVALUATION.md)
+- [Measured validation results and remaining promotion gates](docs/VALIDATION.md)
 
 Start with a modular monolith for the synchronous query path. Extract indexing,
 model serving, and voice adapters when their scaling/failure domains require it.

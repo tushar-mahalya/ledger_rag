@@ -1,0 +1,10 @@
+*
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!src/
+!src/**
+!deploy/
+!deploy/wait-for-secrets.py
+**/__pycache__/
+**/*.pyc
