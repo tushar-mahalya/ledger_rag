@@ -127,10 +127,22 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
                 target = snapshot / "documents.jsonl"
                 await asyncio.to_thread(_snapshot_jsonl, spec.input_path, target)
                 documents = jsonl_documents(target)
+            summaries = None
+            if spec.chunk_profile == "v3":
+                from ledger_rag.ingestion.context import load_summaries, summary_cache_dir
+
+                summaries = await asyncio.to_thread(
+                    load_summaries, summary_cache_dir(DATA / "summaries")
+                )
             await store.create_empty_collection()
             async with embedding_server(spec, local_key):
                 result = await ingest_documents(
-                    documents, store, tenant_id=spec.tenant_id, batch_size=spec.batch_size
+                    documents,
+                    store,
+                    tenant_id=spec.tenant_id,
+                    batch_size=spec.batch_size,
+                    chunk_profile=spec.chunk_profile,
+                    summaries=summaries,
                 )
         report: dict[str, object] = {
             **asdict(result),
@@ -181,6 +193,7 @@ def main(
     dimensions: int = 768,
     batch_size: int = 128,
     quantization: str = "none",
+    chunk_profile: str = "v1",
 ) -> None:
     spec = IngestSpec.model_validate(
         {
@@ -193,6 +206,7 @@ def main(
             "dimensions": dimensions,
             "batch_size": batch_size,
             "quantization": quantization,
+            "chunk_profile": chunk_profile,
         }
     )
     git_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()

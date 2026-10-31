@@ -2,7 +2,7 @@
 
 import hashlib
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -11,7 +11,8 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ledger_rag.core.models import Chunk, Document
-from ledger_rag.ingestion.chunking import chunk_document
+from ledger_rag.ingestion.chunking import ChunkProfile, chunk_document
+from ledger_rag.ingestion.context import document_hash
 from ledger_rag.retrieval.qdrant import QdrantRetriever, RetrievalError
 
 log = structlog.get_logger(__name__)
@@ -33,6 +34,7 @@ class IngestSpec(BaseModel):
     source: Literal["finqa", "jsonl"] = "finqa"
     input_path: str = ""
     quantization: Literal["none", "scalar", "binary"] = "none"
+    chunk_profile: ChunkProfile = "v1"
 
     @model_validator(mode="after")
     def validate_source(self) -> "IngestSpec":
@@ -56,6 +58,7 @@ class IngestResult:
     batches: int
     corpus_sha256: str
     seconds: float
+    chunk_profile: ChunkProfile = "v1"
 
 
 def jsonl_documents(path: Path) -> Iterator[Document]:
@@ -73,6 +76,8 @@ async def ingest_documents(
     *,
     tenant_id: str,
     batch_size: int = 128,
+    chunk_profile: ChunkProfile = "v1",
+    summaries: Mapping[str, str] | None = None,
 ) -> IngestResult:
     """Write complete documents; the caller must own an empty, isolated collection."""
     if not 1 <= batch_size <= 512:
@@ -101,7 +106,12 @@ async def ingest_documents(
         seen.add(document.id)
         fingerprint.update(document.model_dump_json().encode())
         fingerprint.update(b"\n")
-        chunks = chunk_document(document)
+        summary = None
+        if chunk_profile == "v3":
+            summary = (summaries or {}).get(document_hash(document.title, document.text))
+            if not summary:
+                raise ValueError("Chunk profile v3 requires a cached summary for every document")
+        chunks = chunk_document(document, profile=chunk_profile, summary=summary)
         if batch and len(batch) + len(chunks) > batch_size:
             await flush()
         batch.extend(chunks)
@@ -122,6 +132,7 @@ async def ingest_documents(
         batches=batches,
         corpus_sha256=fingerprint.hexdigest(),
         seconds=round(time.monotonic() - start, 3),
+        chunk_profile=chunk_profile,
     )
     log.info("ingestion.verified", documents=result.documents, chunks=result.chunks)
     return result
