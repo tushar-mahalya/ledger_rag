@@ -234,6 +234,7 @@ async def test_modal_job_writes_database_directly_and_commits_only_verified_repo
             assert report["chunks"] == 1
             assert report["documents"] == 1
             assert report["git_sha"] == "git-test"
+            assert report["input_path"] is None and report["input_sha256"] is None
             assert "database-private-key" not in json.dumps(report)
             text = await asyncio.to_thread(Path(report["report_path"]).read_text)
             assert json.loads(text) == report
