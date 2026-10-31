@@ -142,7 +142,12 @@ four are additive, nullable or empty by default, and safe for clients to ignore:
 }
 
 Calculation = { steps: Step[], result: string, citation_ids: string[] }
-Step = { index: integer, op: string, operands: Operand[], result: string }
+Step = {
+  index: integer, op: string, operands: Operand[], result: string,
+  kind: "currency" | "amount" | "ratio" | "percent" | "boolean" | null,
+  citation_ids: string[],          // this step's own evidence lineage
+  evidence_backed: boolean
+}
 Operand = {
   kind: "evidence" | "step" | "constant", value: string,
   citation_id: string | null, quote: string | null,   // evidence: exact span
@@ -200,7 +205,17 @@ expression evaluator. Each step is `{op, args}` with `op` in `add`, `subtract`,
   `%`/`percent`/`bps`/`percentage points`, `thousand|million|billion` and
   `k|m|bn`) and records the source value, scale and unit.
 - `{ref: "#n"}`: the result of an earlier step (0-based).
-- `{constant}`: one of 1, 2, 4, 12, 100, 1000, 1000000.
+- `{constant}`: one of 1, 2, 4, 12, 100, 1000, 1000000, only as the single
+  scaling or offset argument of a step that also has an evidence-backed argument:
+  either factor of `multiply`, the divisor of `divide`, the exponent of `exp`, or
+  `1` in `add`/`subtract` next to a ratio (`1 + growth`). Steps made only of
+  constants, constants in table ops, `greater` or `percent_change`, and
+  arithmetic on a `greater` result are rejected.
+
+Each step records its own citation lineage and a result kind: evidence
+percentages become ratios (fractions), `percent_change` and `ratio x 100` are
+percent, `amount / amount` is a ratio, and adding or tabulating percentages
+together with amounts is rejected.
 
 A number the model typed itself, an unknown citation, a partial or ambiguous
 span, or a forward reference returns `{"error": ...}` to the model so it can
@@ -223,7 +238,13 @@ identifiers and `FY2009`/`Q3` tokens are ignored. Matching:
   `15.27 percent`), capped at `LEDGER_VERIFICATION_MAX_ROUNDING_RATIO` (5%);
   `LEDGER_VERIFICATION_RELATIVE_TOLERANCE` (default 0) adds a relative tolerance;
 - requires compatible units: a percentage is never supported by a currency or
-  scaled amount; program ratios match percentages (`0.2534` supports `25.3%`);
+  scaled amount. Program results only support sentences citing that step's own
+  lineage, and only by kind: a ratio supports a percentage via x100 (`0.2534`
+  supports `25.3%`, never `0.25%`) or a bare multiple (`1.25x`), never a currency
+  or scaled amount; a percent result supports only percentages; amounts are
+  compared at full scale; `greater` results support nothing;
+- checks numbers glued to letters (`3.5x`, `12k`, `40m`) using their mantissa and
+  any known scale, so they cannot slip through unverified;
 - ignores sign, because answers often say "a loss of $1,234" for `(1,234)`.
 
 `LEDGER_VERIFICATION_MODE` is `enforce` (default: abstain with status `failed`),
