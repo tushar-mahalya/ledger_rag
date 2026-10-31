@@ -5,9 +5,14 @@ import {
   artifactDownload,
   extractArtifacts,
   remarkCitations,
+  remarkUnsupported,
   safeExternalUrl,
 } from "./markdown";
 import { visit } from "unist-util-visit";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { Root } from "mdast";
+import { Markdown } from "./components/Markdown";
 
 describe("safe artifacts and references", () => {
   it("only transforms citation text, never code blocks or existing link labels", () => {
@@ -71,5 +76,56 @@ describe("safe artifacts and references", () => {
   });
   it("caps artifact count", () => {
     expect(extractArtifacts("```\na\n```\n\n".repeat(20))).toHaveLength(12);
+  });
+});
+
+describe("unsupported-number marks in rendered Markdown", () => {
+  const render = (text: string, unsupported: string[]) =>
+    renderToStaticMarkup(
+      createElement(Markdown, {
+        text,
+        citations: [
+          {
+            id: "C1",
+            document_id: "d",
+            title: "T",
+            source: "urn:x",
+            published_at: "2026-01-01",
+            quote: "q",
+          },
+        ],
+        onCitation: () => undefined,
+        unsupported,
+      }),
+    );
+
+  it("marks numbers inside formatting and tables but not links or code", () => {
+    const html = render(
+      "Revenue grew **31%** to 150. [C1]\n\n| A | B |\n|---|---|\n| 31% | `31%` |\n\n[31%](https://example.com)",
+      ["31%"],
+    );
+    expect(html.match(/<mark class="unsupported-number"/g)).toHaveLength(2);
+    expect(html).toContain("<strong><mark");
+    expect(html).toContain("<code>31%</code>");
+    expect(html).toContain('href="https://example.com/"');
+    expect(html).toContain('aria-label="View citation C1: T"');
+  });
+
+  it("renders unchanged Markdown when nothing is unsupported", () => {
+    expect(render("Revenue was 150. [C1]", [])).not.toContain("<mark");
+  });
+
+  it("works on the mdast level next to citations", () => {
+    const tree = unified()
+      .use(remarkParse)
+      .use(remarkCitations)
+      .use(remarkUnsupported(["C1", "12"]))
+      .runSync(unified().use(remarkParse).parse("Up 12 points [C1]")) as Root;
+    const marks: string[] = [];
+    visit(tree, "emphasis", (node) => {
+      if (node.data?.hName === "mark")
+        marks.push((node.children[0] as { value: string }).value);
+    });
+    expect(marks).toEqual(["12"]);
   });
 });

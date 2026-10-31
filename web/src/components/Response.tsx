@@ -3,15 +3,26 @@ import {
   Activity as ActivityIcon,
   ArrowUpRight,
   Braces,
+  Calculator,
   Check,
   ChevronDown,
+  Compass,
   Copy,
+  FileSearch,
   FileText,
+  PenLine,
   RotateCcw,
+  ShieldCheck,
   Table2,
 } from "lucide-react";
-import type { Citation, Turn } from "../contracts";
+import type { Activity, Citation, Turn } from "../contracts";
+import { timeline } from "../grounding";
 import { extractArtifacts, type Artifact } from "../markdown";
+import {
+  AbstentionNotice,
+  CalculationTrace,
+  VerificationBadge,
+} from "./Grounding";
 const Markdown = lazy(() =>
   import("./Markdown").then((module) => ({ default: module.Markdown })),
 );
@@ -25,7 +36,7 @@ export function Response({
   onNotice,
 }: {
   turn: Turn;
-  onCitation: (citation: Citation) => void;
+  onCitation: (citation: Citation, quote?: string) => void;
   onArtifact: (artifact: Artifact) => void;
   onRun: () => void;
   onRetry: () => void;
@@ -36,6 +47,18 @@ export function Response({
     [turn.answer?.answer],
   );
   const pending = turn.status === "pending";
+  const rows = useMemo(() => timeline(turn.activities), [turn.activities]);
+  const answer = turn.answer;
+  const verification = answer?.verification;
+  const unsupported =
+    answer && !answer.abstained && verification?.status !== "verified"
+      ? (verification?.unsupported_numbers ?? [])
+      : [];
+  const calculations = answer?.calculations.length
+    ? answer.calculations
+    : answer?.calculation
+      ? [answer.calculation]
+      : [];
   return (
     <article className="turn" aria-label="Research exchange">
       <div className="question-row">
@@ -64,9 +87,15 @@ export function Response({
                 <span>
                   {pending
                     ? "Working with your evidence"
-                    : "Execution activity"}
+                    : turn.demo
+                      ? "Example activity · not executed"
+                      : "Execution activity"}
                 </span>
-                {!pending && <span>{turn.activities.length} events</span>}
+                {!pending && (
+                  <span>
+                    {rows.length} {rows.length === 1 ? "step" : "steps"}
+                  </span>
+                )}
                 <ChevronDown size={14} />
               </summary>
               <ol>
@@ -76,15 +105,31 @@ export function Response({
                     Request sent. Waiting for the service.
                   </li>
                 )}
-                {turn.activities.map((activity, index) => (
-                  <li key={index}>
-                    <span
-                      className={`activity-dot ${activity.status === "started" && pending ? "active" : ""}`}
-                    />
-                    {activity.label}
-                    <span className="activity-status">{activity.status}</span>
-                  </li>
-                ))}
+                {rows.map((row) => {
+                  const running = !row.done && pending;
+                  return (
+                    <li
+                      key={row.key}
+                      className={`timeline-row ${row.stage} ${running ? "running" : ""}`}
+                    >
+                      <span className="timeline-icon">
+                        <StageIcon activity={row} />
+                      </span>
+                      {row.label}
+                      <span className="activity-status">
+                        {row.done ? (
+                          <>
+                            <Check size={11} /> done
+                          </>
+                        ) : running ? (
+                          "in progress"
+                        ) : (
+                          "not completed"
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
               </ol>
               <p>
                 Server execution events, not the model&apos;s private reasoning.
@@ -101,18 +146,33 @@ export function Response({
               Waiting for a citation-checked answer
             </div>
           )}
-          {turn.answer && (
-            <Suspense
-              fallback={
-                <p className="subtle">Preparing the formatted answer...</p>
-              }
-            >
-              <Markdown
-                text={turn.answer.answer}
-                citations={turn.answer.citations}
-                onCitation={onCitation}
-              />
-            </Suspense>
+          {answer?.abstained && answer.abstention ? (
+            <AbstentionNotice
+              message={answer.answer}
+              abstention={answer.abstention}
+            />
+          ) : (
+            answer && (
+              <Suspense
+                fallback={
+                  <p className="subtle">Preparing the formatted answer...</p>
+                }
+              >
+                <Markdown
+                  text={answer.answer}
+                  citations={answer.citations}
+                  onCitation={onCitation}
+                  unsupported={unsupported}
+                />
+              </Suspense>
+            )
+          )}
+          {answer && !answer.abstained && calculations.length > 0 && (
+            <CalculationTrace
+              calculations={calculations}
+              citations={answer.citations}
+              onCitation={onCitation}
+            />
           )}
           {(turn.status === "error" || turn.status === "cancelled") && (
             <div
@@ -185,6 +245,9 @@ export function Response({
                     ? "Abstained"
                     : "References checked"}
               </span>
+              {verification && (
+                <VerificationBadge verification={verification} />
+              )}
               <span className="footer-spacer" />
               <button
                 className="icon-button"
@@ -216,5 +279,17 @@ export function Response({
         </div>
       </div>
     </article>
+  );
+}
+
+function StageIcon({ activity }: { activity: Activity }) {
+  if (activity.stage === "planning") return <Compass size={12} />;
+  if (activity.stage === "retrieval") return <FileSearch size={12} />;
+  if (activity.stage === "generation") return <PenLine size={12} />;
+  if (activity.stage === "validation") return <ShieldCheck size={12} />;
+  return activity.tool === "calculator" ? (
+    <Calculator size={12} />
+  ) : (
+    <FileSearch size={12} />
   );
 }
