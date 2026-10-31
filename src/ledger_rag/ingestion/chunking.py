@@ -11,8 +11,10 @@ Chunk profiles version the text that is embedded, sparse-indexed and reranked:
   collections stay valid; ``Chunk.index_text`` is left unset.
 - ``v2``: a deterministic document header (filing, section, table caption) plus the
   chunk body in which every Markdown table is replaced by a row-wise linearization
-  (``"<row label> | <column header>: <value>"``). ``text`` keeps the Markdown table
-  for display and citation.
+  (``"<row label> | <column header>: <value>"``). Each table unit starts with a header
+  block: the top-left cell as ``Units:``/``Rows:`` (dropped when the rendered caption
+  already contains it) and ``Column:`` lines for headers no row line carries in full.
+  ``text`` keeps the Markdown table for display and citation.
 - ``v3``: ``v2`` plus a cached per-document LLM summary line in the header.
 """
 
@@ -35,6 +37,7 @@ LABEL_CHARS = 160
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 _SEPARATOR = re.compile(r"\s*\|[\s:|-]+\|\s*")
 _CELL_SPLIT = re.compile(r"(?<!\\)\|")
+_UNITS = re.compile(r"\b(?:millions?|thousands?|billions?|dollars|percent(?:age)?)\b|[$%€£¥]")
 
 
 def _is_table(section: str) -> bool:
@@ -183,6 +186,12 @@ class _Unit:
     offset: int
     caption: str | None = None
     solo: bool = False
+    corner: str = ""
+
+    @property
+    def index_size(self) -> int:
+        # Upper bound: the corner line may be dropped when the rendered caption repeats it.
+        return len(self.index) + (len(_corner_line(self.corner)) + 1 if self.corner else 0)
 
 
 def _cells(line: str) -> list[str]:
@@ -198,12 +207,41 @@ def _label(text: str) -> str:
     return text if len(text) <= LABEL_CHARS else text[: LABEL_CHARS - 1].rstrip() + "…"
 
 
+def _full(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _corner_line(cell: str) -> str:
+    """The top-left header cell names the units or the row dimension (``$ in millions``)."""
+    kind = "Units" if _UNITS.search(cell.lower()) else "Rows"
+    return f"{kind}: {_full(cell)}"
+
+
+def table_header_lines(columns: list[str], rows: list[list[str]]) -> list[str]:
+    """Column headers that the row lines would not carry in full.
+
+    A header is emitted when it is clipped in row lines or no row has a value under it.
+    The top-left cell is handled separately (see ``_corner_line``).
+    """
+    lines = []
+    for position, header in enumerate(columns[1:], 1):
+        if not header.strip():
+            continue
+        has_value = any(position < len(cells) and cells[position] for cells in rows)
+        if not has_value or _label(header) != _full(header):
+            lines.append(f"Column: {_full(header)}")
+    return lines
+
+
 def linearize_row(columns: list[str] | None, cells: list[str]) -> list[str]:
-    """One line per value: ``row label | column header: value``; never splits a value."""
+    """One line per value: ``row label | column header: value``; never splits a value.
+
+    Labels are clipped to ``LABEL_CHARS``; a clipped row label is emitted once in full.
+    """
     if not cells:
         return []
     label = _label(cells[0])
-    lines: list[str] = []
+    lines: list[str] = [_full(cells[0])] if label != _full(cells[0]) else []
     for position, value in enumerate(cells[1:], 1):
         if not value:
             continue
@@ -211,6 +249,10 @@ def linearize_row(columns: list[str] | None, cells: list[str]) -> list[str]:
         cell = f"{header}: {value}" if header else value
         lines.append(f"{label} | {cell}" if label else cell)
     return lines or ([label] if label else [])
+
+
+def _table_preamble(columns: list[str], rows: list[list[str]]) -> tuple[str, list[str]]:
+    return columns[0] if columns else "", table_header_lines(columns, rows)
 
 
 def linearize_table(markdown: str) -> str:
@@ -223,7 +265,10 @@ def linearize_table(markdown: str) -> str:
     if not rows:
         return "\n".join(linearize_row(None, _cells(lines[0])))
     columns = _cells(lines[0])
-    return "\n".join(line for row in rows for line in linearize_row(columns, _cells(row)))
+    cells = [_cells(row) for row in rows]
+    corner, header_lines = _table_preamble(columns, cells)
+    body = [line for row in cells for line in linearize_row(columns, row)]
+    return "\n".join([*([_corner_line(corner)] if corner else []), *header_lines, *body])
 
 
 def _header_count(lines: list[str]) -> int:
@@ -282,21 +327,28 @@ def _table_units(
         parts = _pack_lines(linearize_row(None, _cells(lines[0])), index_chars) or [block]
         return [_Unit(block, part, section, offset, caption, solo=len(parts) > 1) for part in parts]
     columns = _cells(lines[0])
+    corner, preamble = _table_preamble(columns, [_cells(row) for row in rows])
+    # Every unit of the table repeats the header block, like the Markdown header rows.
+    reserved = sum(len(line) + 1 for line in preamble)
+    if corner:
+        reserved += len(_corner_line(corner)) + 1
     units: list[_Unit] = []
     group: list[str] = []
     linear: list[str] = []
 
+    def unit(text: str, body: list[str], solo: bool = False) -> _Unit:
+        index = "\n".join([*preamble, *body])
+        return _Unit(text, index, section, offset, caption, solo=solo, corner=corner)
+
     def flush() -> None:
         nonlocal group, linear
         if group:
-            units.append(
-                _Unit("\n".join([header, *group]), "\n".join(linear), section, offset, caption)
-            )
+            units.append(unit("\n".join([header, *group]), linear))
         group, linear = [], []
 
     for row in rows:
         row_lines = linearize_row(columns, _cells(row))
-        row_index = sum(len(line) + 1 for line in row_lines)
+        row_index = sum(len(line) + 1 for line in row_lines) + reserved
         if len(header) + len(row) + 1 > max_chars:
             flush()
             units.extend(
@@ -308,8 +360,8 @@ def _table_units(
             flush()
             text = f"{header}\n{row}"
             units.extend(
-                _Unit(text, part, section, offset, caption, solo=True)
-                for part in _pack_lines(row_lines, index_chars)
+                unit(text, [part], solo=True)
+                for part in _pack_lines(row_lines, index_chars - reserved)
             )
             continue
         text_size = len(header) + sum(len(r) + 1 for r in group) + len(row) + 1
@@ -347,6 +399,12 @@ def _contextual_units(
     return units
 
 
+def _unit_index(unit: _Unit, caption: str | None) -> str:
+    if not unit.corner or (caption and _full(unit.corner).lower() in caption.lower()):
+        return unit.index
+    return f"{_corner_line(unit.corner)}\n{unit.index}" if unit.index else _corner_line(unit.corner)
+
+
 def _chunk_contextual(
     document: Document,
     max_chars: int,
@@ -365,7 +423,7 @@ def _chunk_contextual(
     for unit in units:
         current = groups[-1] if groups else []
         text_size = sum(len(u.text) + 2 for u in current) + len(unit.text)
-        index_size = sum(len(u.index) + 2 for u in current) + len(unit.index)
+        index_size = sum(u.index_size + 2 for u in current) + unit.index_size
         if (
             not current
             or unit.solo
@@ -391,7 +449,7 @@ def _chunk_contextual(
         heading = headings.heading(section_starts[first.section] + first.offset, text)
         caption = next((u.caption for u in group if u.caption), None)
         header = render_header(context, section=heading, caption=caption, summary=summary)
-        index_text = header + "\n\n" + "\n\n".join(u.index for u in group)
+        index_text = header + "\n\n" + "\n\n".join(_unit_index(u, caption) for u in group)
         digest = hashlib.sha256(text.encode()).hexdigest()
         index_digest = hashlib.sha256(index_text.encode()).hexdigest()
         identifier = hashlib.sha256(

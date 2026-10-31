@@ -130,7 +130,9 @@ def test_v2_wide_row_linearization_is_split_on_value_boundaries() -> None:
     chunks = chunk_document(document, max_chars=1800, profile="v2", index_chars=1800)
     assert len(chunks) > 1
     assert len({c.text for c in chunks}) == 1
-    lines = [line for c in chunks for line in (c.index_text or "").split("\n\n", 1)[1].splitlines()]
+    bodies = [(c.index_text or "").split("\n\n", 1)[1].splitlines() for c in chunks]
+    assert all(body[0] == "Rows: label" for body in bodies)
+    lines = ["Rows: label", *(line for body in bodies for line in body[1:])]
     assert lines == linearize_table(document.text).splitlines()
     assert all(len((c.index_text or "").split("\n\n", 1)[1]) <= 1800 for c in chunks)
 
@@ -158,7 +160,55 @@ def test_linearization_handles_header_only_and_empty_cells() -> None:
     )
     assert linearize_row(["", "2009"], ["", "5"]) == ["2009: 5"]
     assert linearize_row(["", "2009"], ["operating activities", ""]) == ["operating activities"]
-    assert linearize_table("| k | a \\| b |\n|---|---|\n| r | 1 |") == "r | a | b: 1"
+    assert linearize_table("| k | a \\| b |\n|---|---|\n| r | 1 |") == "Rows: k\nr | a | b: 1"
+    assert linearize_table("| | a |\n|---|---|\n| r | 1 |") == "r | a: 1"
+
+
+def _v2_index(text: str) -> str:
+    document = Document(
+        id="GS/2014/page_47.pdf",
+        tenant_id="t",
+        title="GS annual report 2014, page 47",
+        text=text,
+        source="s",
+        published_at=date(2014, 12, 31),
+    )
+    return "\n\n".join(c.index_text or "" for c in chunk_document(document, profile="v2"))
+
+
+def test_top_left_units_cell_is_indexed_once() -> None:
+    table = "| $ in millions | 2014 | 2013 |\n|---|---|---|\n| total | 5 | 6 |"
+    index = _v2_index(f"Revenues grew.\n\n{table}")
+    assert "\nUnits: $ in millions\ntotal | 2014: 5\ntotal | 2013: 6" in index
+    captioned = _v2_index(f"The table below presents revenues ( $ in millions ) :\n\n{table}")
+    assert "Table: The table below presents revenues ( $ in millions ) :" in captioned
+    assert "Units:" not in captioned and "total | 2014: 5" in captioned
+    dimension = _v2_index("| december 31 | 2014 |\n|---|---|\n| total | 5 |")
+    assert "\nRows: december 31\ntotal | 2014: 5" in dimension
+
+
+def test_header_block_handles_empty_single_column_and_ragged_tables() -> None:
+    empty = _v2_index("| | 2014 |\n|---|---|\n| total | 5 |")
+    assert "Units:" not in empty and "Rows:" not in empty
+    single = _v2_index("| segment |\n|---|\n| americas |\n| europe |")
+    assert single.endswith("\n\nRows: segment\namericas\neurope")
+    ragged = _v2_index(
+        "| item | 2014 | 2013 | note |\n|---|---|---|---|\n| a | 1 |\n| b | 2 | 3 | 4 | x |"
+    )
+    body = ragged.split("\n\n", 1)[1]
+    assert body.splitlines() == [
+        "Rows: item",
+        "a | 2014: 1",
+        "b | 2014: 2",
+        "b | 2013: 3",
+        "b | note: 4",
+        "b | x",
+    ]
+    blank = _v2_index("| item | 2014 | restated |\n|---|---|---|\n| a | 1 | |")
+    assert "Column: restated" in blank
+    long_label = "net income attributable to " + "common " * 30
+    clipped = _v2_index(f"| item | {long_label} |\n|---|---|\n| {long_label} | 7 |")
+    assert clipped.count(" ".join(long_label.split())) == 2  # once as a row, once as a column
 
 
 def test_document_context_never_invents_company_names() -> None:
