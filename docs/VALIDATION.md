@@ -6,24 +6,55 @@ production targets. Re-run the commands before relying on these results.
 ## Verified source and packaging
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src/ledger_rag
-uv run pytest -q
-uv run python -m ledger_rag.evaluation.harness --smoke --repeats 20 --output reports/smoke.json
-uv build
+uv run --locked --group compute ruff check .
+uv run --locked --group compute ruff format --check .
+uv run --locked --group compute mypy src/ledger_rag scripts/clone_qdrant_benchmark.py
+uv run --locked --group compute mypy --strict --ignore-missing-imports compute
+uv run --locked --group compute pytest -q
+uv run --locked --group compute python -m ledger_rag.evaluation.harness --smoke --repeats 3
+uv build --no-sources
 ```
 
-- 192 tests passed.
+- 318 tests passed after the colocated-ingestion changes.
 - Ruff lint and formatting passed.
-- Strict mypy passed for 15 source modules.
+- Strict mypy passed for 39 service/helper files and three compute files.
 - Wheel and source distribution built successfully.
-- One upstream Starlette TestClient/httpx deprecation warning remains; it does not
-  affect the passing assertions or the production HTTP client.
+- Warnings include the upstream Starlette TestClient/httpx deprecation, intentional
+  local execution of mocked Modal functions, SDK compatibility probes and local
+  Qdrant's lack of payload indexing. Real-server indexing is checked separately.
 - Provider tests use mocked remote HTTP endpoints. Qdrant tests include the
   installed SDK's real local backend, not just response-shaped mocks.
 
+## Colocated ingestion validation
+
+- Tests run the Modal function body with fake GPU/Volume dependencies and a real
+  in-memory Qdrant store. They cover direct loopback embedding requests, complete
+  document batching, bounded uploads, tenant/duplicate/input rejection, count
+  mismatch, process exit/timeout/cancellation, failure sanitization and report
+  persistence only after verified uploads.
+- A remote-module-reimport regression verifies that the deployed query encoder
+  retains its model/revision configuration; deployment-shell values alone do
+  not propagate into Modal containers.
+- Vault projection tests verify protected temporary files, no secret-bearing
+  command arguments/logs, both projection targets, and cleanup on CLI failure.
+- An isolated live Qdrant 1.20.0 check uploaded three **synthetic** points, verified
+  schema-3 identity across different embedding endpoint addresses, ACL/date
+  filtering, existing-destination rejection and scalar vector copying. A further
+  live check verified tenant-aware/document/group/date payload indexes in both
+  original and copied staging collections. All smoke collections were removed;
+  the partial real FinQA index was untouched.
+- Production Compose accepts the external database/collection and embedding-space
+  configuration. Modal CLI help loads the new job successfully. The synthetic
+  evaluation's three-repeat threshold gate passed.
+- Modal platform access is authenticated. The active environment still has no
+  database secret, so GPU image execution, real model loading, remote database
+  connectivity, full-corpus ingestion and throughput/cost remain **unverified**.
+  Follow [the ingestion runbook](INGESTION.md) before launching a paid job.
+
 ## Measured synthetic benchmark
+
+The following numerical tables retain the earlier recorded benchmark, not a new
+neural or cloud measurement from the ingestion work.
 
 Configuration: lexical memory backend, `extractive-demo`, chat profile, top-k 5,
 four original fictional cases, 20 repeats (80 runs). Repeats are not additional

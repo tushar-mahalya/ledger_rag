@@ -148,6 +148,7 @@ def test_benchmark_settings_match_quantized_collection(mode: str, oversampling: 
         embedding_url="http://localhost:8080/v1",
         embedding_key="test-key",
         embedding_model="test-model",
+        embedding_space_id="test-space-v1",
         embedding_dimensions=768,
         query_prefix="query: ",
         rerank_candidates=20,
@@ -159,3 +160,4 @@ def test_benchmark_settings_match_quantized_collection(mode: str, oversampling: 
     assert settings.qdrant_oversampling == oversampling
     assert settings.qdrant_collection == args.collection
     assert settings.embedding_api_key == SecretStr("test-key")
+    assert settings.embedding_space_id == "test-space-v1"

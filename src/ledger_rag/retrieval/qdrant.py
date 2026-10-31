@@ -62,6 +62,7 @@ class QdrantRetriever:
         self._lock = asyncio.Lock()
         self._operation_lock = asyncio.Lock()
         self._write_uncertain = False
+        self._staging_collection = False
         self._identity = {
             "ledger_schema": 2,
             "chunk_text": "title-header-v1",
@@ -70,25 +71,63 @@ class QdrantRetriever:
             "embedding_dimensions": settings.embedding_dimensions,
             "sparse_model": "hashed-bm25-k1=1.2-b=0.75-avgdl=256-blake2s32-v1",
         }
+        if settings.embedding_space_id:
+            self._identity["ledger_schema"] = 3
+            self._identity["embedding_space_id"] = settings.embedding_space_id
+            del self._identity["embedding_endpoint"]
+
+    async def _create_collection(self) -> None:
+        created = await self._client.create_collection(
+            collection_name=self._collection,
+            vectors_config={
+                "dense": models.VectorParams(
+                    size=self._settings.embedding_dimensions,
+                    distance=models.Distance.COSINE,
+                    on_disk=True if self._settings.qdrant_quantization != "none" else None,
+                )
+            },
+            sparse_vectors_config={
+                "sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)
+            },
+            quantization_config=self._quantization(),
+            metadata=self._identity,
+        )
+        if not created:
+            raise RetrievalError("Qdrant did not acknowledge collection creation")
+
+    async def create_empty_collection(self) -> None:
+        """Claim a new staging collection; never reuse an existing or partial index."""
+        async with self._operation_lock:
+            self._check_write_state()
+            async with self._lock:
+                if await self._client.collection_exists(self._collection):
+                    raise RetrievalError("Destination collection already exists; use a new name")
+                await self._create_collection()
+            await self._ensure_collection(create=False)
+            indexes: dict[str, models.PayloadSchemaType | models.KeywordIndexParams] = {
+                "tenant_id": models.KeywordIndexParams(
+                    type=models.KeywordIndexType.KEYWORD, is_tenant=True
+                ),
+                "document_id": models.PayloadSchemaType.KEYWORD,
+                "allowed_groups": models.PayloadSchemaType.KEYWORD,
+                "published_day": models.PayloadSchemaType.INTEGER,
+            }
+            for name, schema in indexes.items():
+                await self._client.create_payload_index(
+                    self._collection, field_name=name, field_schema=schema, wait=True
+                )
+            self._staging_collection = True
+
+    async def count(self) -> int:
+        async with self._operation_lock:
+            self._check_write_state()
+            await self._ensure_collection(create=False)
+            return (await self._client.count(self._collection, exact=True)).count
 
     async def _ensure_collection(self, *, create: bool) -> None:
         async with self._lock:
             if create and not await self._client.collection_exists(self._collection):
-                await self._client.create_collection(
-                    collection_name=self._collection,
-                    vectors_config={
-                        "dense": models.VectorParams(
-                            size=self._settings.embedding_dimensions,
-                            distance=models.Distance.COSINE,
-                            on_disk=True if self._settings.qdrant_quantization != "none" else None,
-                        )
-                    },
-                    sparse_vectors_config={
-                        "sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)
-                    },
-                    quantization_config=self._quantization(),
-                    metadata=self._identity,
-                )
+                await self._create_collection()
             info = await self._client.get_collection(self._collection)
             vectors = info.config.params.vectors
             sparse = info.config.params.sparse_vectors
@@ -194,11 +233,19 @@ class QdrantRetriever:
             self._check_write_state()
             await self._upsert(chunks)
 
+    async def append_staging(self, chunks: list[Chunk]) -> None:
+        """Skip redundant stale deletes only for a collection claimed by this instance."""
+        async with self._operation_lock:
+            self._check_write_state()
+            if not self._staging_collection:
+                raise RetrievalError("Staging writes require a newly claimed collection")
+            await self._upsert(chunks, replace_documents=False)
+
     def _check_write_state(self) -> None:
         if self._write_uncertain:
             raise RetrievalError("Qdrant mutation outcome is uncertain; reconciliation required")
 
-    async def _upsert(self, chunks: list[Chunk]) -> None:
+    async def _upsert(self, chunks: list[Chunk], *, replace_documents: bool = True) -> None:
         if not chunks:
             return
         if len({chunk.id for chunk in chunks}) != len(chunks):
@@ -235,27 +282,32 @@ class QdrantRetriever:
             )
             documents[(chunk.tenant_id, chunk.document_id)].append(point_id)
         self._write_uncertain = True
-        await self._client.upsert(self._collection, points=points, wait=True)
-        for (tenant, document), current_ids in documents.items():
-            await self._client.delete(
-                self._collection,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="tenant_id", match=models.MatchValue(value=tenant)
-                            ),
-                            models.FieldCondition(
-                                key="document_id", match=models.MatchValue(value=document)
-                            ),
-                        ],
-                        must_not=[
-                            models.HasIdCondition(has_id=[point_id for point_id in current_ids])
-                        ],
-                    )
-                ),
-                wait=True,
+        size = self._settings.qdrant_upsert_batch_size
+        for start in range(0, len(points), size):
+            await self._client.upsert(
+                self._collection, points=points[start : start + size], wait=True
             )
+        if replace_documents:
+            for (tenant, document), current_ids in documents.items():
+                await self._client.delete(
+                    self._collection,
+                    points_selector=models.FilterSelector(
+                        filter=models.Filter(
+                            must=[
+                                models.FieldCondition(
+                                    key="tenant_id", match=models.MatchValue(value=tenant)
+                                ),
+                                models.FieldCondition(
+                                    key="document_id", match=models.MatchValue(value=document)
+                                ),
+                            ],
+                            must_not=[
+                                models.HasIdCondition(has_id=[point_id for point_id in current_ids])
+                            ],
+                        )
+                    ),
+                    wait=True,
+                )
         self._write_uncertain = False
 
     @staticmethod

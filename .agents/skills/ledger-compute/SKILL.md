@@ -7,6 +7,7 @@ description: "Use when executing or releasing Ledger's Modal training and GPU in
 
 [training app](../../../compute/training.py),
 [inference app](../../../compute/inference.py),
+[colocated ingestion](../../../compute/ingestion.py),
 [registry](../../../src/ledger_rag/training/registry.py).
 SDK details: [upstream Modal skill](../modal/SKILL.md).
 Credentials: [headless authentication](../../../docs/AGENT_WORKFLOWS.md#headless-modal-authentication).

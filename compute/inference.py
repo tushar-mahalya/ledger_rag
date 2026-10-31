@@ -1,9 +1,9 @@
 """Elastic GPU embedding/reranking tier on Modal (Text Embeddings Inference).
 
 The service's OpenAI-compatible embedding client and TEI rerank client talk to these
-endpoints unchanged, so bulk ingestion runs through the production code path on a GPU
-that scales to zero. Query-time traffic for the IVR stays on the low-latency local CPU
-tier (same model, INT8 ONNX); ``parity`` quantifies the drift between the two.
+endpoints unchanged. Bulk ingestion uses compute/ingestion.py to colocate embedding
+and database writes instead. The warm CPU query tier needs measured INT8 parity;
+``parity`` quantifies drift and does not automatically authorize index sharing.
 
 Deploy::
 
@@ -28,13 +28,22 @@ APP_NAME = "ledger-inference"
 GPUS = ["L4", "L40S"]
 TEI_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:89-1.8"
 EMBED_MODEL = os.environ.get("LEDGER_EMBED_MODEL", "Alibaba-NLP/gte-modernbert-base")
+EMBED_REVISION = os.environ.get("LEDGER_EMBED_REVISION", "")
 RERANK_MODEL = os.environ.get("LEDGER_RERANK_MODEL", "Alibaba-NLP/gte-reranker-modernbert-base")
 PORT = 8000
 
 image = (
     modal.Image.from_registry(TEI_IMAGE, add_python="3.12")
     .entrypoint([])
-    .env({"HUGGINGFACE_HUB_CACHE": "/cache/tei", "HF_HUB_ENABLE_HF_TRANSFER": "0"})
+    .env(
+        {
+            "HUGGINGFACE_HUB_CACHE": "/cache/tei",
+            "HF_HUB_ENABLE_HF_TRANSFER": "0",
+            "LEDGER_EMBED_MODEL": EMBED_MODEL,
+            "LEDGER_EMBED_REVISION": EMBED_REVISION,
+            "LEDGER_RERANK_MODEL": RERANK_MODEL,
+        }
+    )
 )
 app = modal.App(APP_NAME, image=image)
 models_volume = modal.Volume.from_name("ledger-models", create_if_missing=True)
@@ -42,12 +51,13 @@ cache_volume = modal.Volume.from_name("ledger-hf-cache", create_if_missing=True)
 SECRETS = [modal.Secret.from_name("ledger-tei", required_keys=["TEI_API_KEY"])]
 
 
-def _router(model_id: str, max_batch_tokens: int) -> None:
+def _router(model_id: str, max_batch_tokens: int, revision: str = "") -> None:
     subprocess.Popen(
         [
             "text-embeddings-router",
             "--model-id",
             model_id,
+            *(["--revision", revision, "--dtype", "float16"] if revision else []),
             "--port",
             str(PORT),
             "--api-key",
@@ -77,7 +87,7 @@ COMMON = {
 @modal.concurrent(max_inputs=128)
 @modal.web_server(port=PORT, startup_timeout=600)
 def embed() -> None:
-    _router(EMBED_MODEL, 65536)
+    _router(EMBED_MODEL, 65536, EMBED_REVISION)
 
 
 @app.function(**COMMON)  # type: ignore[arg-type]

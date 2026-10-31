@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     embedding_api_key: SecretStr | None = None
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = Field(default=1536, ge=32, le=8192)
+    embedding_space_id: str = Field(default="", max_length=256, pattern=r"^[a-zA-Z0-9._:/@+-]*$")
     # Instruction prefix some embedding models expect on queries only (e.g. BGE, E5, Arctic).
     embedding_query_prefix: str = Field(default="", max_length=200)
     retrieval_fusion: Literal["hybrid", "dense", "sparse"] = "hybrid"
@@ -45,6 +46,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: SecretStr | None = None
     qdrant_collection: str = "ledger_chunks"
+    qdrant_upsert_batch_size: int = Field(default=128, ge=1, le=2048)
     seed_path: Path | None = None
     rate_limit_per_minute: int = Field(default=60, ge=1)
     max_concurrent_queries: int = Field(default=32, ge=1, le=1000)

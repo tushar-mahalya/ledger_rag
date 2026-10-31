@@ -215,6 +215,14 @@ No dashboards, alert rules, managed SIEM, or measured SLO compliance are implied
 
 ## TLS, zero trust, and cloud rollout
 
+For batch indexing, use the [Modal ingestion runbook](INGESTION.md). The job
+receives a dedicated database credential through the `ledger-ingestion` Modal
+Secret projected from Vault, performs embeddings and uploads in one GPU
+container, and leaves Qdrant persistence outside that container. The production
+overlay accepts `LEDGER_QDRANT_URL`, `LEDGER_QDRANT_COLLECTION` and
+`LEDGER_EMBEDDING_SPACE_ID` for a verified cloud-built index; defaults preserve
+the bundled database and legacy collection identity.
+
 Expose only a TLS ingress/API gateway, enforce modern TLS, request/body limits,
 OIDC policy, shared per-tenant rate quotas, and egress allowlists. For Kubernetes,
 use cert-manager with a reviewed ACME or private-CA issuer; renew certificates

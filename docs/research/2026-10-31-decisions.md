@@ -115,3 +115,19 @@ deploy endpoints merely to validate agent instructions.
     Authentication must be resolved explicitly before continuing; no automatic
     CPU fallback. A warm IVR query tier and bounded local tests/parity checks remain
     separate concerns. See [agent workflows](../AGENT_WORKFLOWS.md).
+
+## Colocated ingestion implementation
+
+- Modal access is now verified by successful read-only app/secret listing; the
+    prior missing-token observation is superseded. No cloud job has been launched.
+- Added a single-container GPU build: pinned input -> production chunks ->
+    loopback TEI -> direct dense/sparse Qdrant uploads -> exact count -> committed
+    manifest. A new-only destination prevents partial builds from silently
+    replacing the serving index. Qdrant is external and persistent.
+- Explicit schema-3 embedding-space identity decouples model/revision identity
+    from endpoint location; schema-2 behavior remains unchanged by default.
+    Ingestion and query endpoints must use compatible pinned rendering/model
+    settings. An ID is not a substitute for serving parity.
+- Read-only checks found no Modal database secret. GPU execution, actual
+    throughput and database reachability remain unverified; see the
+    [ingestion runbook](../INGESTION.md) for provisioning and release gates.

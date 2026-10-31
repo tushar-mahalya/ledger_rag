@@ -114,6 +114,88 @@ async def test_no_stale_delete_after_failed_embedding_or_upsert() -> None:
     await retriever.close()
 
 
+async def test_bounded_uploads_delete_stale_chunks_only_after_all_batches() -> None:
+    retriever, client, _ = await store()
+    retriever._settings.qdrant_upsert_batch_size = 1
+    chunks = [chunk(), chunk("tenant/doc/1", ordinal=1)]
+    await retriever.upsert(chunks)
+    assert [len(call.kwargs["points"]) for call in client.upsert.await_args_list] == [1, 1]
+    current_ids = client.delete.call_args.kwargs["points_selector"].filter.must_not[0].has_id
+    assert current_ids == [str(uuid5(NAMESPACE_URL, c.id)) for c in chunks]
+    client.delete.reset_mock()
+    client.upsert.side_effect = [None, RuntimeError("second batch failed")]
+    with pytest.raises(RuntimeError, match="second batch"):
+        await retriever.upsert(chunks)
+    client.delete.assert_not_called()
+    with pytest.raises(RetrievalError, match="uncertain"):
+        await retriever.count()
+    await retriever.close()
+
+
+async def test_new_collection_refuses_existing_destination_before_embedding() -> None:
+    retriever, client, requests = await store()
+    with pytest.raises(RetrievalError, match="already exists"):
+        await retriever.create_empty_collection()
+    client.create_collection.assert_not_called()
+    assert not requests
+    client.collection_exists.return_value = False
+    client.create_collection.return_value = False
+    with pytest.raises(RetrievalError, match="acknowledge"):
+        await retriever.create_empty_collection()
+    client.create_collection.return_value = True
+    await retriever.create_empty_collection()
+    indexes = {
+        call.kwargs["field_name"]: call.kwargs["field_schema"]
+        for call in client.create_payload_index.await_args_list
+    }
+    assert set(indexes) == {"tenant_id", "document_id", "allowed_groups", "published_day"}
+    assert indexes["tenant_id"].is_tenant is True
+    assert indexes["published_day"] == models.PayloadSchemaType.INTEGER
+    assert all(call.kwargs["wait"] for call in client.create_payload_index.await_args_list)
+    client.count.return_value = models.CountResult(count=0)
+    assert await retriever.count() == 0
+    assert client.count.call_args.kwargs["exact"] is True
+    await retriever.close()
+
+
+async def test_staging_upload_requires_new_collection_and_avoids_stale_deletes() -> None:
+    retriever, client, requests = await store()
+    with pytest.raises(RetrievalError, match="newly claimed"):
+        await retriever.append_staging([chunk()])
+    assert not requests
+    client.collection_exists.return_value = False
+    await retriever.create_empty_collection()
+    client.collection_exists.return_value = True
+    await retriever.append_staging([chunk()])
+    client.upsert.assert_awaited_once()
+    client.delete.assert_not_called()
+    await retriever.close()
+
+
+async def test_explicit_embedding_space_is_transport_independent_and_opt_in() -> None:
+    base = Settings(
+        demo_token=SecretStr("testing-only"),
+        embedding_space_id="tei-1.8-float16:model@revision",
+    )
+    first = QdrantRetriever(base)
+    second = QdrantRetriever(
+        base.model_copy(update={"embedding_base_url": "http://127.0.0.1:8000/v1"})
+    )
+    different = QdrantRetriever(base.model_copy(update={"embedding_space_id": "other-space"}))
+    legacy = QdrantRetriever(base.model_copy(update={"embedding_space_id": ""}))
+    try:
+        assert first._identity == second._identity
+        assert first._identity["ledger_schema"] == 3
+        assert "embedding_endpoint" not in first._identity
+        assert different._identity != first._identity
+        assert legacy._identity["ledger_schema"] == 2
+        assert "embedding_endpoint" in legacy._identity
+        assert legacy._identity != first._identity
+    finally:
+        for retriever in [first, second, different, legacy]:
+            await retriever.close()
+
+
 async def test_duplicate_and_cross_tenant_ids_rejected() -> None:
     retriever, client, requests = await store()
     with pytest.raises(RetrievalError, match="Duplicate"):

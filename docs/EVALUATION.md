@@ -377,7 +377,17 @@ that leaked labels and inflated results. Pin a corrected revision and test
 positive/negative serialization parity. That construction leak is separate from
 LLM-pretraining contamination; both require disclosure.
 
-**Local Qdrant retrieval/quantization experiment (optional):**
+**Bulk baseline:** use [colocated Modal ingestion](INGESTION.md), then copy the
+verified manifest's collection, model, dimensions and embedding-space ID into
+the benchmark configuration. Both the benchmark CLI and clone helper accept
+`--embedding-space-id` or `LEDGER_EMBEDDING_SPACE_ID`. Database credentials come
+from the secret-managed environment; model credentials should not be supplied
+as literal command arguments.
+
+**Explicit local parity/debug experiment only (not the bulk default):**
+
+The following legacy endpoint-bound commands are retained for approved local
+experiments. They do not apply unchanged to a Modal-built schema-3 index.
 
 ```sh
 # One complete, idempotent upsert into a dedicated local collection.

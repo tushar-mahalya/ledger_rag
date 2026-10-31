@@ -29,7 +29,7 @@ not the number of frameworks in the diagram.
 | Operations | Structured redacted logs, request/trace IDs, OTLP traces, Prometheus metrics, Docker, Vault Agent templates, CI |
 | Evaluation | Retrieval/answer smoke tests, authorization/failure-path suites, reproducible evaluation and HTTP benchmarking |
 | Voice gateway | Generic PCM and Twilio Media Streams adapters, VAD and barge-in; synthetic lifecycle tests, not verified carrier calls |
-| Compute plane | Modal training/inference code, leakage-aware mining and model manifests; remote execution and serving promotion still need validation |
+| Compute plane | Colocated Modal GPU ingestion with direct Qdrant writes, training/inference, mining and model manifests; remote execution still needs validation |
 | Agent workflows | Portable Agent Skills, shared working agreement, official Modal reference and CI validation |
 
 **Important boundaries:** valid citation markers do not establish semantic
@@ -88,7 +88,7 @@ publicly or treat an unsecured local Vault as a production secrets service.
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy src/ledger_rag
-uv run pytest -q
+uv run --group compute pytest -q
 uv run python -m ledger_rag.evaluation.harness --smoke --repeats 20 --output reports/smoke.json
 ```
 
@@ -111,6 +111,7 @@ of concurrency capacity.
 - [Architecture and execution paths](docs/ARCHITECTURE.md)
 - [Primary-source research and dataset decisions](docs/RESEARCH.md)
 - [Deployment, secrets, observability and recovery](docs/OPERATIONS.md)
+- [Single-container Modal ingestion and database uploads](docs/INGESTION.md)
 - [Evaluation and experiment design](docs/EVALUATION.md)
 - [Measured validation results and remaining promotion gates](docs/VALIDATION.md)
 
@@ -133,6 +134,7 @@ Secrets are read at startup: rotate files, then roll the application instances.
 | OpenAI-compatible LLM | `LEDGER_PROVIDER=openai`, `LEDGER_LLM_BASE_URL`, `LEDGER_LLM_MODEL`, `LEDGER_LLM_API_KEY` |
 | Anthropic-compatible LLM | `LEDGER_PROVIDER=anthropic`, messages-compatible base URL, model and key |
 | Dense embeddings | `LEDGER_EMBEDDING_BASE_URL`, model, matching dimensions and API key |
+| Colocated ingestion identity | `LEDGER_EMBEDDING_SPACE_ID` from the verified job manifest; empty retains legacy endpoint-bound collections |
 | Persistent index | `LEDGER_RETRIEVAL_BACKEND=qdrant`, URL/collection and optional API key |
 | Dense index compression | `LEDGER_QDRANT_QUANTIZATION=none` (default), `scalar`, or experimental `binary`; `LEDGER_QDRANT_OVERSAMPLING=2.0` |
 | Cross-encoder | Optional `LEDGER_RERANKER_URL` (TEI base URL) and API key |

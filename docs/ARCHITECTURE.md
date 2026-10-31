@@ -59,6 +59,17 @@ This is a **modular monolith**, not microservices: one deployable API process, b
 
 ## 3. Retrieval pipeline design
 
+### Implemented bulk compute path
+
+[Modal ingestion](INGESTION.md) colocates dataset loading, production chunking,
+loopback TEI GPU embedding and direct Qdrant writes in one disposable container.
+The persistent database remains external. Each build claims a new collection,
+verifies exact point counts and commits a manifest before returning; serving
+cutover is an explicit operator gate. Schema-3 embedding-space identity separates
+model/revision compatibility from network endpoint location while legacy
+endpoint-bound collections retain their original checks. Cloud runtime and
+throughput validation remain outstanding.
+
 **[TARGET] full pipeline:**
 1. Ingest SEC filing (or other licensed source) → parent-section + child-sentence/table-row chunking (RESEARCH.md §2, LlamaIndex pattern).
 2. Contextual augmentation: prepend LLM-generated chunk context (company/filing/period/line-item) per Anthropic's Contextual Retrieval methodology (RESEARCH.md §2) — [FUTURE] relative to current build; not yet implemented.

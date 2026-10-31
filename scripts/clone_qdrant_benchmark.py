@@ -27,6 +27,7 @@ def settings(
     embedding_url: str,
     embedding_model: str,
     quantization: Quantization,
+    embedding_space_id: str = "",
 ) -> Settings:
     qdrant_key = os.environ.get("LEDGER_QDRANT_API_KEY")
     return Settings(
@@ -38,6 +39,7 @@ def settings(
         embedding_base_url=embedding_url,
         embedding_api_key=SecretStr("not-used-for-vector-copy"),
         embedding_model=embedding_model,
+        embedding_space_id=embedding_space_id,
         embedding_dimensions=dimensions,
         qdrant_quantization=quantization,
     )
@@ -53,6 +55,7 @@ async def clone(
     embedding_model: str,
     quantization: Quantization,
     batch_size: int,
+    embedding_space_id: str = "",
 ) -> int:
     source_store = QdrantRetriever(
         settings(
@@ -61,6 +64,7 @@ async def clone(
             dimensions=dimensions,
             embedding_url=embedding_url,
             embedding_model=embedding_model,
+            embedding_space_id=embedding_space_id,
             quantization="none",
         )
     )
@@ -71,6 +75,7 @@ async def clone(
             dimensions=dimensions,
             embedding_url=embedding_url,
             embedding_model=embedding_model,
+            embedding_space_id=embedding_space_id,
             quantization=quantization,
         )
     )
@@ -81,7 +86,7 @@ async def clone(
             raise ValueError(f"Destination collection already exists: {destination}")
         await source_store._ensure_collection(create=False)
         source_count = (await source_store._client.count(collection_name=source, exact=True)).count
-        await destination_store._ensure_collection(create=True)
+        await destination_store.create_empty_collection()
 
         offset: Any | None = None
         copied = 0
@@ -135,6 +140,9 @@ def main() -> None:
     parser.add_argument("--dimensions", type=int, default=768)
     parser.add_argument("--embedding-url", default="http://127.0.0.1:18080/v1")
     parser.add_argument("--embedding-model", default="Alibaba-NLP/gte-modernbert-base")
+    parser.add_argument(
+        "--embedding-space-id", default=os.environ.get("LEDGER_EMBEDDING_SPACE_ID", "")
+    )
     parser.add_argument("--quantization", choices=["scalar", "binary"], required=True)
     parser.add_argument("--batch-size", type=int, default=128)
     args = parser.parse_args()
@@ -150,6 +158,7 @@ def main() -> None:
             dimensions=args.dimensions,
             embedding_url=args.embedding_url,
             embedding_model=args.embedding_model,
+            embedding_space_id=args.embedding_space_id,
             quantization=args.quantization,
             batch_size=args.batch_size,
         )

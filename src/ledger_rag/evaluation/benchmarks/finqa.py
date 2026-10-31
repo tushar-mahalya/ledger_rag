@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import random
 import re
 import statistics
@@ -227,6 +228,7 @@ def bench_settings(args: argparse.Namespace, **overrides: Any) -> Settings:
         "embedding_base_url": args.embedding_url,
         "embedding_api_key": SecretStr(args.embedding_key),
         "embedding_model": args.embedding_model,
+        "embedding_space_id": args.embedding_space_id,
         "embedding_dimensions": args.embedding_dimensions,
         "embedding_query_prefix": args.query_prefix,
         "qdrant_quantization": args.quantization,
@@ -412,8 +414,13 @@ def main() -> None:
     parser.add_argument("--qdrant-url", default="http://localhost:6333")
     parser.add_argument("--collection", default="finqa_bench")
     parser.add_argument("--embedding-url", default="http://localhost:8080/v1")
-    parser.add_argument("--embedding-key", default="local-unused")
+    parser.add_argument(
+        "--embedding-key", default=os.environ.get("LEDGER_EMBEDDING_API_KEY", "local-unused")
+    )
     parser.add_argument("--embedding-model", default="Alibaba-NLP/gte-modernbert-base")
+    parser.add_argument(
+        "--embedding-space-id", default=os.environ.get("LEDGER_EMBEDDING_SPACE_ID", "")
+    )
     parser.add_argument("--embedding-dimensions", type=int, default=768)
     parser.add_argument("--query-prefix", default="")
     parser.add_argument(
@@ -459,6 +466,7 @@ def main() -> None:
             "test_questions": len(cases),
         },
         "embedding_model": args.embedding_model,
+        "embedding_space_id": args.embedding_space_id,
         "reranker": args.reranker_url and "gte-reranker-modernbert-base",
         "quantization": args.quantization,
         "oversampling": args.oversampling,

@@ -148,6 +148,8 @@ submits SDK jobs still needs platform authentication.
 
 - Run bulk embedding, benchmark model inference and training on Modal.
   A local CLI can orchestrate these remote calls; that is not local model compute.
+- [Colocated ingestion](INGESTION.md) loads documents, embeds over loopback and
+  uploads directly from one GPU job to a new persistent Qdrant collection.
 - Local unit tests and synthetic smoke remain useful; CPU/GPU parity checks are
   explicitly bounded exceptions. Warm query serving is a separate IVR latency
   decision, not a reason to run batch workloads locally.
@@ -187,7 +189,7 @@ Run focused tests for the changed component first. The broader service gate is:
 uv run --locked ruff check .
 uv run --locked ruff format --check .
 uv run --locked mypy src/ledger_rag
-uv run --locked pytest -q
+uv run --locked --group compute pytest -q
 ```
 
 For compute changes, also run
