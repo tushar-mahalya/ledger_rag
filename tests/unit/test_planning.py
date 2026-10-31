@@ -455,3 +455,19 @@ def test_settings_validate_decision_backend(settings: Settings) -> None:
     )
     assert isinstance(make_planner(configured, None).engine, LayaDecisionEngine)
     assert make_planner(settings, FakeProvider([])).provider is None  # extractive: no LLM
+
+
+@pytest.mark.parametrize(
+    ("text", "year"),
+    [
+        ("Revenue in FY99", 1999),
+        ("Revenue in FY'05", 2005),
+        ("Revenue in FY 19", 2019),
+        ("Revenue in fiscal 99", 1999),
+        ("Revenue in fiscal year 07", 2007),
+        ("Revenue in FY49", 2049),
+        ("Revenue in FY50", 1950),
+    ],
+)
+def test_two_digit_fiscal_years_use_pivot(text: str, year: int) -> None:
+    assert analyze(text).years == (year,)

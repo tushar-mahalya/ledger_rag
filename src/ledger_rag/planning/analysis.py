@@ -20,7 +20,7 @@ _TICKER = re.compile(r"^[A-Z][A-Z0-9.&-]{0,9}$")
 _DOCUMENT_ID = re.compile(r"^([A-Z][A-Z0-9.&-]{0,9})/((?:19|20)\d\d)/")
 _TITLE = re.compile(r"^([A-Z][A-Z0-9.&-]{0,9}) annual report ((?:19|20)\d\d)\b")
 _YEAR = re.compile(r"(?<![\d$.,])((?:19[5-9]|20[0-4])\d)(?![\d%])")
-_SHORT_FY = re.compile(r"\bfy\s?'?(\d\d)\b", re.I)
+_SHORT_FY = re.compile(r"\b(?:fy|fiscal(?: year)?)\s?['’]?(\d\d)\b", re.I)
 _QUARTER = re.compile(r"\b(q[1-4])\b|\b(first|second|third|fourth) quarter\b", re.I)
 _UPPER_TOKEN = re.compile(r"(?<![A-Za-z0-9])[A-Z][A-Z0-9.&-]{0,9}(?![A-Za-z0-9])")
 _FOLLOW_UP = re.compile(
@@ -217,10 +217,15 @@ class QueryAnalysis:
         return bool(self.metrics) and bool(self.companies or self.years) and not self.follow_up
 
 
+def _expand_two_digit(year: int) -> int:
+    # Pivot consistent with _YEAR's 1950-2049 window: 50-99 -> 19xx, 00-49 -> 20xx.
+    return 1900 + year if year >= 50 else 2000 + year
+
+
 def find_years(text: str) -> list[int]:
     found: list[int] = []
     for year in [int(m.group(1)) for m in _YEAR.finditer(text)] + [
-        2000 + int(m.group(1)) for m in _SHORT_FY.finditer(text)
+        _expand_two_digit(int(m.group(1))) for m in _SHORT_FY.finditer(text)
     ]:
         if year not in found:
             found.append(year)
