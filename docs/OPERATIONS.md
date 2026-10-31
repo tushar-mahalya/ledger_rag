@@ -327,11 +327,24 @@ Compose limits API to 1 CPU/768 MiB, concurrency to the app default 32, and Qdra
 to 2 CPU/2 GiB; these are **starting budgets, not capacity measurements**. Run one
 uvicorn worker and **one API replica** for this reference. Do not enable horizontal
 autoscaling or multiple workers: document replacement is serialized only inside
-one instance, and failed-replacement quarantine is in-memory, not durable.
-Restarting an API is **not safe repair** and can forget a quarantine without
-repairing stored ACL/chunk consistency. If replacement fails, stop ingestion and
-restrict affected queries, reconcile the full authoritative document/ACL state
-with the index, and validate recovery before restoring traffic.
+one instance (reads there run concurrently; writes are exclusive).
+
+Failed-replacement quarantine is **durable and fails closed**. Before mutating, a
+writer stores a `ledger_write_lease` (`writer`, `expires_at`) in the Qdrant
+collection metadata and removes it only after all upserts and stale deletes
+succeed; long writes refresh it. Searches and readiness already read collection
+metadata, so an expired lease (crash, cancellation, restart or failure
+mid-replacement) makes **every** instance, including restarted ones, unready
+and refuse searches and writes. An unexpired lease held by another process is an
+in-flight write: reads continue and other writers refuse. This is best-effort
+coordination, not a distributed lock. Size `LEDGER_QDRANT_WRITE_LEASE_SECONDS`
+(default 120) above one upsert batch plus the stale deletes; an over-long write
+fails closed until it finishes. Restarting an API is **not repair**. If a
+replacement fails, stop ingestion, reconcile the full authoritative
+document/ACL state with the index, validate it, then explicitly release the
+lease with `uv run python scripts/release_qdrant_write_lease.py
+--confirm-reconciled` (same `LEDGER_*` settings as the API) before restoring
+traffic.
 
 Horizontal scaling requires a distributed index coordinator, durable ACL
 versioning, and a transactional ingestion outbox/reconciliation mechanism first.

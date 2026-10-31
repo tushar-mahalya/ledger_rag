@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
@@ -13,7 +14,12 @@ from qdrant_client import AsyncQdrantClient, models
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import Chunk, Principal, QueryRequest
-from ledger_rag.retrieval.qdrant import QdrantRetriever, RetrievalError, _sparse
+from ledger_rag.retrieval.qdrant import (
+    WRITE_LEASE_KEY,
+    QdrantRetriever,
+    RetrievalError,
+    _sparse,
+)
 
 
 def chunk(chunk_id: str = "tenant/doc/0", **updates: Any) -> Chunk:
@@ -736,3 +742,114 @@ async def test_embedding_requests_are_sub_batched_in_order() -> None:
     await retriever.upsert(chunks)
     assert [len(json.loads(r.content)["input"]) for r in requests] == [2, 2, 1]
     assert json.loads(requests[2].content)["input"] == ["Results\ntext 4"]
+
+
+async def test_write_lease_brackets_mutations_and_survives_failures() -> None:
+    retriever, client, _ = await store()
+    calls: list[str] = []
+    client.update_collection.side_effect = lambda *a, **k: calls.append(
+        "lease" if k["metadata"][WRITE_LEASE_KEY] else "release"
+    )
+    client.upsert.side_effect = lambda *a, **k: calls.append("upsert")
+    client.delete.side_effect = lambda *a, **k: calls.append("delete")
+    await retriever.upsert([chunk()])
+    assert calls == ["lease", "upsert", "delete", "release"]
+    lease = client.update_collection.await_args_list[0].kwargs["metadata"][WRITE_LEASE_KEY]
+    assert lease["writer"] == retriever._writer_id
+    assert lease["expires_at"] > time.time() + 100
+    calls.clear()
+
+    def fail_delete(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("delete failed")
+
+    client.delete.side_effect = fail_delete
+    with pytest.raises(RuntimeError, match="delete failed"):
+        await retriever.upsert([chunk()])
+    assert calls == ["lease", "upsert"], "a failed write must leave the durable lease in place"
+    await retriever.close()
+
+
+async def test_long_writes_refresh_their_lease() -> None:
+    retriever, client, _ = await store()
+    retriever._settings = retriever._settings.model_copy(
+        update={"qdrant_upsert_batch_size": 1, "qdrant_write_lease_seconds": 10}
+    )
+    clock = [1000.0]
+
+    def advance(*args: Any, **kwargs: Any) -> None:
+        clock[0] += 6
+
+    client.upsert.side_effect = advance
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("ledger_rag.retrieval.qdrant.time.time", lambda: clock[0])
+        await retriever.upsert([chunk(), chunk("tenant/doc/1"), chunk("tenant/doc/2")])
+    leases = [
+        call.kwargs["metadata"][WRITE_LEASE_KEY]
+        for call in client.update_collection.await_args_list
+    ]
+    assert [lease["expires_at"] for lease in leases[:-1]] == [1010.0, 1016.0, 1022.0]
+    assert leases[-1] is None
+    await retriever.close()
+
+
+@pytest.mark.parametrize("lease", ["corrupt", {"writer": "other"}, {"expires_at": "soon"}])
+async def test_malformed_write_lease_fails_closed(lease: Any) -> None:
+    retriever, client, _ = await store()
+    client.get_collection.return_value.config.metadata[WRITE_LEASE_KEY] = lease
+    assert not await retriever.ready()
+    with pytest.raises(RetrievalError, match="abandoned write lease"):
+        await retriever.search(
+            QueryRequest(question="revenue"), Principal(subject="user", tenant_id="tenant")
+        )
+    with pytest.raises(RetrievalError, match="abandoned write lease"):
+        await retriever.upsert([chunk()])
+    client.query_points.assert_not_called()
+    client.upsert.assert_not_called()
+    await retriever.close()
+
+
+async def test_abandoned_write_is_visible_to_other_and_restarted_instances() -> None:
+    writer, first_mock, _ = await store()
+    reader, second_mock, _ = await store()
+    await first_mock.close()
+    await second_mock.close()
+    shared = AsyncQdrantClient(":memory:")
+    writer._client = reader._client = shared
+    await writer.bootstrap()
+    await writer.upsert([chunk()])
+    query, principal = QueryRequest(question="revenue"), Principal(subject="u", tenant_id="tenant")
+    assert [hit.chunk.id for hit in await reader.search(query, principal)] == ["tenant/doc/0"]
+
+    original_delete = shared.delete
+
+    async def crash(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("process died mid-replacement")
+
+    shared.delete = crash  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="mid-replacement"):
+        await writer.upsert([chunk("replacement")])
+    shared.delete = original_delete  # type: ignore[method-assign]
+
+    # In flight from the reader's point of view: reads continue, other writers refuse.
+    assert await reader.ready()
+    assert await reader.search(query, principal)
+    with pytest.raises(RetrievalError, match="Another writer"):
+        await reader.upsert([chunk("third")])
+
+    # After expiry every instance, including a freshly started one, fails closed.
+    with pytest.MonkeyPatch.context() as patch:
+        later = time.time() + 10**6
+        patch.setattr("ledger_rag.retrieval.qdrant.time.time", lambda: later)
+        restarted, restarted_mock, _ = await store()
+        await restarted_mock.close()
+        restarted._client = shared
+        for instance in [reader, restarted]:
+            assert not await instance.ready()
+            with pytest.raises(RetrievalError, match="abandoned write lease"):
+                await instance.search(query, principal)
+        await restarted.release_write_lease()
+        assert await reader.ready()
+        assert await restarted.search(query, principal)
+        await restarted._embedding_client.aclose()
+    await writer._embedding_client.aclose()
+    await reader.close()

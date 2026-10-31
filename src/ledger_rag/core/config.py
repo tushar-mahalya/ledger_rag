@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     # Reliability controls. Unset generation fields are omitted from provider requests.
     qdrant_bootstrap_on_startup: bool = False
+    qdrant_write_lease_seconds: float = Field(default=120, ge=5, le=86400)
 
     @model_validator(mode="after")
     def validate_deployment(self) -> "Settings":

@@ -128,7 +128,7 @@ Sources: [API](../src/ledger_rag/api/app.py),
 | Reranking | Optional TEI cross-encoder; configurable candidate count, voice bypass | Measure quality/latency tradeoff; an extra network hop is not free |
 | Compression | Optional scalar/binary vector quantization with dense rescoring; `none` bypasses it | Distinct from CPU INT8 model inference; neither has demonstrated corpus-wide uplift here |
 | Bulk builds | One Modal GPU container writes a new collection, creates filter indexes and verifies counts before committing a manifest | No automatic resume, online cutover, distributed write lock or production release |
-| Small replacements | Upload all new chunks before tenant/document-scoped stale deletion; uncertain writes quarantine that instance | Not transactional across processes; a restart is not reconciliation |
+| Small replacements | Upload all new chunks before tenant/document-scoped stale deletion; a write lease in collection metadata makes an abandoned write fail closed in every instance | Not transactional; the lease is best-effort coordination, not a distributed lock; release only after reconciliation |
 
 See [ingestion and release boundaries](INGESTION.md),
 [Qdrant implementation](../src/ledger_rag/retrieval/qdrant.py) and

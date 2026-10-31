@@ -8,7 +8,17 @@ instance, reads run concurrently while writes and collection management are
 exclusive (writer-preferring), so a search never observes this instance's own
 half-applied replacement. The instance refuses further operations after an
 uncertain mutation; recovery requires external reconciliation, not a retry.
-Other instances require external serialization and coordinated recovery.
+
+Write uncertainty is also durable and shared: before mutating, a writer stores
+a lease ``{writer, expires_at}`` in the collection metadata and removes it only
+after every upsert and stale delete succeeded. Every instance already reads the
+collection metadata on each search and readiness check, so an *expired* lease
+(writer crashed, was cancelled or restarted mid-replacement) fails closed in all
+instances and across restarts, at no extra round trip. An unexpired foreign lease
+is an in-flight write: reads continue (replacement was never transactional) and
+other writers refuse. The check-then-set is best effort, not a distributed lock;
+concurrent writers still need external serialization. Recovery is explicit:
+reconcile, then ``release_write_lease()``.
 
 Readiness is read-only: it validates reachability, schema/identity and write
 state and never creates or alters a collection. Provisioning (collection,
@@ -21,10 +31,12 @@ import asyncio
 import hashlib
 import math
 import re
+import time
 from collections import Counter, defaultdict
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from uuid import NAMESPACE_URL, uuid5
+from typing import Any
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 from pydantic import ValidationError
@@ -38,6 +50,9 @@ from ledger_rag.ingestion.chunking import contextual_text
 
 class RetrievalError(RuntimeError):
     """A retrieval transport, embedding or collection compatibility failure."""
+
+
+WRITE_LEASE_KEY = "ledger_write_lease"
 
 
 def _sparse(text: str, *, document: bool) -> models.SparseVector:
@@ -118,6 +133,8 @@ class QdrantRetriever:
         )
         self._gate = _ReadWriteGate()
         self._write_uncertain = False
+        self._writer_id = uuid4().hex
+        self._lease_expires = 0.0
         self._staging_collection = False
         self._identity = {
             "ledger_schema": 2,
@@ -191,7 +208,7 @@ class QdrantRetriever:
             await self._ensure_collection(create=False)
             return (await self._client.count(self._collection, exact=True)).count
 
-    async def _ensure_collection(self, *, create: bool) -> None:
+    async def _ensure_collection(self, *, create: bool) -> dict[str, Any]:
         """Validate the collection; ``create`` is only legal while holding the write gate."""
         if create and not await self._client.collection_exists(self._collection):
             try:
@@ -227,6 +244,39 @@ class QdrantRetriever:
                     "Qdrant quantization configuration is incompatible; "
                     "provision or migrate the collection explicitly"
                 )
+        lease = metadata.get(WRITE_LEASE_KEY)
+        if lease is not None and not self._owns(lease) and not self._lease_active(lease):
+            raise RetrievalError(
+                "Qdrant collection has an abandoned write lease; reconciliation required"
+            )
+        return metadata
+
+    def _owns(self, lease: object) -> bool:
+        return isinstance(lease, dict) and lease.get("writer") == self._writer_id
+
+    @staticmethod
+    def _lease_active(lease: object) -> bool:
+        expires = lease.get("expires_at") if isinstance(lease, dict) else None
+        return (
+            isinstance(expires, int | float)
+            and not isinstance(expires, bool)
+            and math.isfinite(expires)
+            and expires > time.time()
+        )
+
+    async def _set_lease(self) -> None:
+        expires = time.time() + self._settings.qdrant_write_lease_seconds
+        await self._client.update_collection(
+            self._collection,
+            metadata={WRITE_LEASE_KEY: {"writer": self._writer_id, "expires_at": expires}},
+        )
+        self._lease_expires = expires
+
+    async def release_write_lease(self) -> None:
+        """Operator acknowledgement that the collection was reconciled after a failed write."""
+        async with self._gate.write():
+            await self._client.update_collection(self._collection, metadata={WRITE_LEASE_KEY: None})
+            self._write_uncertain = False
 
     def _quantization(self) -> models.QuantizationConfig | None:
         mode = self._settings.qdrant_quantization
@@ -324,7 +374,9 @@ class QdrantRetriever:
             return
         if len({chunk.id for chunk in chunks}) != len(chunks):
             raise RetrievalError("Duplicate chunk IDs in upsert")
-        await self._ensure_collection(create=True)
+        lease = (await self._ensure_collection(create=True)).get(WRITE_LEASE_KEY)
+        if lease is not None and not self._owns(lease):
+            raise RetrievalError("Another writer holds the Qdrant write lease")
         ids = [str(uuid5(NAMESPACE_URL, chunk.id)) for chunk in chunks]
         owners = {point_id: chunk for point_id, chunk in zip(ids, chunks, strict=True)}
         existing = await self._client.retrieve(
@@ -355,12 +407,15 @@ class QdrantRetriever:
                 )
             )
             documents[(chunk.tenant_id, chunk.document_id)].append(point_id)
+        await self._set_lease()
         try:
             await self._apply(points, documents, replace_documents=replace_documents)
         except BaseException:
-            # Failure or cancellation mid-mutation leaves an unknown mixture of chunks.
+            # Failure or cancellation mid-mutation leaves an unknown mixture of chunks;
+            # the durable lease is deliberately left to expire so every instance fails closed.
             self._write_uncertain = True
             raise
+        await self._client.update_collection(self._collection, metadata={WRITE_LEASE_KEY: None})
 
     async def _apply(
         self,
@@ -371,6 +426,8 @@ class QdrantRetriever:
     ) -> None:
         size = self._settings.qdrant_upsert_batch_size
         for start in range(0, len(points), size):
+            if self._lease_expires - time.time() < self._settings.qdrant_write_lease_seconds / 2:
+                await self._set_lease()
             await self._client.upsert(
                 self._collection, points=points[start : start + size], wait=True
             )
