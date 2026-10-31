@@ -8,13 +8,15 @@ payloads, and IDs are copied without re-embedding or exposing document contents.
 import argparse
 import asyncio
 import os
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import SecretStr
 from qdrant_client import models
 
 from ledger_rag.core.config import Settings
 from ledger_rag.retrieval.qdrant import QdrantRetriever
+
+Quantization = Literal["none", "scalar", "binary"]
 
 
 def settings(
@@ -24,7 +26,7 @@ def settings(
     dimensions: int,
     embedding_url: str,
     embedding_model: str,
-    quantization: str,
+    quantization: Quantization,
 ) -> Settings:
     qdrant_key = os.environ.get("LEDGER_QDRANT_API_KEY")
     return Settings(
@@ -49,7 +51,7 @@ async def clone(
     dimensions: int,
     embedding_url: str,
     embedding_model: str,
-    quantization: str,
+    quantization: Quantization,
     batch_size: int,
 ) -> int:
     source_store = QdrantRetriever(
@@ -79,8 +81,7 @@ async def clone(
             raise ValueError(f"Destination collection already exists: {destination}")
         await source_store._ensure_collection(create=False)
         source_count = (await source_store._client.count(collection_name=source, exact=True)).count
-        if not await destination_store.ready():
-            raise RuntimeError(f"Could not provision destination collection: {destination}")
+        await destination_store._ensure_collection(create=True)
 
         offset: Any | None = None
         copied = 0
@@ -92,10 +93,15 @@ async def clone(
                 with_payload=True,
                 with_vectors=True,
             )
-            points = [
-                models.PointStruct(id=record.id, vector=record.vector, payload=record.payload)
-                for record in records
-            ]
+            points = []
+            for record in records:
+                if record.vector is None:
+                    raise RuntimeError(f"Source record has no vector: {record.id}")
+                points.append(
+                    models.PointStruct.model_validate(
+                        {"id": record.id, "vector": record.vector, "payload": record.payload}
+                    )
+                )
             if points:
                 await destination_store._client.upsert(
                     collection_name=destination, points=points, wait=True
