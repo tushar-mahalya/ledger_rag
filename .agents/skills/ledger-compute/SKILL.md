@@ -1,60 +1,44 @@
 ---
 name: ledger-compute
-description: "Use when running or changing Ledger's Modal training, GPU embedding/reranking, dataset mining, ONNX/INT8 export, parity checks or model promotion."
+description: "Use when executing or releasing Ledger's Modal training and GPU inference jobs, including ONNX/INT8 export and serving parity. Adds project release gates to the official Modal SDK skill; not for unrelated API work."
 ---
 
-# Right-sized Modal compute with auditable promotion
+# Ledger Modal compute workflow
 
-## Read
-
-[Official Modal skill](../modal/SKILL.md),
 [training app](../../../compute/training.py),
 [inference app](../../../compute/inference.py),
-[mining](../../../src/ledger_rag/training/data.py),
 [registry](../../../src/ledger_rag/training/registry.py).
+SDK details: [upstream Modal skill](../modal/SKILL.md).
+Credentials: [headless authentication](../../../docs/AGENT_WORKFLOWS.md#headless-modal-authentication).
 
-## Procedure
+## Execution boundary
 
-1. Match the official skill version to the locked SDK; use `--help` for actual
-   signatures. Generic SDK examples do not override this project's safeguards.
-2. Before remote calls, confirm account/profile, dataset rights, GPU availability,
-   approved per-run spend and cancellation/timeout plan. Authenticate outside chat.
-   Never reuse a pasted token or multiply accounts to bypass limits.
-3. Run offline validation first:
+- Bulk embeddings, reranking benchmarks and training run on Modal. Its CPU
+  workers handle fetch/mining and INT8 evaluation; GPU workers handle models.
+  The local CLI coordinates remote calls; it need not do model computation.
+- Local unit tests, synthetic smoke and explicit CPU parity checks are valid.
+  A warm query-serving tier avoids scale-to-zero cold starts on IVR traffic.
+- Verify platform access with `modal app list --limit 5` under the locked compute
+  environment. A profile selection alone is not proof of access. Missing auth
+  blocks remote work; do not silently substitute local CPU inference.
+- Platform tokens authenticate CLI/SDK calls. `ledger-tei` / `TEI_API_KEY` protects
+  HTTP inference separately; use [Vault projection](../../../scripts/sync_modal_secrets.sh).
 
-   ```bash
-   uv run --locked pytest -q tests/unit/test_training.py
-   uv run --locked --group compute mypy --strict --ignore-missing-imports compute
-   uv run --locked --group compute modal --version
-   uv run --locked --group compute modal profile current
-   ```
+## Job and release checks
 
-4. CPU handles fetch/mining and INT8 evaluation; GPU handles training and elastic
-   batch inference. L4/L40S are inference options. Training currently defaults
-   to H100 via `LEDGER_MODAL_TRAIN_GPU`; benchmark runtime x current price before
-   calling that cheapest. Timeouts/container limits are not dollar caps.
-5. Preserve locked images, Volume reload/commit boundaries, train/dev/test
-   separation, false-negative filtering, production text rendering and clean
-   Git lineage. Do not mount extra workspace files or secrets into images.
-6. Only after approval, run one bounded job, observe it, and record its ID/cost:
+1. Confirm target workspace, data lineage, authorized resource/time limits and
+   cancellation plan. H100 training and L4/L40S inference are defaults, not proven
+   cost optima. Credit balances and timeouts are not hard spending caps.
+2. Run the scoped job and retain its ID, artifact/manifest identity, runtime and
+   cost. `modal deploy` publishes persistent endpoints, not an offline check.
+3. Check committed artifacts from a fresh worker, export success and serving parity.
+   `PROMOTED` currently gates only float-model dev metrics, not INT8 or live
+   serving. Do not auto-deploy that pointer. Dev selection/gating is optimistic;
+   held-out test is reporting-only. Remote runtime validation remains required.
 
-   ```bash
-   uv run --locked --group compute modal run compute/training.py --kind embedder --epochs 1
-   ```
+## Offline validation
 
-   Use `--kind reranker` for the separate reranker job; do not launch both blindly.
-   Use [Vault projection](../../../scripts/sync_modal_secrets.sh) for serving keys.
-   `modal deploy` creates persistent endpoints; it is not an offline check.
-7. Inspect baseline/dev/guard metrics, held-out test, export status and INT8 parity.
-   Current `PROMOTED` reflects the float-model dev gate, **not** an INT8 or live
-   serving gate. Do not deploy it automatically. Dev checkpoint selection plus
-   dev promotion is optimistic; test is reporting-only.
-8. Verify fresh workers see committed artifacts. Version serving/index identities;
-   check rollback before deploying. Record ONNX failure rather than claiming CPU
-   parity. The current pipeline needs remote runtime validation before production.
-
-## Done / stop
-
-Return job/manifest identity, GPU/runtime/cost, metrics and deployment status.
-Stop on missing auth, invalid data lineage, budget uncertainty, failed export,
-non-finite metrics or unverified serving parity. Never train on held-out questions.
+```bash
+uv run --locked pytest -q tests/unit/test_training.py
+uv run --locked --group compute mypy --strict --ignore-missing-imports compute
+```

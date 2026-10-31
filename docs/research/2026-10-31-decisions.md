@@ -95,3 +95,23 @@ deploy endpoints merely to validate agent instructions.
   real voice measurements, remote training/parity, optional GenAI/Langfuse,
   a justified control plane, deployment/restore drills and production documentation.
   None is silently marked complete by the agent-skills work.
+
+  ## Agent workflow and execution correction
+
+  - Reduced eight skills to three: benchmark execution, project compute/release,
+    and the unchanged upstream Modal reference. Component navigation stays in docs;
+    project invariants stay in `AGENTS.md`. `.agents/skills` is canonical, with
+    per-skill `.claude/skills` aliases. Fewer instructions are not proof of better
+    reasoning; validate discovery and task behavior in the actual clients.
+  - Confirmed with locked Modal 1.6.3 CLI/SDK documentation that token credentials
+    support browser-free authentication, including direct `MODAL_TOKEN_ID` /
+    `MODAL_TOKEN_SECRET` environment injection. Browser token creation is optional.
+    Platform credentials and TEI endpoint keys serve different trust boundaries.
+  - The attempted access check returned `Token missing`. No Modal job or deployment
+    ran. Local bulk inference was an execution-placement mistake, not a Modal
+    limitation: both benchmark model containers are now stopped. Qdrant data is
+    retained; ingestion is incomplete and is not an accepted benchmark baseline.
+  - Bulk embedding, benchmark inference and training are assigned to Modal.
+    Authentication must be resolved explicitly before continuing; no automatic
+    CPU fallback. A warm IVR query tier and bounded local tests/parity checks remain
+    separate concerns. See [agent workflows](../AGENT_WORKFLOWS.md).

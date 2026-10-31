@@ -1,53 +1,43 @@
 ---
 name: ledger-evaluation
-description: "Use when running FinQA/FinanceBench benchmarks, retrieval ablations, numeric-answer evaluation, leakage checks, latency tests or model promotion evidence."
+description: "Use when executing or comparing Ledger FinQA benchmarks, retrieval/quantization ablations, or model-promotion measurements. Not needed for ordinary retrieval code edits or general research."
 ---
 
-# Reproducible evaluation, not leaderboard theatre
+# Ledger benchmark workflow
 
-## Read
+Commands and report interpretation: [evaluation runbook](../../../docs/EVALUATION.md).
+Implementation: [FinQA](../../../src/ledger_rag/evaluation/benchmarks/finqa.py),
+[generic harness](../../../src/ledger_rag/evaluation/harness.py).
 
-[Methodology](../../../docs/EVALUATION.md),
-[generic harness](../../../src/ledger_rag/evaluation/harness.py),
-[FinQA harness](../../../src/ledger_rag/evaluation/benchmarks/finqa.py),
-[training data](../../../src/ledger_rag/training/data.py).
+## Run and compare
 
-## Procedure
+1. Freeze corpus/split, models, candidate counts, ACL scope and hardware before
+   comparing arms. Use dev for selection; test is reporting-only.
+2. Inspect existing jobs/results before ingestion. Verify pinned data checksums,
+   completed ingestion and exact point counts before accepting a baseline.
+3. Use identical cases for sparse/dense/hybrid/hybrid:rerank. Report company and
+   global scopes separately. Run bulk model inference on Modal, not a local fallback.
+4. Save machine-readable results with Git/data/model lineage, sample size,
+   failures, latency and cost. Distinguish pilots from full-split measurements.
 
-1. State the hypothesis and primary/guard metrics before running. Fix corpus,
-   split, seed, candidate counts, ACL scope, model revision, backend and hardware.
-2. Check corpus rights and contamination. Train only on train; use dev for
-   selection. Keep test untouched until the decision. Repeated test-driven tuning
-   invalidates a held-out claim; use a new holdout.
-3. Begin with the credential-free checks:
+## Non-obvious harness limits
 
-   ```bash
-   uv run --locked pytest -q tests/unit/test_evaluation.py tests/unit/test_finqa_benchmark.py tests/unit/test_training.py
-   uv run --locked python -m ledger_rag.evaluation.harness --smoke --repeats 3
-   uv run --locked python -m ledger_rag.evaluation.benchmarks.finqa --help
-   ```
+- FinQA `--limit` takes the first N evaluation cases; it does not limit ingestion.
+  There is no ingest resume flag. Restarting re-embeds the full corpus.
+- [Collection cloning](../../../scripts/clone_qdrant_benchmark.py) reuses vectors
+  for quantization ablations. The source must be quiescent; the destination must
+  not exist. Preserve the baseline and inspect partial destinations after failure.
+- Qdrant scalar/binary compression and ONNX/INT8 model inference are different
+  approximations. `none` bypasses vector quantization, including on compressed indexes.
+- Numeric answer matching is heuristic, not official program execution or
+  semantic faithfulness. Citation validity is not entailment.
+- The generic harness requires `--remote --tenant` and explicit
+  `--allow-index-write` for writes. Synthetic smoke is not a real-data quality score.
 
-4. For real data, verify the fetch script's pinned checksums, complete ingestion
-   and expected corpus/chunk counts before scoring. A partially populated index
-   is not a valid baseline. Inspect existing job/results before restarting work.
-   FinQA `--limit` limits evaluation cases, **not ingestion**. There is no ingest
-   resume/dry-run flag; restarting attempts full-corpus upserts and embedding cost.
-5. Compare sparse, dense, hybrid and hybrid:rerank with identical queries. FinQA
-   supports `--configs`, `--scopes company global`, `--limit`, and
-   `--answer-modes`; confirm accepted values in current CLI/source.
-   Company-scoped and global retrieval are different tasks; report both.
-6. Separate retrieved vs oracle evidence answers, numeric accuracy, abstention,
-   citation validity and semantic support. A citation marker is not entailment.
-7. Measure warm/cold latency, p50/p95/p99, concurrency, error rate and cost.
-   Count failures in denominators. Report sample size, uncertainty, timeout/rate
-   limits and whether the reranker consumed CPU or GPU.
-8. Save machine-readable outputs with Git/data/model lineage; publish aggregates,
-   not secrets or unrestricted source documents. Use the actual production path.
+## Local checks (no model server needed)
 
-## Done / stop
-
-Return baseline/candidate metrics, tradeoffs, artifact path and pass/fail decision.
-Stop before remote evaluation without approved credentials, scope, cost and
-mutation permission. The generic harness requires `--remote --tenant` and
-`--allow-index-write` for writes. Do not pass real keys in CLI arguments.
-Synthetic smoke success is never FinQA accuracy or real IVR latency.
+```bash
+uv run --locked pytest -q tests/unit/test_evaluation.py tests/unit/test_finqa_benchmark.py
+uv run --locked python -m ledger_rag.evaluation.harness --smoke --repeats 3
+uv run --locked python -m ledger_rag.evaluation.benchmarks.finqa --help
+```

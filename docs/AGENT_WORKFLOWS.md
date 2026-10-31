@@ -37,24 +37,36 @@ configure that client to load the canonical files. CI checks every alias target.
 Restart/reload a client after adding skills. Clients that scan both locations may
 deduplicate by skill name; confirm the selected source rather than assuming it.
 
-## Choose a workflow
+## Three skills, not a component-by-component instruction stack
+
+Keep `.agents/skills` canonical and `.claude/skills` as discovery aliases, not
+copies. Neither directory improves model reasoning by itself; the useful
+difference is which clients discover it.
+
+The original eight skills are reduced to two project workflows plus the upstream
+Modal reference. Retrieval, generation, voice, operations and research skills
+were retired: they mostly repeated component documentation and general engineering
+advice. Their shared safety invariants remain in [AGENTS.md](../AGENTS.md).
+This follows the [Agent Skills authoring guidance](https://agentskills.io/skill-creation/best-practices):
+add non-obvious project knowledge, keep coherent task boundaries, and omit what
+the agent already knows. It is not a measured claim of better model performance.
 
 | Skill | Use for |
 |---|---|
-| [ledger-retrieval](../.agents/skills/ledger-retrieval/SKILL.md) | Chunking, model/index identity, hybrid search, quantization and reranking |
-| [ledger-evaluation](../.agents/skills/ledger-evaluation/SKILL.md) | FinQA, leakage, ablations, answer correctness and latency/cost evidence |
-| [ledger-generation](../.agents/skills/ledger-generation/SKILL.md) | Protocol adapters, grounded tools, citations, abstention and authorization |
-| [ledger-voice](../.agents/skills/ledger-voice/SKILL.md) | Audio framing, VAD, barge-in, cancellation and speech latency |
-| [ledger-compute](../.agents/skills/ledger-compute/SKILL.md) | Modal training/inference, mining, exports and promotion limitations |
-| [ledger-operations](../.agents/skills/ledger-operations/SKILL.md) | Vault/OIDC, deployment, observability and recovery |
-| [ledger-research](../.agents/skills/ledger-research/SKILL.md) | Source verification, architecture tradeoffs, experiments and decision retention |
-| [modal](../.agents/skills/modal/SKILL.md) | Official SDK/CLI reference; pair with `ledger-compute` for project safeguards |
+| [ledger-evaluation](../.agents/skills/ledger-evaluation/SKILL.md) | Executing/comparing benchmarks; corpus, split, cloning and metric pitfalls |
+| [ledger-compute](../.agents/skills/ledger-compute/SKILL.md) | Executing/releasing project compute jobs; auth, placement and promotion gates |
+| [modal](../.agents/skills/modal/SKILL.md) | Unmodified upstream SDK/CLI guidance |
 
-Descriptions are the discovery surface. For example, "change Qdrant quantization
-without changing tenant filters" should select `ledger-retrieval`; "evaluate a new
-reranker on frozen dev" should select `ledger-evaluation`. Ask the client to name
-the skill it loaded, without executing cloud commands, to smoke-test discovery.
-Validate this manually in each target client after upgrades.
+Ordinary component edits need no project skill. Navigate through
+[architecture](ARCHITECTURE.md), [operations](OPERATIONS.md),
+[evaluation](EVALUATION.md) and [research decisions](research/2026-10-31-decisions.md)
+as needed. Do not load all skills, force delegation or prescribe a universal
+reasoning sequence. Choose relevant evidence and checks for the task.
+
+Descriptions are the discovery surface. "Compare a reranker on frozen dev"
+should select `ledger-evaluation`; "fix a voice cancellation test" should not.
+Ask the client which skill it loaded without executing cloud commands to test
+discovery after upgrades. This manual client check is separate from static CI.
 
 ## Official Modal skill
 
@@ -67,6 +79,8 @@ uv run --locked --group compute modal skills install --yes --no-docs
 `--no-docs` intentionally avoids vendoring a large, rapidly stale documentation
 snapshot. The skill links to official docs; use relevant pages/CLI `--help`
 on demand. It is upstream content, not a project-authored workflow.
+Its broad Modal trigger is upstream policy; the two project skills do not repeat
+SDK guidance or expand that trigger to unrelated tasks.
 The installed text matches `modal skills show` from the locked SDK (apart from
 terminal whitespace). Its Apache-2.0
 [license](../.agents/skills/modal/LICENSE) is retained from that distribution.
@@ -85,23 +99,69 @@ execute newly suggested commands. Keep installation workspace-local (no
 `--global`). The official reference does not authorize spending or deployment.
 No token is needed for this bundled skill installation.
 
-### Authentication is separate
+## Headless Modal authentication
 
-Revoke any token exposed in chat. Then authenticate in your own terminal:
+**Browser login is not required for token-authenticated CLI, SDK or CI use.**
+`modal token new` is optional browser-based token creation, not a prerequisite
+when credentials already exist. Revoke exposed credentials before production use.
+
+For one-time workstation configuration, enter credentials in your own terminal,
+not in command arguments, source files or chat:
 
 ```bash
-uv run --locked --group compute modal token new --profile tushki10200 --activate
-uv run --locked --group compute modal profile current
+uv run --locked --group compute modal token set --profile tushki10200 --activate --verify
+uv run --locked --group compute modal app list --limit 5
 ```
 
-Do not paste tokens back into chat. Activation only selects a profile; it does not
-prove API access. After authentication, a read-only
-`uv run --locked --group compute modal app list --limit 5` verifies access.
-Training/deployment still requires budget and scope approval.
+With token arguments omitted, `token set` prompts for them and writes the local
+Modal configuration outside the repository. This requires terminal input, but
+not a browser. Use `modal profile activate tushki10200` to select an existing
+profile. Profile selection alone does not verify access.
+
+For fully noninteractive CI/deployment, have the secret manager inject
+`MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` into the CLI/SDK process environment.
+The installed SDK reads them directly; no `token set`, profile file or browser
+is needed. Environment values override profile values. Disable shell tracing
+and never dump the environment or print secrets. The repository does not yet
+provision Vault delivery of these two platform credentials.
+
+After injection, this read-only check verifies access without starting compute:
+
+```bash
+uv run --locked --group compute modal app list --limit 5
+```
+
+These are separate credential boundaries:
+
+| Credential | Consumer | Purpose |
+|---|---|---|
+| Modal token ID + secret | CLI/SDK/job submitter | Deploy/manage apps and submit remote jobs |
+| `TEI_API_KEY` in `ledger-tei` | Modal TEI servers and authorized HTTP clients | Protect embedding/reranking endpoints |
+| Vault identity/token | Secret projection process | Read approved Vault paths |
+
+[Vault projection](../scripts/sync_modal_secrets.sh) provisions `ledger-tei`;
+it does **not** log the CLI into Modal. HTTP clients of the deployed TEI endpoints
+use the TEI key, not platform credentials or browser login. A backend that also
+submits SDK jobs still needs platform authentication.
+
+## Compute placement
+
+- Run bulk embedding, benchmark model inference and training on Modal.
+  A local CLI can orchestrate these remote calls; that is not local model compute.
+- Local unit tests and synthetic smoke remain useful; CPU/GPU parity checks are
+  explicitly bounded exceptions. Warm query serving is a separate IVR latency
+  decision, not a reason to run batch workloads locally.
+- Missing credentials, deployment or endpoint connectivity are explicit blockers.
+  Do not silently fall back to local CPU model servers. Scope/budget authorization
+  is still required; an account credit balance is not a per-run cap.
+- Before switching embedding backends, validate rendering/model identity and
+  parity. Never append different model/precision outputs to a partial index
+  without an explicit compatibility decision or isolated rebuild.
 
 ## Maintenance and validation
 
-- Keep the working agreement brief and project-owned skills under 120 lines.
+- Keep project skills around 40-60 lines; 120 is the validator's ceiling, not a target.
+  Add a skill only for a demonstrated, repeatable workflow that docs alone do not cover.
   Use common `name`/`description` fields; avoid client-specific tool/model bindings.
 - Link to existing source/tests/docs instead of copying implementations.
 - When adding a skill, add its relative directory symlink in `.claude/skills`;
@@ -119,6 +179,22 @@ Training/deployment still requires budget and scope approval.
 These are static repository checks, not proof a client loaded the skill or obeyed
 it. Skills guide behavior; they do not enforce permissions or replace tests.
 
+## Code checks by scope
+
+Run focused tests for the changed component first. The broader service gate is:
+
+```bash
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked mypy src/ledger_rag
+uv run --locked pytest -q
+```
+
+For compute changes, also run
+`uv run --locked --group compute mypy --strict --ignore-missing-imports compute`.
+These checks do not prove cloud execution or serving parity. Documentation-only
+changes need the applicable link/skill checks, not model servers or paid jobs.
+
 ## Primary compatibility references
 
 - [Agent Skills format](https://agentskills.io/specification)
@@ -128,3 +204,4 @@ it. Skills guide behavior; they do not enforce permissions or replace tests.
 - [OpenCode skills](https://opencode.ai/docs/skills/)
 - [VS Code Agent Skills](https://code.visualstudio.com/docs/copilot/customization/agent-skills)
 - [Modal skills CLI](https://modal.com/docs/reference/cli/skills)
+- [Modal authentication/configuration](https://modal.com/docs/sdk/py/latest/config)
