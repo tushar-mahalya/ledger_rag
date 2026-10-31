@@ -113,6 +113,26 @@ corpora fail explicitly without including document bodies in validation errors.
 
 ## Integrity and failure behavior
 
+```mermaid
+stateDiagram-v2
+    [*] --> InputReady: Snapshot or verify pinned source
+    InputReady --> Claimed: Create new collection and payload indexes
+    InputReady --> Rejected: Destination already exists
+    Claimed --> Writing: Pinned TEI becomes healthy
+    Claimed --> Inspect: Startup or initialization failure
+    Writing --> Verified: Exact count matches acknowledged uploads
+    Writing --> Inspect: Failure, interruption or count mismatch
+    Verified --> Reported: Commit manifest to Volume
+    Verified --> Inspect: Manifest persistence failure
+    Reported --> Serving: Operator validates quality and performs cutover
+    Serving --> Previous: Operator rolls back configuration
+    Inspect --> [*]: Reconcile, do not serve partial build
+    Rejected --> [*]
+```
+
+This describes the release workflow, **not a durable orchestrator implemented
+by these state names**. `Reported` does not automatically become `Serving`.
+
 - Each run atomically claims a **new collection**. Existing, partially written
   and previously completed collections are refused. No automatic overwrite,
   deletion, resume, alias switch or promotion occurs.

@@ -85,6 +85,26 @@ ports are published, always on `127.0.0.1`; do not remove that binding.
 
 ## Vault bootstrap, delivery, and rotation
 
+```mermaid
+flowchart LR
+    Vault["Vault KV and workload identity"] --> Agent["Vault Agent"]
+    Agent --> Files["Read-only API secret files"]
+    Files --> Wait["Startup waiter: required files"]
+    Wait --> API["API loads settings once"]
+    Vault --> Project["Authorized secret projection"]
+    Project --> DBSecret["Modal database secret"]
+    DBSecret --> Job["GPU ingestion job"]
+    Project --> TEISecret["Modal serving key"]
+    TEISecret --> TEI["Embedding / reranking endpoint"]
+    Platform["Modal platform token"] --> Submitter["CLI / SDK submitter"]
+    Submitter --> Job
+    Rotation["Operator rotates provider credentials"] --> Vault
+    Files -. "controlled restart after rotation" .-> API
+```
+
+This diagram separates credential consumers; the platform token is not a TEI
+bearer key or a Qdrant key. File updates alone do not reload a running API.
+
 `deploy/vault/server.hcl` uses TLS and persistent Raft storage, not `-dev`.
 The supplied Vault is one node and therefore not HA. Start **only** Vault while
 provisioning:
@@ -183,8 +203,9 @@ does not ship or benchmark a TEI service, OCR pipeline, ASR, or TTS.
 Langfuse, populate `otlp_headers_json` in Vault with the required `Authorization:
 Basic ...` and `x-langfuse-ingestion-version: 4` headers; rotate it like any other
 secret. See [Langfuse OTLP docs](https://langfuse.com/integrations/native/opentelemetry).
-This exporter sends traces only. The current service traces HTTP request boundaries,
-not GenAI prompts/completions or per-provider model spans; this is not yet a full
+This exporter sends traces only. The service creates HTTP, RAG, reranking and
+voice-stage spans, but not full GenAI prompt/completion or per-provider call
+semantics; this is not yet a full
 Langfuse LLM-observability integration. Do not send sensitive prompt/document
 content. Restart the API after rotating headers; settings/exporters are startup-only.
 
@@ -193,9 +214,9 @@ accepts OTLP logs and exports them to Loki's `/otlp` endpoint, and combines OTLP
 metrics with authenticated `/metrics` scrapes. Prometheus scrapes Collector
 `:8889`; Grafana provisions all three data sources.
 
-Application structlog JSON stays on **stdout** with request/trace IDs and no
-request body. It is not automatically shipped to Loki: install a reviewed host
-log forwarder (e.g. Alloy/Fluent Bit), parse JSON, redact at source, and send OTLP
+Application structlog JSON goes to **process/container output** with request/trace
+IDs and no request body. It is not automatically shipped to Loki: install a reviewed
+host log forwarder (e.g. Alloy/Fluent Bit), parse JSON, redact at source, and send OTLP
 logs to Collector. No Docker socket or unrestricted host-log mount is supplied.
 Collector drops arbitrary span attributes and log bodies as defense in depth;
 this is not proof of complete PII redaction. Review resource attributes, span
@@ -212,6 +233,31 @@ Alert on HTTP 5xx/429, p95/p99 latency, scrape failures, Vault sealed state,
 Qdrant disk exhaustion, rising abstentions, and provider timeouts. Prometheus
 retains 15 days; Loki/Tempo retain seven days with local storage in this reference.
 No dashboards, alert rules, managed SIEM, or measured SLO compliance are implied.
+
+### Observability data flow
+
+```mermaid
+flowchart LR
+    Spans["HTTP / RAG / voice spans"] --> Trace["Collector: allowlist + batch"]
+    Trace --> Tempo["Tempo"]
+    Metrics["API metrics: authenticated scrape"] --> Receiver["Collector Prometheus receiver"]
+    Receiver --> Exporter["Collector metrics endpoint"]
+    Exporter --> Prometheus["Prometheus"]
+    JSON["Application JSON: process/container output"] --> Local["Local container logs"]
+    JSON -. "forwarder NOT configured" .-> Logs["Collector OTLP log receiver"]
+    Logs --> Redact["Redact body + allowlist"]
+    Redact --> Loki["Loki"]
+    Tempo --> Grafana["Grafana provisioned data sources"]
+    Prometheus --> Grafana
+    Loki --> Grafana
+```
+
+Solid paths reflect shipped configuration, not a verified cloud deployment.
+The dashed log path is missing infrastructure, not automatic log delivery.
+The Collector currently retains only a narrow HTTP/error attribute allowlist;
+custom RAG/voice attributes are not all retained by the default export pipeline.
+Direct Langfuse export is an explicit alternative configuration, not a second
+simultaneous sink shown here. Prompt capture remains disabled.
 
 ## TLS, zero trust, and cloud rollout
 

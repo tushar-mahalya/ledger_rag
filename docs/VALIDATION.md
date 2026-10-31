@@ -1,7 +1,10 @@
 # Validation record
 
 Date: 2026-10-31. This record distinguishes measured local behavior from untested
-production targets. Re-run the commands before relying on these results.
+production targets. The current refresh covers source/packaging checks, local
+FinQA statistics, documentation syntax and a read-only database preflight.
+Earlier experiments are recorded separately, not claimed as reruns against the
+current workspace. Re-run the commands before relying on these results.
 
 ## Verified source and packaging
 
@@ -11,21 +14,54 @@ uv run --locked --group compute ruff format --check .
 uv run --locked --group compute mypy src/ledger_rag scripts/clone_qdrant_benchmark.py
 uv run --locked --group compute mypy --strict --ignore-missing-imports compute
 uv run --locked --group compute pytest -q
-uv run --locked --group compute python -m ledger_rag.evaluation.harness --smoke --repeats 3
+uv run --locked python scripts/check_agent_skills.py
 uv build --no-sources
 ```
 
-- 318 tests passed after the colocated-ingestion changes.
-- Ruff lint and formatting passed.
+- 323 tests passed, including the FinQA split/reporting regressions.
+- Ruff lint passed; formatting checks passed for 81 files.
 - Strict mypy passed for 39 service/helper files and three compute files.
 - Wheel and source distribution built successfully.
+- The Agent Skills validator passed, including canonical skills, local links,
+  Claude aliases and the locked Modal skill version.
+- All nine Mermaid diagrams parsed locally with Mermaid 11.12.2. This checks
+  syntax only, not visual rendering.
 - Warnings include the upstream Starlette TestClient/httpx deprecation, intentional
   local execution of mocked Modal functions, SDK compatibility probes and local
-  Qdrant's lack of payload indexing. Real-server indexing is checked separately.
+  Qdrant's lack of payload indexing. Real-server indexing was checked in the
+  earlier isolated-server tests below.
 - Provider tests use mocked remote HTTP endpoints. Qdrant tests include the
   installed SDK's real local backend, not just response-shaped mocks.
 
-## Colocated ingestion validation
+## Local FinQA statistics
+
+```bash
+uv run --locked --group compute python -m ledger_rag.evaluation.benchmarks.finqa stats \
+  --data data/finqa --split dev --limit 2
+```
+
+- The pinned local corpus produced 2,789 report pages and 8,611 chunks.
+- The dev pool contains 883 questions; the bounded invocation selected two.
+- This was a local statistics check only: no embeddings, model/cloud calls or
+  database writes. The first two cases are not an accuracy benchmark, and
+  `--limit` does not restrict the corpus.
+
+## Read-only database preflight
+
+- TLS-verified, authenticated `GET /` and `GET /collections` each returned
+  HTTP 200 from the supplied Qdrant endpoint: server 1.20.0, zero collections.
+  Neither the endpoint nor the credential is recorded here.
+- No database writes, model runs or GPU jobs were performed. Read access does
+  not establish collection-creation permissions, least-privilege write scope,
+  backup/recovery readiness or reachability from a Modal worker.
+- Modal read-only secret listing still returned no secrets; the Vault CLI was
+  unavailable in the checked local environment. Approved Vault/Modal secret
+  provisioning and an explicit paid-job budget remain blockers.
+- Cloud GPU image execution, model loading, full-corpus ingestion, serving parity
+  and throughput/cost remain **unverified**. Follow
+  [the ingestion runbook](INGESTION.md) before launching a paid job.
+
+## Earlier colocated ingestion validation
 
 - Tests run the Modal function body with fake GPU/Volume dependencies and a real
   in-memory Qdrant store. They cover direct loopback embedding requests, complete
@@ -37,21 +73,18 @@ uv build --no-sources
   not propagate into Modal containers.
 - Vault projection tests verify protected temporary files, no secret-bearing
   command arguments/logs, both projection targets, and cleanup on CLI failure.
-- An isolated live Qdrant 1.20.0 check uploaded three **synthetic** points, verified
-  schema-3 identity across different embedding endpoint addresses, ACL/date
+- An earlier isolated live Qdrant 1.20.0 check uploaded three **synthetic** points,
+  verified schema-3 identity across different embedding endpoint addresses, ACL/date
   filtering, existing-destination rejection and scalar vector copying. A further
   live check verified tenant-aware/document/group/date payload indexes in both
   original and copied staging collections. All smoke collections were removed;
-  the partial real FinQA index was untouched.
+  the partial real FinQA index was untouched. This was a separate local-server
+  check, not a write test against the endpoint in the current read-only preflight.
 - Production Compose accepts the external database/collection and embedding-space
   configuration. Modal CLI help loads the new job successfully. The synthetic
   evaluation's three-repeat threshold gate passed.
-- Modal platform access is authenticated. The active environment still has no
-  database secret, so GPU image execution, real model loading, remote database
-  connectivity, full-corpus ingestion and throughput/cost remain **unverified**.
-  Follow [the ingestion runbook](INGESTION.md) before launching a paid job.
 
-## Measured synthetic benchmark
+## Earlier measured synthetic benchmark
 
 The following numerical tables retain the earlier recorded benchmark, not a new
 neural or cloud measurement from the ingestion work.
@@ -85,7 +118,7 @@ No real FinanceBench, FinQA, TAT-QA, or FinDER performance is claimed. There are
 semantic-faithfulness or numerical-correctness results without appropriate gold
 labels. Degenerate intervals on four cases do not establish generalization.
 
-## Live HTTP smoke check
+## Earlier live HTTP smoke check
 
 A local Uvicorn instance using a file-provisioned random demo credential verified:
 
@@ -97,10 +130,10 @@ A local Uvicorn instance using a file-provisioned random demo credential verifie
 
 The temporary process was stopped and its temporary credential removed.
 
-## Bounded concurrent HTTP measurements
+## Earlier bounded concurrent HTTP measurements
 
-Final source was also tested with four concurrent clients, two warmup requests
-and 20 measured requests per profile, without retries:
+The then-current source was tested with four concurrent clients, two warmup
+requests and 20 measured requests per profile, without retries:
 
 | Local synthetic workload | Successes | Final-answer p95 | Evidence-event p95 |
 |---|---:|---:|---:|
@@ -113,7 +146,7 @@ or real IVR latency**. Reports are generated under `reports/` and intentionally
 excluded from Git. Every measured answer was non-abstaining. The temporary server
 and credential were cleaned up.
 
-## Container and secrets integration
+## Earlier container and secrets integration
 
 The operations implementation agent verified:
 
@@ -129,8 +162,8 @@ The operations implementation agent verified:
 - test containers, temporary volumes, credentials and certificates were removed.
 
 An additional independent check compared SHA256 hashes of all 15 Python modules
-inside the built container with the final workspace sources: they matched exactly.
-This is local deployment evidence, not a completed public-cloud deployment.
+inside the built container with the then-current workspace sources: they matched
+exactly. This is local deployment evidence, not a completed public-cloud deployment.
 
 ## Review-driven fixes
 

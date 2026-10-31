@@ -128,6 +128,138 @@ deploy endpoints merely to validate agent instructions.
     from endpoint location; schema-2 behavior remains unchanged by default.
     Ingestion and query endpoints must use compatible pinned rendering/model
     settings. An ID is not a substitute for serving parity.
-- Read-only checks found no Modal database secret. GPU execution, actual
-    throughput and database reachability remain unverified; see the
+- Read-only checks found no Modal database secret. A later authenticated HTTPS
+    preflight reached Qdrant 1.20.0 and listed zero collections, without writes.
+    Reachability from a Modal worker, GPU execution and actual throughput remain
+    unverified; see the
     [ingestion runbook](../INGESTION.md) for provisioning and release gates.
+
+## Architecture choice review
+
+**Decision: retain a conditional baseline, not declare a universal winner.**
+An independent source review plus inspection of the current request, ingestion,
+voice and telemetry paths informed this comparison. "All possible approaches"
+is not an enumerable or testable claim. We compare credible alternatives under
+explicit constraints, preserve rejected options, and change course when evidence
+warrants it.
+
+Current facts: 2,789 FinQA pages produce 8,611 chunks; the development split has
+883 questions and the held-out test split 1,147. That is a useful correctness
+benchmark, not evidence of large-scale capacity. There is **no existing Postgres
+or transactional outbox** in this repository. Cloud authentication works, but
+real GPU ingestion, full-corpus answer quality and voice latency remain unverified.
+
+### Compute placement
+
+| Approach | Why / when it fits | Cost or correctness tradeoff | Decision |
+|---|---|---|---|
+| Colocated Modal worker + TEI + direct database writes | One controlled, reproducible bulk build; no vectors relayed through the caller; aligns batch and serving TEI behavior | GPU allocation includes download, CPU preparation and database waits; not inherently cheapest | Current implementation, pending cloud measurements |
+| CPU preparation/upload workers + shared GPU endpoint | Continuous ingestion or several tenants can share a saturated model service | Additional transport, queues, admission control and failure boundaries; writes still bottleneck at the database | Compare if profiling shows material GPU idle time or ongoing multi-producer demand |
+| Direct in-process encoder instead of loopback TEI | Can remove HTTP serialization and simplify very small jobs | Must independently match pooling, normalization, dtype, batching and tokenization with query serving | Candidate ablation, not assumed faster or equivalent |
+| Remote CPU / ONNX encoder | Small or infrequent jobs may not amortize GPU startup and reservation | Throughput and numerical parity must be measured; CPU is not automatically cheaper per completed build | Include as a Modal-hosted comparator, not a silent local fallback |
+| Durable vector artifacts + separate import | Expensive embeddings can be reused across repeated index builds; separates model work from database availability | Adds artifact schema, storage, manifests and lifecycle/ACL handling | Prefer when repeated rebuilds justify durable intermediate vectors |
+| Qdrant managed inference | Fewer separately managed embedding components for supported models/deployments | Changes model availability, residency, operational ownership and cost; custom fine-tune/parity needs may not fit | Valid alternative to benchmark, not adopted by assumption |
+| Database inside the ephemeral GPU job | Fewer network boundaries during a toy experiment | Couples database uptime/storage to disposable compute and GPU cost; unsafe production default | Reject for persistent serving storage |
+
+[Qdrant's inference documentation](https://qdrant.tech/documentation/inference/)
+distinguishes client-side FastEmbed, in-cluster sparse BM25, managed Cloud
+Inference and externally hosted providers. FastEmbed does **not** mean arbitrary
+dense models run inside a self-hosted Qdrant server. A portable vector artifact
+is also not a Qdrant snapshot: snapshot restore is a database recovery operation,
+not a generic incremental vector merge.
+
+Before changing placement, record cold start/download, preparation, embedding,
+upload, indexing and verification time **separately**, plus GPU utilization,
+peak memory, completed points, failures, billed resource time and total cost.
+The current ingestion `seconds` field excludes preparation/model startup; it
+cannot alone establish the cheapest design. Measure end-to-end completed-build
+cost, not only warm embedding throughput.
+
+### Retrieval and persistence
+
+| Choice | Strongest reason to choose it | Reason not to assume it wins here | Revisit trigger |
+|---|---|---|---|
+| Current Qdrant dense + sparse RRF | Existing tested adapters, payload isolation, vector-specific indexes and explicit model identity | Hashed lexical scoring is approximate; no real-data superiority or capacity result yet | Evidence/identifier misses or an operational requirement the current store cannot meet |
+| Native Qdrant full-text BM25 / sparse BM25 | Could improve lexical semantics while retaining one search store and less custom scoring code | Exact feature/API support must match the deployed server/client; ranking differs from the current approximation | **Priority ablation** before adding a second search cluster |
+| Postgres + pgvector + full-text search | Attractive when transactional source rows, relational queries and RLS are already needed; exact search is a valid small-corpus baseline | Postgres is not already deployed; migration and ANN/filter behavior still need testing | Durable metadata/ACL/outbox requirements justify Postgres, or it wins the same workload's cost/quality test |
+| OpenSearch hybrid search | Mature lexical/analyzer/structured search needs plus vector retrieval | Adds cluster, shard, memory and index-lifecycle operations; engine choice alone does not fix financial reasoning | Exact-identifier or lexical slices justify its capabilities after simpler alternatives are measured |
+| Contextual retrieval / late chunking / ColBERT-style interaction | May address specific context-loss or multi-hop evidence failures | More ingestion/model/storage work; reported gains on other datasets are not this project's gains | Reproducible dev failure slices improve without unacceptable latency, rights or operating cost |
+
+Primary references:
+[Qdrant inference and BM25 options](https://qdrant.tech/documentation/inference/),
+[pgvector exact/approximate search](https://github.com/pgvector/pgvector),
+[Postgres full-text search](https://www.postgresql.org/docs/current/textsearch.html),
+[OpenSearch hybrid search](https://docs.opensearch.org/latest/vector-search/ai-search/hybrid-search/index/),
+[contextual retrieval](https://www.anthropic.com/research/contextual-retrieval),
+[ColBERTv2](https://aclanthology.org/2022.naacl-main.272/).
+
+Ticker/filing identifiers should have explicit normalized fields and exact-match
+tests where needed; neither vector similarity nor a keyword payload index is a
+ranked lexical engine. ACL enforcement must be specified end to end, including
+who may use database credentials directly. Adding a relational policy does not
+automatically coordinate ACL changes with a separately indexed copy.
+
+### Service and workflow boundaries
+
+| Approach | Decision and trigger |
+|---|---|
+| Modular monolith + independent batch compute | Keep the synchronous query path simple. Do not add network services solely to appear sophisticated. The small-write API still shares query capacity; bulk builds use Modal instead. |
+| Durable metadata, outbox and coordinated writes | Required before continuous multi-writer updates, robust ACL/deletion propagation or automated repair. This is a missing capability, not something current Modal retries provide. |
+| LangGraph | Useful when chat actually needs checkpointed conversation state, resumable human approval or complex branching. A checkpointer is not a cross-system transaction or a quality improvement by itself. |
+| Temporal | Candidate for durable ingestion/release orchestration and recovery once those workflows justify its infrastructure. Activities and side effects still need idempotency; automatic retries can otherwise duplicate external work. |
+| GraphQL | Consider only for a real admin/control-plane metadata surface. Keep REST/SSE/WebSocket for current query and media traffic. |
+
+Primary references:
+[LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence),
+[Temporal activity idempotency](https://docs.temporal.io/activity-definition#idempotency).
+Framework choice follows the recovery/state requirement, not a service-count
+rule or a claim that orchestration increases answer accuracy.
+
+### Review outcomes and next experiment order
+
+1. **Fixed now:** stale diagrams/status claims about voice, OIDC, log shipping,
+     synchronous ingestion and optional stores. The diagrams distinguish shipped
+     paths, manual release gates and missing integrations.
+2. **Fixed now:** the FinQA CLI previously exposed only test questions despite
+     the loader supporting other splits. `--split dev` now enables selection
+     without consuming the held-out test set; reports distinguish available and
+     selected questions. The legacy default/report field remains compatible.
+3. **Next: real baseline**, once Vault/Modal database-secret provisioning and
+     an explicit paid-job budget are configured.
+     Measure completed GPU builds and the current dense/sparse/hybrid/rerank arms
+     on dev before adding new components. Use the same data, scopes and identity.
+4. **Next: simplest retrieval challengers.** Compare exact/native lexical scoring,
+     fusion and candidate counts first, then encoders, contextual/late interaction
+     only for identified misses. Preserve original source text and numeric units.
+5. **Next: operational release gates.** Export/runtime parity, durable recovery,
+     log forwarding, GenAI span semantics and real telephony tests remain
+     uncompleted work. Do not claim they were solved by this review.
+
+For each experiment, preregister the primary metric and acceptable cost/latency
+budget. Keep ACL/date/failure regressions as hard gates. Use paired comparisons
+and uncertainty on dev, report failures and slice regressions, and only then
+freeze a candidate for held-out reporting. An architecture change needs a
+measured benefit or a required capability, not merely a new publication.
+
+### Inputs needed before deployment and meaningful optimization
+
+The supplied Qdrant endpoint passed TLS-verified authenticated `GET /` and
+`GET /collections` checks (HTTP 200, version 1.20.0, zero collections). This was
+read-only: it did not test write permissions or network access from Modal.
+Modal's secret list remained empty and the local Vault CLI was unavailable.
+See the [validation record](../VALIDATION.md#read-only-database-preflight);
+endpoint discovery is no longer the blocker, but provisioning and paid-job
+authorization remain outstanding.
+
+| Input | What it unlocks |
+|---|---|
+| Provision the supplied Qdrant connection through Vault/Modal secrets; verify scoped write permissions and worker reachability | Actual cloud ingestion and persistent retrieval |
+| Per-run and monthly budget, allowed region and data residency | Responsible GPU selection, concurrency and deployment choices |
+| Corpus size/growth, update frequency, languages and expected concurrent queries/calls | Whether batch, continuous ingestion, extra stores or shared inference are justified |
+| Required voice/chat latency and availability targets | Measurable warm-capacity, routing and failure budgets |
+| Compatible LLM endpoint/model and credentials; STT/TTS and telephony test configuration | Answer correctness, cost and real end-to-end voice evaluation |
+| Intended portfolio/data usage and dataset/source rights | Which corpora may be indexed, evaluated or redistributed |
+
+Provide non-secret requirements directly; provision credentials through the
+secret manager rather than pasting them into chat. A free-credit balance is not
+a hard per-run spending limit.
