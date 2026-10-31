@@ -11,6 +11,8 @@ from pydantic import (
     model_validator,
 )
 
+from ledger_rag.core.provenance import Provenance, SourceKind
+
 
 class Profile(StrEnum):
     VOICE = "voice"
@@ -79,6 +81,17 @@ class Citation(BaseModel):
     title: str
     published_at: date
     quote: str
+    # External evidence (SEC XBRL, FRED) carries typed provenance; corpus evidence does not.
+    source_kind: SourceKind = "corpus"
+    provenance: Provenance | None = None
+
+    @model_validator(mode="after")
+    def provenance_matches_kind(self) -> Self:
+        if (self.source_kind == "corpus") != (self.provenance is None) or (
+            self.provenance is not None and self.provenance.source_kind != self.source_kind
+        ):
+            raise ValueError("External citations need provenance of the same source kind")
+        return self
 
 
 class HistoryMessage(BaseModel):
