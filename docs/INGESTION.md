@@ -85,6 +85,38 @@ The GPU is allocated for loading and uploading too; colocating saves embedding
 network hops but slow database writes can leave GPU time idle. Measure before
 adding concurrency. `max_containers=1` is per function/app, not a global index lock.
 
+## Chunk profiles
+
+`--chunk-profile` selects how chunks are indexed (default `v1`). See
+[ADR-0001](ADR-0001-retrieval-chunk-profiles-and-rerankers.md) for the design.
+
+- **`v1`:** the original, byte-identical chunking.
+- **`v2`:** adds a deterministic filing header (ticker, fiscal year, form, page,
+  section and table caption) and a row-wise table linearization to the *indexed* text.
+  Displayed and cited text keeps the Markdown table. Expect 8,644 FinQA chunks.
+- **`v3`:** adds a cached per-document LLM summary line to the v2 header.
+
+Each profile needs its own new collection. Never reuse a v1 collection name.
+
+```bash
+uv run --locked --group compute modal run compute/ingestion.py \
+  --collection finqa_gte_modernbert_v2ctx --chunk-profile v2 \
+  --model-revision e7f32e3c00f91d699e8c43b53106206bcc72bb22
+```
+
+v3 reads summaries only from the `ledger-data` Volume cache and fails if any
+document lacks one. Fill the cache first. The command below runs on a CPU
+container, uses the `ledger-llm` secret, makes at most 8 concurrent requests and is
+idempotent, so rerun it to fill any gaps:
+
+```bash
+uv run --locked --group compute modal run compute/summaries.py   # --limit 20 to probe
+```
+
+For `Qwen/Qwen3-Embedding-0.6B` pass `--model-id`, the pinned `--model-revision`
+and `--dimensions 1024`. Queries then need the Qwen3 instruction prefix (see the
+ADR); documents are embedded without a prefix.
+
 ## Reuse with application documents
 
 Supply UTF-8 JSONL containing one validated
