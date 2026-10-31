@@ -156,6 +156,7 @@ Secrets are read at startup: rotate files, then roll the application instances.
 | Colocated ingestion identity | `LEDGER_EMBEDDING_SPACE_ID` from the verified job manifest; empty retains legacy endpoint-bound collections |
 | Persistent index | `LEDGER_RETRIEVAL_BACKEND=qdrant`, URL/collection and optional API key |
 | Dense index compression | `LEDGER_QDRANT_QUANTIZATION=none` (default), `scalar`, or experimental `binary`; `LEDGER_QDRANT_OVERSAMPLING=2.0` |
+| Answer verification | `LEDGER_VERIFICATION_MODE=enforce` (default), `flag` or `off`; optional `LEDGER_GROUNDEDNESS_VERIFIER=lettucedetect` with URL/key (off by default, fails open) |
 | Cross-encoder | Optional `LEDGER_RERANKER_URL` (TEI base URL) and API key |
 | Production identity | OIDC issuer, audience, JWKS URL and signed `tenant_id`, `roles`, `groups` claims |
 | Vault | Vault address, workload AppRole bootstrap or production workload identity, least-privilege policy |

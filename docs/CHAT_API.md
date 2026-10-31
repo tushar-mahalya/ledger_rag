@@ -75,6 +75,7 @@ The public schema is:
 | corrective search | `Searching evidence` | `search_evidence` |
 | rejected tool request | `Checking tool request` | absent |
 | validation | `Validating citations` | absent |
+| optional model verifier (chat only) | `Verifying grounding` | absent |
 
 `started` is emitted on entering the actual operation; `completed` only on
 normal exit. There are no simulated steps or artificial delays. An exception,
@@ -82,6 +83,9 @@ timeout, or cancellation can leave an operation without `completed`.
 Handled calculator errors and rejected tool requests can complete normally:
 **completed means the operation finished, not that an answer is correct**.
 Likewise, completed citation validation can produce an abstention.
+`Verifying grounding` uses stage `validation` so existing stage enums still
+parse. It only appears when the optional model verifier is enabled and the
+deterministic checks already passed.
 
 Typical ordering is retrieval started/completed, `evidence`, generation
 started/completed, validation started/completed, `answer`, `done`. Each executed
@@ -121,21 +125,50 @@ add citations later; the final answer's citations are authoritative for the
 answer. Citation quotes are intentionally exposed authorized evidence, unlike
 private tool protocol messages.
 
-### `answer`, `done`, `error` (unchanged)
+### `answer`, `done`, `error`
 
-`answer` carries the existing `Answer` JSON:
+`answer` carries the `Answer` JSON. The first nine fields are unchanged; the last
+four are additive, nullable or empty by default, and safe for clients to ignore:
 
 ```text
 {
   answer: string, citations: Citation[], abstained: boolean,
   profile: "chat" | "voice", retrieval_ms: number, generation_ms: number,
-  request_id: string, model: string, tool_calls: integer
+  request_id: string, model: string, tool_calls: integer,
+  calculation: Calculation | null,      // last successful program
+  calculations: Calculation[],          // every successful program, in order
+  verification: Verification | null,
+  abstention: AbstentionDecision | null
+}
+
+Calculation = { steps: Step[], result: string, citation_ids: string[] }
+Step = { index: integer, op: string, operands: Operand[], result: string }
+Operand = {
+  kind: "evidence" | "step" | "constant", value: string,
+  citation_id: string | null, quote: string | null,   // evidence: exact span
+  source_value: string | null, scale: string | null, unit: string | null,
+  step: integer | null                                  // step: referenced #n
+}
+Verification = {
+  status: "verified" | "unverified" | "failed" | "skipped",
+  mode: "off" | "flag" | "enforce",
+  checked_numbers: integer, unsupported_numbers: string[], reasons: string[],
+  verifier: string | null, verifier_score: number | null
+}
+AbstentionDecision = {
+  abstained: boolean, reasons: string[], calibrated: false,
+  features: {
+    hit_count, top_score, mean_score, citation_coverage, checked_numbers,
+    unsupported_numbers, verification_status, verifier_score, tool_calls, tool_errors
+  }
 }
 ```
 
-No answer is emitted before citation validation. Missing, unknown, or
-paragraph-level missing citation markers produce the existing explicit
-abstention and empty citations. `done` carries `{}` after success, including
+Decimal values are strings so they round-trip exactly. No answer is emitted
+before citation and numeric verification. Missing, unknown, or paragraph-level
+missing citation markers produce the existing explicit abstention and empty
+citations. An abstention also clears `answer` and `citations`; `verification`
+and `abstention` stay populated so clients and evaluators can see why. `done` carries `{}` after success, including
 successful abstention.
 
 After a stream has begun, failures produce `error` with exactly:
@@ -154,6 +187,95 @@ and concurrency permit are cleaned up. The stream buffer is bounded to **16
 frames**, applies backpressure, and uses task completion rather than a sentinel
 that could block cleanup on a full queue. No heartbeat or reconnect/resume
 protocol is implemented.
+
+## Grounded calculation and verification
+
+The `calculator` tool is an evidence-bound FinQA-style program, not a free
+expression evaluator. Each step is `{op, args}` with `op` in `add`, `subtract`,
+`multiply`, `divide`, `exp`, `greater` (1 or 0), `percent_change(old, new)`, or
+`table_sum|table_average|table_max|table_min`. Every argument is exactly one of:
+
+- `{citation_id, quote}`: an exact span of that citation's text containing one
+  complete number. The service parses it (commas, `(1,234)` negatives, currency,
+  `%`/`percent`/`bps`/`percentage points`, `thousand|million|billion` and
+  `k|m|bn`) and records the source value, scale and unit.
+- `{ref: "#n"}`: the result of an earlier step (0-based).
+- `{constant}`: one of 1, 2, 4, 12, 100, 1000, 1000000.
+
+A number the model typed itself, an unknown citation, a partial or ambiguous
+span, or a forward reference returns `{"error": ...}` to the model so it can
+retry; error text never echoes arguments. Programs are limited to 8 steps,
+16 arguments per step (48 total), exponents with magnitude at most 10, results
+with magnitude at most 1e30, and Decimal arithmetic (28 digits, half-even).
+Division by zero and an undefined percent change are errors.
+
+Numeric verification is deterministic and runs for both profiles (voice adds no
+LLM call). Answers are split into sentences or lines; a sentence without its own
+`[Cn]` markers inherits its paragraph's markers. Every number in a sentence must
+match either a number in that sentence's cited evidence or a step result of a
+program bound to one of those citations. Years without currency or scale,
+citation markers, list markers, dates, ordinals, `Item 7`/`Note 12`/`10-K` style
+identifiers and `FY2009`/`Q3` tokens are ignored. Matching:
+
+- compares scaled values (`$1.2 billion` matches `1,200 million`) and, when one
+  side is unscaled, the written mantissa (`120` matches `USD 120 million`);
+- allows rounding to the answer's displayed precision (`15.3%` matches
+  `15.27 percent`), capped at `LEDGER_VERIFICATION_MAX_ROUNDING_RATIO` (5%);
+  `LEDGER_VERIFICATION_RELATIVE_TOLERANCE` (default 0) adds a relative tolerance;
+- requires compatible units: a percentage is never supported by a currency or
+  scaled amount; program ratios match percentages (`0.2534` supports `25.3%`);
+- ignores sign, because answers often say "a loss of $1,234" for `(1,234)`.
+
+`LEDGER_VERIFICATION_MODE` is `enforce` (default: abstain with status `failed`),
+`flag` (keep the answer with status `unverified`) or `off` (status `skipped`).
+
+`LEDGER_GROUNDEDNESS_VERIFIER=lettucedetect` (default `off`) also posts the
+answer and cited quotes to [the Modal verifier](../compute/verifier.py)
+(`LEDGER_GROUNDEDNESS_VERIFIER_URL`, `..._API_KEY`; HTTPS outside development),
+for chat only and only after the deterministic checks pass. A score below
+`LEDGER_GROUNDEDNESS_VERIFIER_MIN_SCORE` (0.5) fails or flags the answer. A
+timeout (`..._TIMEOUT_SECONDS`, 1.5 s) or error fails open to the deterministic
+result with reason `verifier_unavailable`. Its 2026-10-31 smoke test measured
+latency only (33 ms warm server-side median on a small Modal GPU, about 0.56 s
+warm round trip through the Modal client, 42 s on a cold start). No accuracy has
+been measured on Ledger data.
+
+`AbstentionPolicy` then decides from explicit features: no validated answer,
+failed verification, top retrieval score below `LEDGER_ABSTAIN_MIN_TOP_SCORE`
+(default unset, because memory, RRF and reranker scores use different scales),
+citation coverage below `LEDGER_ABSTAIN_MIN_CITATION_COVERAGE` (default 0), and
+tool errors above `LEDGER_ABSTAIN_MAX_TOOL_ERRORS` (default unset). **These
+thresholds are not calibrated.** `calibrated` is always `false` until they are
+fitted on FinQA dev data (never the test split); the exposed `features` exist
+for that fit.
+
+```mermaid
+sequenceDiagram
+    participant LLM
+    participant Tools as tools node
+    participant Program as program.run_program
+    participant Validate as validation node
+    participant Verifier as Modal verifier (optional)
+    participant Policy as AbstentionPolicy
+    LLM->>Tools: calculator {steps:[{op, args:[{citation_id, quote}, {ref}, {constant}]}]}
+    Tools->>Program: bind quotes to cited evidence
+    alt unbound literal, bad span or limit exceeded
+        Program-->>Tools: ProgramError
+        Tools-->>LLM: {"error": "..."} (retry)
+    else valid
+        Program-->>Tools: Calculation (steps, provenance, result)
+        Tools-->>LLM: {result, citation_ids, steps}
+    end
+    LLM->>Validate: final answer with [Cn] markers
+    Validate->>Validate: citation IDs exist; per-sentence numeric provenance
+    opt chat, enabled and deterministic checks passed
+        Validate->>Verifier: POST /v1/verify (bearer, timeout)
+        Verifier-->>Validate: supported_score or fail open
+    end
+    Validate->>Policy: features (scores, verification, coverage, tool errors)
+    Policy-->>Validate: AbstentionDecision
+    Validate-->>LLM: Answer + calculation + verification + abstention
+```
 
 ## Graph, budgets, and compatibility
 
