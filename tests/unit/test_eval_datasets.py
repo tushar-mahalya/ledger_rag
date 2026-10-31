@@ -245,6 +245,133 @@ def test_tatqa_questions_map_types_scales_and_evidence() -> None:
     assert (arithmetic.license, arithmetic.usage) == ("CC-BY-4.0", "train_ok")
 
 
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "$29,146 *",
+        "$22,185*",
+        "3,646,581 (i)",
+        "74,100 (1)",
+        "3,460.0p",
+        "(0.2)%",
+        "$(99)",
+        "(51)",
+        "–138",
+        "64% - 69%",
+        "6.1 - 6.3",
+        "-",
+        "—",
+        "–",
+        "- -",
+        "$—",
+        "n/a",
+        "nil",
+        "None",
+        "11th June",
+    ],
+)
+def test_tatqa_body_values(cell: str) -> None:
+    assert tatqa.is_body_value(cell)
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "2018",
+        "FY2019",
+        "2019 vs 2018",
+        "2 0 1 8",
+        "2018 1",
+        "2021-2022",
+        "1 - 3",
+        "Year ended December 31, 2019",
+        "December 31",
+        "Q1",
+        "%",
+        "%Chg",
+        "Level 1",
+        "Total Number of Shares Purchased (1)",
+        "($ in millions)",
+    ],
+)
+def test_tatqa_header_tokens(cell: str) -> None:
+    assert not tatqa.is_body_value(cell)
+
+
+def test_tatqa_footnoted_values_end_the_header() -> None:
+    # tatqa/d37c6159-a2af-4d21-88bc-57491ef0d175 (TAT-QA train)
+    rows = [
+        ["($ in millions)", "", "", "", ""],
+        ["For the year ended December 31:", "2018", "2017", "Yr.-to-Yr. Percent Change", "Adj."],
+        [
+            "Global Technology Services external revenue",
+            "$29,146 *",
+            "$29,213 *",
+            "(0.2)%",
+            "(0.8)%",
+        ],
+        ["Infrastructure & Cloud Services", "$22,185*", "$22,016*", "0.8%", "0.0%"],
+        ["Technology Support Services", "6,961", "7,196", "(3.3)", "(3.5)"],
+    ]
+    assert tatqa.header_row_count(rows) == 2
+    assert tatqa.fiscal_year(rows, 2) == 2018
+    rendered = render_table(rows, 2)
+    assert "| Global Technology Services external revenue | $29,146 * |" in rendered
+
+
+def test_tatqa_dash_and_footnoted_rows_end_the_header() -> None:
+    # tatqa/7fdfb900-e531-45a1-836e-b7b08f4e7336 (TAT-QA train), headers shortened
+    rows = [
+        ["Type of Payment", "Termination ($)", "Death ($)", "Change In Control ($)", "Both ($)"],
+        ["Cash Compensation", "-", "-", "-", "-"],
+        ["Accelerated Vesting of Stock Option Awards", "-", "-", "-", "74,100 (1)"],
+        ["Accelerated Vesting of Restricted Stock Unit Awards", "-", "-", "-", "-"],
+        ["Accelerated Vesting of Performance Awards", "- -", "204,000 (2)", "-", "204,000 (2)"],
+        ["Medical and Other Benefits", "-", "-", "-", "-"],
+        ["Total", "-", "204,000", "-", "278,100"],
+    ]
+    assert tatqa.header_row_count(rows) == 1
+
+
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        ([["", "2019", "2018"], ["Revenue", "3,460.0p", "2,797.0p"], ["Cost", "1", "2"]], 1),
+        ([["", "2015 Grant"], ["Grant date", "11th June"], ["Price", "3,460.0p"]], 1),
+        (
+            [
+                ["", "December 31", ""],
+                ["", "2019", "2 0 1 8"],
+                ["", "$ in thousands", ""],
+                ["A", "1", "2"],
+            ],
+            3,
+        ),
+        (
+            [
+                ["", "Total", "2020", "2021-2022"],
+                ["Debt", "$111", "$2", "$5"],
+                ["Leases", "1", "2", "3"],
+            ],
+            1,
+        ),
+        (
+            [
+                ["", "Less than", "1 - 3"],
+                ["", "1 year", "years"],
+                ["Debt", "$17", "$98"],
+                ["X", "1", "2"],
+            ],
+            2,
+        ),
+        ([["", "2019", "2018"], ["Current:", "", ""], ["Cash", "5", "4"]], 1),
+        ([["", "Q1", "Q2"], ["Sales", "—", "n/a"], ["Cost", "1", "2"]], 1),
+    ],
+)
+def test_tatqa_header_row_count_synthetic(rows: list[list[str]], expected: int) -> None:
+    assert tatqa.header_row_count(rows) == expected
+
+
 def test_tatqa_rejects_duplicate_contexts() -> None:
     with pytest.raises(ValueError, match="Duplicate"):
         tatqa.build({"train": [tatqa_context()], "dev": [tatqa_context()]})

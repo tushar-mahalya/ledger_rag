@@ -34,7 +34,21 @@ SPLIT_FILES = {
 }
 UNKNOWN_DATE = date(1970, 1, 1)
 _YEAR = re.compile(r"\b(19[89]\d|20[0-4]\d)\b")
-_NUMERIC = re.compile(r"^[\s$€£(−-]*\d[\d,.\s]*%?\)?$")
+_FOOTNOTE = re.compile(r"(?:\s*(?:\*+|\([a-z0-9]{1,2}\)|\[[a-z0-9]{1,2}\]))+$", re.IGNORECASE)
+_AMOUNT = (
+    r"[$€£¥]?\s*[(−–-]?\s*[$€£¥]?\s*\d[\d,]*(?:\.\d+)?"
+    r"\s*(?:%|p|x|pts?|bps|m|bn|k)?\s*\)?\s*%?"
+)
+_VALUE = re.compile(rf"^{_AMOUNT}$", re.IGNORECASE)
+# Ranges count as data only with a %, decimal, currency or thousands separator;
+# bare integer ranges are period or maturity labels ("2021-2022", "1 - 3").
+_RANGE = re.compile(rf"^{_AMOUNT}\s*[-–—]\s*{_AMOUNT}$", re.IGNORECASE)
+_RANGE_MARK = re.compile(r"[%.,$€£¥]")
+_NIL = re.compile(r"^(?:[$€£¥]?\s*(?:[-—–−]\s*)+%?|n/?a|nil|nm|none)$", re.IGNORECASE)
+_DAY_MONTH = re.compile(
+    r"^\d{1,2}(?:st|nd|rd|th)\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*$",
+    re.IGNORECASE,
+)
 _TYPES: dict[str, AnswerType] = {
     "span": "span",
     "multi-span": "multi_span",
@@ -43,18 +57,40 @@ _TYPES: dict[str, AnswerType] = {
 }
 
 
-def header_row_count(rows: list[list[str]]) -> int:
-    """Leading rows whose value cells are labels or years (at least one row).
+def is_body_value(cell: str) -> bool:
+    """Whether a value cell holds data rather than a column label or period token.
 
-    A label-only row (e.g. ``Current:`` with blank values) after the header starts
-    the body; it is a section heading, not a column label.
+    Data cells are numbers, possibly with currency, sign, parentheses, percent, unit
+    suffixes (``3,460.0p``), ranges (``64% - 69%``) or trailing footnote markers (``$29,146 *``,
+    ``74,100 (1)``), dash/nil placeholders (``-``, ``—``, ``- -``, ``n/a``) and
+    year-less ordinal dates (``11th June``). Bare years and labels such as
+    ``FY2019``, ``2019 vs 2018``, ``December 31``, ``Q1`` or ``%`` are header tokens.
+    """
+    text = cell.strip()
+    if _NIL.match(text) or _DAY_MONTH.match(text):
+        return True
+    candidates = {text, _FOOTNOTE.sub("", text).strip()}
+    return any(
+        value
+        and not _YEAR.fullmatch(value)
+        and (_VALUE.match(value) or (_RANGE.match(value) and _RANGE_MARK.search(value)))
+        for value in candidates
+    )
+
+
+def header_row_count(rows: list[list[str]]) -> int:
+    """Leading rows whose value cells are all labels or period tokens (at least one).
+
+    The first row with any data value starts the body. A label-only row (e.g.
+    ``Current:`` with blank values) after the header also starts the body; it is a
+    section heading, not a column label.
     """
     count = 0
     for row in rows[:-1]:
-        values = [cell for cell in row[1:] if cell]
+        values = [cell for cell in row[1:] if cell.strip()]
         if not values and count:
             break
-        if any(_NUMERIC.match(cell) and not _YEAR.fullmatch(cell) for cell in values):
+        if any(is_body_value(cell) for cell in values):
             break
         count += 1
     return max(1, count)

@@ -24,7 +24,7 @@ from ledger_rag.evaluation.datasets.schema import (
 from ledger_rag.evaluation.datasets.sources import SOURCES
 from ledger_rag.ingestion.chunking import chunk_document
 
-ADAPTER_VERSION = 1
+ADAPTER_VERSION = 2
 
 
 def load(dataset: str, raw_dir: Path) -> tuple[list[CorpusDocument], list[QAItem], Any]:
