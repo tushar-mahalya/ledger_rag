@@ -40,7 +40,8 @@ database_secret = modal.Secret.from_name(
 
 def _snapshot_jsonl(input_path: str, target: Path) -> None:
     source = Path(input_path).resolve()
-    if not source.is_relative_to(DATA) or not source.is_file():
+    # Modal mounts Volumes through a symlink, so compare fully resolved paths.
+    if not source.is_relative_to(DATA.resolve()) or not source.is_file():
         raise ValueError("JSONL source must be a file inside the data volume")
     shutil.copyfile(source, target)
 
