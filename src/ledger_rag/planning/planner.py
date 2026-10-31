@@ -19,7 +19,12 @@ from ledger_rag.planning.decisions import (
     LayaDecisionEngine,
 )
 from ledger_rag.planning.decomposition import llm_subqueries, template_subqueries
-from ledger_rag.planning.rewrite import RewriteMethod, deterministic_rewrite, rewrite
+from ledger_rag.planning.rewrite import (
+    RewriteMethod,
+    carry_over,
+    deterministic_rewrite,
+    rewrite,
+)
 
 logger = structlog.get_logger()
 
@@ -105,6 +110,13 @@ class Planner:
     def _gazetteer(self, principal: Principal | None) -> Gazetteer:
         return self.gazetteer.with_principal(principal, self.settings.planner_company_group_prefix)
 
+    def _routing(self, query: QueryRequest, gazetteer: Gazetteer) -> QueryAnalysis:
+        """Current-question analysis plus entities carried from history (never raw text)."""
+        analysis = analyze(query.question, gazetteer)
+        if query.history and analysis.follow_up and not analysis.self_contained:
+            return carry_over(query.question, analysis, query.history, gazetteer).analysis
+        return analysis
+
     def _limit(self, profile: Profile) -> int:
         if profile == Profile.VOICE:
             return self.settings.planner_voice_max_subqueries
@@ -156,7 +168,8 @@ class Planner:
             )
             method = "deterministic"
             analysis = analyze(question, gazetteer)
-        decision = self.heuristic.decide_sync(question, analysis, query.profile)
+        routing = self._routing(query, gazetteer)
+        decision = self.heuristic.decide_sync(query.question, routing, query.profile)
         subqueries = [question]
         if self.settings.planner_decompose and (decision.decompose or analysis.multi_part):
             subqueries = template_subqueries(question, analysis, self._limit(query.profile))
@@ -169,9 +182,10 @@ class Planner:
         base = self.deterministic(query, principal)
         provider = None if voice else self.provider
         initial = analyze(query.question, gazetteer)
-        # The decision reads the deterministic standalone question while the LLM rewrite runs.
+        # Routing sees only the current question plus structured carried entities; the
+        # rewritten (history-bearing) question is used for retrieval only.
         decision, rewritten = await asyncio.gather(
-            self.engine.decide(base.retrieval_question, base.analysis, query.profile),
+            self.engine.decide(query.question, self._routing(query, gazetteer), query.profile),
             rewrite(
                 query.question,
                 initial,

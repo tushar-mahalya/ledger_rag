@@ -12,6 +12,7 @@ from pydantic import SecretStr
 
 from ledger_rag.core.models import Profile
 from ledger_rag.planning.analysis import QueryAnalysis
+from ledger_rag.planning.screening import ADVICE, INJECTION, OFF_TOPIC
 
 logger = structlog.get_logger()
 
@@ -24,22 +25,6 @@ _GREETING = re.compile(
     r"|ok(?:ay)?|got it|cheers|please hold(?: on)?(?: a (?:second|moment|minute))?"
     r"|what can you do|who are you|how do(?:es)? (?:this|you) work)\b[\s!.?,]*"
     r"(?:that is all|that's all|there|a (?:second|moment|minute))?[\s!.?]*$",
-    re.I,
-)
-_ADVICE = re.compile(
-    r"\bshould i (?:buy|sell|invest|hold|short)\b|\bprice target\b|\bstock (?:tip|pick)s?\b"
-    r"|\b(?:predict|forecast)\w* (?:the |next year'?s? |future )?(?:stock|share) price\b"
-    r"|\bwill (?:the )?(?:stock|shares?) (?:go up|go down|rise|fall)\b|\bbest stock\b",
-    re.I,
-)
-_OFF_TOPIC = re.compile(
-    r"\b(?:weather|recipe|poem|song|lyrics|joke|horoscope|movie|sports? score)\b"
-    r"|\bwrite (?:me )?(?:a|an) (?:story|essay|poem)\b",
-    re.I,
-)
-_INJECTION = re.compile(
-    r"\bignore (?:all |any )?(?:previous|prior|above) instructions\b|\bsystem prompt\b"
-    r"|\bdeveloper mode\b|\bjailbreak\b",
     re.I,
 )
 _HANDOFF = re.compile(
@@ -67,16 +52,23 @@ class DecisionEngine(Protocol):
 
 
 class HeuristicDecisionEngine:
-    """Offline, deterministic default. Refusals require explicit, high-precision patterns."""
+    """Offline, deterministic default. Refusals require explicit, high-precision patterns.
+
+    ``text`` must be the current question only, never history or a rewritten query;
+    ``analysis`` may include structured entities carried over from history.
+    """
 
     def decide_sync(self, text: str, analysis: QueryAnalysis, profile: Profile) -> Decision:
         has_finance = bool(analysis.metrics or analysis.companies or analysis.years)
+        # Entities carried from history resolve follow-ups but cannot excuse an off-topic or
+        # small-talk *current* question.
+        own_finance = has_finance and not analysis.carried_over
         route: Route
-        if _INJECTION.search(text) or _ADVICE.search(text):
+        if INJECTION.search(text) or ADVICE.search(text):
             route, confidence = "refuse_out_of_scope", 0.9
-        elif _OFF_TOPIC.search(text) and not has_finance:
+        elif OFF_TOPIC.search(text) and not own_finance:
             route, confidence = "refuse_out_of_scope", 0.85
-        elif _GREETING.match(text) and not has_finance:
+        elif _GREETING.match(text) and not own_finance:
             route, confidence = "direct_answer", 0.85
         elif not has_finance and analysis.follow_up and len(text.split()) <= 4:
             route, confidence = "clarify", 0.6

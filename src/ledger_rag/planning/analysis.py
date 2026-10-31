@@ -203,6 +203,8 @@ class QueryAnalysis:
     operation: Operation = "lookup"
     follow_up: bool = False
     confidence: float = 0.0
+    # Entity kinds ("companies", "metrics", "years") filled from history, not the question.
+    carried_over: tuple[str, ...] = ()
 
     @property
     def needs_calculation(self) -> bool:
