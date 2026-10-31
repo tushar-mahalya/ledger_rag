@@ -6,7 +6,6 @@ import pytest
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import Document, Principal, Profile, QueryRequest
-from ledger_rag.generation.tools import calculate
 from ledger_rag.ingestion.chunking import chunk_document
 from ledger_rag.orchestration.service import RagService
 from ledger_rag.retrieval.memory import MemoryRetriever
@@ -77,38 +76,6 @@ async def test_reingestion_removes_stale_chunks(document: Document) -> None:
     assert len(store.chunks) == 1
 
 
-@pytest.mark.parametrize(
-    "expression,expected", [("0.1 + 0.2", "0.3"), ("(150-120)/120*100", "25.00"), ("-2*3", "-6")]
-)
-def test_calculator(expression: str, expected: str) -> None:
-    assert calculate(expression) == expected
-
-
-@pytest.mark.parametrize(
-    "expression",
-    [
-        "__import__('os')",
-        "2**100",
-        "1/0",
-        "True + 1",
-        "1e999",
-        "[1]",
-        "1 << 2",
-        "9" * 201,
-        "1e-1000000",
-        "1e-128 * 0.1",
-        "1e-1000000000",
-    ],
-)
-def test_calculator_rejects_unsafe_inputs(expression: str) -> None:
-    with pytest.raises(ValueError):
-        calculate(expression)
-
-
-def test_calculator_fixed_point_output_is_bounded() -> None:
-    assert len(calculate("1e-128")) <= 256
-
-
 async def test_citations_are_from_authorized_evidence(
     settings: Settings, document: Document, principal: Principal
 ) -> None:
@@ -149,7 +116,21 @@ async def test_tool_loop_is_bounded_and_decimal(
             {
                 "content": "",
                 "tool_calls": [
-                    {"id": "t1", "name": "calculator", "arguments": {"expression": "120*0.15"}}
+                    {
+                        "id": "t1",
+                        "name": "calculator",
+                        "arguments": {
+                            "steps": [
+                                {
+                                    "op": "multiply",
+                                    "args": [
+                                        {"citation_id": "C1", "quote": "USD 120 million"},
+                                        {"citation_id": "C1", "quote": "15 percent"},
+                                    ],
+                                }
+                            ]
+                        },
+                    }
                 ],
             },
             {"content": "Computed income is USD 18 million. [C1]", "tool_calls": []},
@@ -161,7 +142,8 @@ async def test_tool_loop_is_bounded_and_decimal(
     answer = await service.generate(query, hits, elapsed, "test")
     assert answer.tool_calls == 1
     tool_message = provider.messages[1][-1]
-    assert json.loads(tool_message["content"])["result"] == "18.00"
+    assert json.loads(tool_message["content"])["result"] == "18000000"
+    assert not answer.abstained
 
 
 async def test_voice_disables_tools(
