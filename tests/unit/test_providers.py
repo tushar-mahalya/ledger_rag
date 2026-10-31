@@ -164,9 +164,9 @@ async def test_anthropic_converts_parallel_tools_and_results(base: str) -> None:
 
 
 @pytest.mark.parametrize("provider_type", [OpenAIProvider, AnthropicProvider])
-@pytest.mark.parametrize("status", [401, 429, 500])
-async def test_http_errors_are_sanitized_and_not_retried(
-    provider_type: type[OpenAIProvider] | type[AnthropicProvider], status: int
+@pytest.mark.parametrize(("status", "attempts"), [(400, 1), (401, 1), (429, 3), (500, 3)])
+async def test_http_errors_are_sanitized_and_only_transient_ones_retried(
+    provider_type: type[OpenAIProvider] | type[AnthropicProvider], status: int, attempts: int
 ) -> None:
     provider = provider_type(settings())
     requests = await transport(provider, {"error": "secret-key PROMPT"}, status=status)
@@ -174,7 +174,7 @@ async def test_http_errors_are_sanitized_and_not_retried(
         await provider.complete([{"role": "user", "content": "PROMPT"}])
     assert str(status) in str(error.value)
     assert "secret-key" not in str(error.value) and "PROMPT" not in str(error.value)
-    assert len(requests) == 1
+    assert len(requests) == attempts
     await provider.close()
 
 
@@ -588,6 +588,87 @@ async def test_extractive_comparative_quote_preserves_numeric_thousands_separato
     )
     assert result["content"] == "Revenue in 2025 was $1,200, compared with $900 in 2024. [C1]"
     await provider.close()
+
+
+OK_RESPONSES: dict[type, dict[str, Any]] = {
+    OpenAIProvider: {"choices": [{"message": {"content": "ok"}}]},
+    AnthropicProvider: {"content": [{"type": "text", "text": "ok"}]},
+}
+
+
+@pytest.mark.parametrize("provider_type", [OpenAIProvider, AnthropicProvider])
+async def test_unset_generation_controls_are_omitted(
+    provider_type: type[OpenAIProvider] | type[AnthropicProvider],
+) -> None:
+    provider = provider_type(settings())
+    requests = await transport(provider, OK_RESPONSES[provider_type])
+    await provider.complete([{"role": "user", "content": "q"}])
+    body = json.loads(requests[0].content)
+    assert not {"temperature", "seed", "reasoning_effort", "max_completion_tokens"} & set(body)
+    # Anthropic requires a token cap; OpenAI-compatible servers choose their own.
+    assert body.get("max_tokens") == (2048 if provider_type is AnthropicProvider else None)
+    await provider.close()
+
+
+@pytest.mark.parametrize("parameter", ["max_tokens", "max_completion_tokens"])
+async def test_openai_sends_configured_generation_controls(parameter: str) -> None:
+    configured = settings().model_copy(
+        update={
+            "llm_temperature": 0.0,
+            "llm_max_tokens": 900,
+            "llm_max_tokens_parameter": parameter,
+            "llm_seed": 7,
+            "llm_reasoning_effort": "low",
+        }
+    )
+    provider = OpenAIProvider(configured)
+    requests = await transport(provider, OK_RESPONSES[OpenAIProvider])
+    await provider.complete([{"role": "user", "content": "q"}])
+    body = json.loads(requests[0].content)
+    assert {key: body.get(key) for key in ("temperature", parameter, "seed")} == {
+        "temperature": 0.0,
+        parameter: 900,
+        "seed": 7,
+    }
+    assert body["reasoning_effort"] == "low"
+    assert len({"max_tokens", "max_completion_tokens"} & set(body)) == 1
+    await provider.close()
+
+
+async def test_anthropic_sends_configured_generation_controls() -> None:
+    configured = settings("anthropic").model_copy(
+        update={"llm_temperature": 0.2, "llm_max_tokens": 512}
+    )
+    provider = AnthropicProvider(configured)
+    requests = await transport(provider, OK_RESPONSES[AnthropicProvider])
+    await provider.complete([{"role": "user", "content": "q"}])
+    body = json.loads(requests[0].content)
+    assert body["temperature"] == 0.2 and body["max_tokens"] == 512
+    await provider.close()
+
+
+@pytest.mark.parametrize(
+    "update", [{"llm_seed": 1}, {"llm_reasoning_effort": "high"}, {"llm_temperature": 1.5}]
+)
+def test_anthropic_rejects_unsupported_generation_controls(update: dict[str, Any]) -> None:
+    with pytest.raises(ProviderError):
+        AnthropicProvider(settings("anthropic").model_copy(update=update))
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"llm_temperature": -0.1},
+        {"llm_temperature": 2.1},
+        {"llm_max_tokens": 0},
+        {"llm_seed": -1},
+        {"llm_reasoning_effort": "extreme"},
+        {"llm_max_tokens_parameter": "max_output_tokens"},
+    ],
+)
+def test_generation_settings_are_validated(update: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        Settings.model_validate({**settings().model_dump(), **update})
 
 
 async def test_factory() -> None:

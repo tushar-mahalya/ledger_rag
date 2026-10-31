@@ -20,8 +20,10 @@ from ledger_rag.core.models import (
     Document,
     IngestRequest,
     Principal,
+    Profile,
     QueryRequest,
 )
+from ledger_rag.core.retry import request_deadline
 from ledger_rag.generation.evidence import citations_from_hits
 from ledger_rag.ingestion.chunking import chunk_document
 from ledger_rag.observability.telemetry import (
@@ -72,6 +74,10 @@ def create_app(
             backend = make_provider(resolved)
         voice: VoiceRuntime | None = None
         try:
+            bootstrap = getattr(store, "bootstrap", None)
+            if resolved.qdrant_bootstrap_on_startup and bootstrap is not None:
+                # Readiness is read-only; provisioning is this explicit startup step.
+                await bootstrap()
             if resolved.seed_path:
                 if resolved.environment == "production":
                     raise ValueError(
@@ -84,6 +90,8 @@ def create_app(
                 ]
                 await store.upsert([c for doc in documents for c in chunk_document(doc)])
             metrics = Metrics()
+            for collector in getattr(store, "collectors", list)():
+                metrics.registry.register(collector)
             if resolved.voice_enabled:
                 voice = make_voice_runtime(resolved, metrics.registry, stt, tts)
             app.state.runtime = Runtime(
@@ -210,7 +218,7 @@ def create_app(
         state = runtime(request)
         async with slot(state):
             try:
-                async with asyncio.timeout(state.settings.query_deadline_seconds):
+                async with request_deadline(state.settings.query_deadline_seconds):
                     await state.service.retriever.upsert(chunks)
             except TimeoutError as exc:
                 raise HTTPException(504, "Ingestion deadline exceeded") from exc
@@ -225,7 +233,9 @@ def create_app(
         state = runtime(request)
         async with slot(state):
             try:
-                async with asyncio.timeout(state.settings.query_deadline_seconds):
+                async with request_deadline(
+                    state.settings.query_deadline_seconds, voice=payload.profile == Profile.VOICE
+                ):
                     hits, retrieval_ms = await state.service.retrieve(payload, principal)
                     answer = await state.service.generate(
                         payload, hits, retrieval_ms, request.state.request_id, principal
@@ -249,7 +259,10 @@ def create_app(
 
             try:
                 async with slot(state):
-                    async with asyncio.timeout(state.settings.query_deadline_seconds):
+                    async with request_deadline(
+                        state.settings.query_deadline_seconds,
+                        voice=payload.profile == Profile.VOICE,
+                    ):
                         hits, retrieval_ms = await state.service.retrieve(
                             payload, principal, on_activity=on_activity
                         )

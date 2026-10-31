@@ -299,7 +299,13 @@ JSON logs alone are not a compliance-grade audit trail.
 
 Available metrics: `ledger_http_requests_total`,
 `ledger_http_duration_seconds`, `ledger_retrieval_seconds`,
-`ledger_generation_seconds`, and `ledger_abstentions_total`.
+`ledger_generation_seconds`, `ledger_abstentions_total`, and (Qdrant backend)
+`ledger_qdrant_rejected_points_total{reason}`. The last counts retrieved points
+dropped as `invalid_payload` (schema corruption), `filter_violation` (tenant/ACL/
+as-of mismatch despite the server filter) or `invalid_score`; search refills
+`top_k` from the remaining fused candidates and logs `qdrant_points_rejected`
+with counts only, never payloads or point IDs. Any non-zero rate signals index
+corruption or a filter bug and should page.
 Alert on HTTP 5xx/429, p95/p99 latency, scrape failures, Vault sealed state,
 Qdrant disk exhaustion, rising abstentions, and provider timeouts. Prometheus
 retains 15 days; Loki/Tempo retain seven days with local storage in this reference.
@@ -369,6 +375,15 @@ governance or an authorization review.
 Use `/health/live` for liveness and `/health/ready` for readiness.
 Readiness must gate load-balancer traffic; it is not a remote LLM accuracy or
 provider-availability guarantee. Use separate synthetic identity/model probes.
+Readiness is **read-only and lock-free**: one collection-info read validates
+reachability, vector/sparse schema, embedding identity, quantization and write
+state. It never creates or alters a collection and does not wait behind writers.
+A missing collection is reported unready. Provision explicitly: set
+`LEDGER_QDRANT_BOOTSTRAP_ON_STARTUP=true` (the bundled production overlay does,
+for its fresh local Qdrant) to create a missing collection with its payload
+indexes at startup, ingest documents (the write path provisions the same way),
+or build a staged collection with the [ingestion runbook](INGESTION.md). An
+existing collection is validated and never migrated in place.
 The image's healthcheck uses installed Python, not a nonexistent curl binary.
 Vault uses its installed CLI; minimal infrastructure images without guaranteed
 HTTP clients have no pretend curl/wget healthchecks. Probe their HTTP health
@@ -386,11 +401,38 @@ Compose limits API to 1 CPU/768 MiB, concurrency to the app default 32, and Qdra
 to 2 CPU/2 GiB; these are **starting budgets, not capacity measurements**. Run one
 uvicorn worker and **one API replica** for this reference. Do not enable horizontal
 autoscaling or multiple workers: document replacement is serialized only inside
-one instance, and failed-replacement quarantine is in-memory, not durable.
-Restarting an API is **not safe repair** and can forget a quarantine without
-repairing stored ACL/chunk consistency. If replacement fails, stop ingestion and
-restrict affected queries, reconcile the full authoritative document/ACL state
-with the index, and validate recovery before restoring traffic.
+one instance (reads there run concurrently; writes are exclusive).
+
+Failed-replacement quarantine is **durable and fails closed**. Before mutating, a
+writer stores a `ledger_write_lease` (`writer`, `expires_at`) in the Qdrant
+collection metadata and removes it only after all upserts and stale deletes
+succeed; long writes refresh it. Searches and readiness already read collection
+metadata, so an expired lease (crash, cancellation, restart or failure
+mid-replacement) makes **every** instance, including restarted ones, unready
+and refuse searches and writes. An unexpired lease held by another process is an
+in-flight write: reads continue and other writers refuse. This is best-effort
+coordination, not a distributed lock. Size `LEDGER_QDRANT_WRITE_LEASE_SECONDS`
+(default 120) above one upsert batch plus the stale deletes; an over-long write
+fails closed until it finishes. Restarting an API is **not repair**. If a
+replacement fails, stop ingestion, reconcile the full authoritative
+document/ACL state with the index, validate it, then explicitly release the
+lease with `uv run python scripts/release_qdrant_write_lease.py
+--confirm-reconciled` (same `LEDGER_*` settings as the API) before restoring
+traffic.
+
+Upstream **retries** cover only idempotent computations: LLM, embedding and
+reranker HTTP calls. 408/425/429/500/502/503/504/529 and transport errors
+(connect, read timeout) are retried up to `LEDGER_UPSTREAM_MAX_RETRIES` (default
+2) with full-jitter backoff, `uniform(0, min(max, base·2^attempt))`
+(`LEDGER_UPSTREAM_RETRY_BASE_SECONDS` 0.2, `LEDGER_UPSTREAM_RETRY_MAX_DELAY_SECONDS`
+5). A `Retry-After` header (seconds or HTTP date) sets the minimum delay; if it
+exceeds the max delay, the call fails at once. A retry starts only if the delay plus
+0.25s still fits before the request deadline (`LEDGER_QUERY_DEADLINE_SECONDS`).
+The `voice` profile is capped at **one** retry. Other 4xx statuses fail fast.
+Each retry logs `upstream_retry` (operation, attempt, status, delay; no content).
+A retried LLM 5xx or timeout may be **billed twice**; set the cap to 0 if that
+matters. Qdrant reads and writes are never retried; writes stay governed by the
+lease above.
 
 Horizontal scaling requires a distributed index coordinator, durable ACL
 versioning, and a transactional ingestion outbox/reconciliation mechanism first.

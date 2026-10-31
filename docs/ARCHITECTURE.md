@@ -122,13 +122,13 @@ Sources: [API](../src/ledger_rag/api/app.py),
 |---|---|---|
 | Chunking | Preserve paragraphs, table rows/headers and bounded neighboring context; embed title plus chunk text | No LLM-generated context, late chunking or visual table encoder yet |
 | Identity | Production chunker hashes tenant/document/ordinal/content; Qdrant uses deterministic UUIDs and ownership checks | Generic chunk callers must still obey the ownership contract |
-| Hybrid retrieval | Dense cosine plus hashed lexical sparse vectors, fused with RRF | Fixed reference length 256 and hashed terms are a BM25 approximation, not exact corpus-wide BM25 |
+| Hybrid retrieval | Dense cosine plus hashed lexical sparse vectors, fused with RRF | Fixed reference length 256 and hashed terms are a BM25 approximation, not exact corpus-wide BM25; Qdrant applies native IDF ([ADR 0001](adr/0001-native-bm25.md)) |
 | Permissions | Tenant, group ACL and publication-day filters apply before ranking, with post-retrieval checks | `as_of` is disclosure publication date, not fiscal year |
 | Index compatibility | Legacy schema 2 binds embeddings to endpoint/model/dimensions/rendering; opt-in schema 3 uses explicit embedding-space identity | A logical ID is not proof of served weights; validate the pinned query model and precision |
 | Reranking | Optional TEI cross-encoder; configurable candidate count, voice bypass | Measure quality/latency tradeoff; an extra network hop is not free |
 | Compression | Optional scalar/binary vector quantization with dense rescoring; `none` bypasses it | Distinct from CPU INT8 model inference; neither has demonstrated corpus-wide uplift here |
 | Bulk builds | One Modal GPU container writes a new collection, creates filter indexes and verifies counts before committing a manifest | No automatic resume, online cutover, distributed write lock or production release |
-| Small replacements | Upload all new chunks before tenant/document-scoped stale deletion; uncertain writes quarantine that instance | Not transactional across processes; a restart is not reconciliation |
+| Small replacements | Upload all new chunks before tenant/document-scoped stale deletion; a write lease in collection metadata makes an abandoned write fail closed in every instance | Not transactional; the lease is best-effort coordination, not a distributed lock; release only after reconciliation |
 
 See [ingestion and release boundaries](INGESTION.md),
 [Qdrant implementation](../src/ledger_rag/retrieval/qdrant.py) and

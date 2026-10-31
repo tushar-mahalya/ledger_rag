@@ -79,6 +79,17 @@ class Settings(BaseSettings):
     vad_trailing_silence_ms: int = Field(default=500, ge=100, le=5000)
     vad_max_utterance_seconds: float = Field(default=15, ge=1, le=60)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    # Reliability controls. Unset generation fields are omitted from provider requests.
+    qdrant_bootstrap_on_startup: bool = False
+    qdrant_write_lease_seconds: float = Field(default=120, ge=5, le=86400)
+    llm_temperature: float | None = Field(default=None, ge=0, le=2)
+    llm_max_tokens: int | None = Field(default=None, ge=1, le=131072)
+    llm_max_tokens_parameter: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
+    llm_seed: int | None = Field(default=None, ge=0, le=2**63 - 1)
+    llm_reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] | None = None
+    upstream_max_retries: int = Field(default=2, ge=0, le=5)
+    upstream_retry_base_seconds: float = Field(default=0.2, gt=0, le=10)
+    upstream_retry_max_delay_seconds: float = Field(default=5, gt=0, le=60)
 
     @model_validator(mode="after")
     def validate_deployment(self) -> "Settings":

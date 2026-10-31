@@ -4,11 +4,17 @@ import time
 from collections import OrderedDict
 
 import jwt
+import structlog
 from fastapi import HTTPException
 from jwt import PyJWKClient
+from pydantic import ValidationError
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import Principal
+
+logger = structlog.get_logger(__name__)
+MAX_ROLE_CLAIMS = 32
+MAX_GROUP_CLAIMS = 128
 
 
 class Authenticator:
@@ -59,16 +65,24 @@ class Authenticator:
         groups = claims.get("groups", [])
         if (
             not isinstance(subject, str)
-            or not subject
             or not isinstance(tenant, str)
-            or not tenant
             or not isinstance(roles, list)
             or not all(isinstance(role, str) for role in roles)
             or not isinstance(groups, list)
             or not all(isinstance(group, str) for group in groups)
         ):
             raise HTTPException(401, "Invalid identity claims")
-        return Principal(subject=subject, tenant_id=tenant, roles=roles, groups=groups)
+        # Groups become Qdrant filter terms; bound them before any further work.
+        if len(roles) > MAX_ROLE_CLAIMS or len(groups) > MAX_GROUP_CLAIMS:
+            logger.warning("oidc_claims_rejected", reason="too_many_values")
+            raise HTTPException(401, "Invalid identity claims")
+        try:
+            return Principal(subject=subject, tenant_id=tenant, roles=roles, groups=groups)
+        except ValidationError as exc:
+            # Field names only: claim values may be personal or attacker-controlled.
+            fields = sorted({str(error["loc"][0]) for error in exc.errors(include_input=False)})
+            logger.warning("oidc_claims_rejected", reason="invalid_values", fields=fields)
+            raise HTTPException(401, "Invalid identity claims") from None
 
 
 class RateLimiter:
