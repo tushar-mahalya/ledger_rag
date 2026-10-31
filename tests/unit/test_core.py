@@ -143,7 +143,9 @@ async def test_tool_loop_is_bounded_and_decimal(
     assert answer.tool_calls == 1
     tool_message = provider.messages[1][-1]
     assert json.loads(tool_message["content"])["result"] == "18000000"
-    assert not answer.abstained
+    assert not answer.abstained and answer.verification is not None
+    assert answer.verification.status == "verified"
+    assert answer.calculation is not None and answer.calculation.citation_ids == ["C1"]
 
 
 async def test_voice_disables_tools(

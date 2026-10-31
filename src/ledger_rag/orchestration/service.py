@@ -5,12 +5,28 @@ import structlog
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.contracts import Provider, Retriever
-from ledger_rag.core.models import Answer, Citation, Hit, Principal, Profile, QueryRequest
+from ledger_rag.core.models import (
+    Answer,
+    Calculation,
+    Citation,
+    Hit,
+    Principal,
+    Profile,
+    QueryRequest,
+    Verification,
+)
+from ledger_rag.generation.abstention import AbstentionPolicy
 from ledger_rag.generation.evidence import (
     ABSTENTION,
     citations_from_hits,
     generation_messages,
     validate_citations,
+)
+from ledger_rag.generation.verification import (
+    AnswerVerifier,
+    GroundednessVerifier,
+    citation_coverage,
+    make_groundedness_verifier,
 )
 from ledger_rag.observability.spans import safe_span
 from ledger_rag.orchestration.activity import ActivityCallback, activity
@@ -21,10 +37,23 @@ logger = structlog.get_logger()
 
 
 class RagService:
-    def __init__(self, settings: Settings, retriever: Retriever, provider: Provider) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        retriever: Retriever,
+        provider: Provider,
+        groundedness: GroundednessVerifier | None = None,
+    ) -> None:
         self.settings = settings
         self.retriever = retriever
         self.provider = provider
+        self.verifier = AnswerVerifier(
+            settings, groundedness or make_groundedness_verifier(settings)
+        )
+        self.abstention = AbstentionPolicy.from_settings(settings)
+
+    async def close(self) -> None:
+        await self.verifier.close()
 
     async def retrieve(
         self,
@@ -65,7 +94,9 @@ class RagService:
         citations = citations_from_hits(hits)
         messages = generation_messages(query, citations)
         start = time.perf_counter()
-        tool_count = 0
+        tool_count = tool_errors = 0
+        calculations: list[Calculation] = []
+        verification: Verification | None = None
         with safe_span("rag.generate") as span:
             span.set_attribute("gen_ai.request.model", self.provider.model)
             span.set_attribute("rag.profile", query.profile.value)
@@ -78,6 +109,9 @@ class RagService:
                         tool_count=0,
                         pending_calls=[],
                         content="",
+                        calculations=[],
+                        tool_errors=0,
+                        verification=None,
                     ),
                     ChatContext(
                         query=query.model_copy(deep=True),
@@ -86,6 +120,7 @@ class RagService:
                         retrieve=partial(self.retrieve, on_activity=on_activity),
                         max_tool_calls=self.settings.max_tool_rounds,
                         on_activity=on_activity,
+                        verifier=self.verifier,
                     ),
                 )
                 content, citations, tool_count = (
@@ -93,6 +128,8 @@ class RagService:
                     state["citations"],
                     state["tool_count"],
                 )
+                calculations, tool_errors = state["calculations"], state["tool_errors"]
+                verification = state["verification"]
             else:
                 content = ""
                 if citations:
@@ -107,12 +144,34 @@ class RagService:
                                 raise ValueError("Provider returned invalid content")
                 async with activity(on_activity, "validation"):
                     content, citations = validate_citations(content, citations)
+                    # Voice stays on the deterministic path: no model verifier, no extra calls.
+                    verification = self.verifier.check(content, citations, [])
+            decision = self.abstention.decide(
+                content=content,
+                hits=hits,
+                verification=verification,
+                citation_coverage=citation_coverage(content) if content else None,
+                tool_calls=tool_count,
+                tool_errors=tool_errors,
+            )
+            if decision.abstained:
+                content, citations = "", []
             span.set_attribute("rag.tool_calls", tool_count)
-            span.set_attribute("rag.abstained", not bool(content))
+            span.set_attribute("rag.abstained", decision.abstained)
+            if verification is not None:
+                span.set_attribute("rag.verification", verification.status)
         elapsed = (time.perf_counter() - start) * 1000
         generation_ms = elapsed if hits or (query.profile == Profile.CHAT and principal) else 0
-        return self._answer(
+        answer = self._answer(
             query, citations, content, retrieval_ms, generation_ms, request_id, tool_count
+        )
+        return answer.model_copy(
+            update={
+                "calculation": calculations[-1] if calculations else None,
+                "calculations": calculations,
+                "verification": verification,
+                "abstention": decision,
+            }
         )
 
     def _answer(
