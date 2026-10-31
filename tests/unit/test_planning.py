@@ -548,6 +548,40 @@ def test_two_digit_fiscal_years_use_pivot(text: str, year: int) -> None:
     assert analyze(text).years == (year,)
 
 
+def test_gazetteer_round_trips_and_builds_from_finqa(tmp_path: Path) -> None:
+    from scripts.build_gazetteer import build, main
+
+    names = gazetteer()
+    path = tmp_path / "names.json"
+    path.write_text(json.dumps(names.to_dict()))
+    assert Gazetteer.from_file(path).to_dict() == names.to_dict()
+    finqa = tmp_path / "finqa"
+    finqa.mkdir()
+    page = {"pre_text": ["Revenue rose."], "post_text": [], "table": [["a", "b"]]}
+    (finqa / "train.json").write_text(json.dumps([{**page, "filename": "ADI/2009/page_49.pdf"}]))
+    (finqa / "test.json").write_text(json.dumps([{**page, "filename": "UNP/2012/page_3.pdf"}]))
+    documents = tmp_path / "docs.jsonl"
+    document = Document(
+        id="HUM/2019/page_1.pdf",
+        tenant_id="finqa",
+        title="HUM annual report 2019, page 1",
+        text="x",
+        source="finqa://HUM/2019/page_1.pdf",
+        published_at=date(2019, 12, 31),
+    )
+    documents.write_text(document.model_dump_json() + "\n")
+    assert build(documents=documents) == {"HUM": []}
+    aliases = tmp_path / "aliases.json"
+    aliases.write_text(json.dumps({"ADI": ["analog devices"], "ZZZ": ["not in corpus"]}))
+    assert build(finqa=finqa, aliases=aliases) == {"ADI": ["analog devices"], "UNP": []}
+    output = tmp_path / "gazetteer.json"
+    main(["--finqa", str(finqa), "--output", str(output)])
+    loaded = Gazetteer.from_file(output)
+    assert loaded.companies("Compare ADI and UNP") == ["ADI", "UNP"]
+    with pytest.raises(FileNotFoundError):
+        build(finqa=tmp_path / "missing")
+
+
 async def test_service_close_closes_planner_engine(settings: Settings) -> None:
     from ledger_rag.orchestration.service import RagService
     from ledger_rag.retrieval.memory import MemoryRetriever

@@ -164,6 +164,13 @@ class Gazetteer:
                 gazetteer.add(match.group(1))
         return gazetteer
 
+    def to_dict(self) -> dict[str, list[str]]:
+        """``{"TICKER": [aliases]}``, the format read by :meth:`from_file`; sorted, stable."""
+        result: dict[str, list[str]] = {ticker: [] for ticker in sorted(self.tickers)}
+        for alias, ticker in sorted(self.aliases.items()):
+            result[ticker].append(alias)
+        return result
+
     def with_principal(self, principal: Principal | None, prefix: str) -> "Gazetteer":
         """Add tickers the principal may read (``company:ADI`` groups); never widens access."""
         if principal is None or not prefix:
