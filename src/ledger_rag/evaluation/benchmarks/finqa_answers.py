@@ -23,7 +23,7 @@ import sys
 import time
 from typing import Any
 
-from ledger_rag.core.models import Chunk, Hit, QueryRequest
+from ledger_rag.core.models import Chunk, QueryRequest
 from ledger_rag.evaluation.benchmarks.finqa import (
     Case,
     Corpus,
@@ -41,7 +41,7 @@ from ledger_rag.evaluation.uncertainty import (
     summarize_rows,
 )
 
-PROMPT_VERSION = "finqa-structured-v1"
+PROMPT_VERSION = "finqa-structured-v2"
 SYSTEM_PROMPT = """You answer questions about excerpts from SEC annual reports (10-K).
 Use only the numbered context. Think briefly (a few short lines at most), then end your
 reply with exactly these three lines:
@@ -57,7 +57,9 @@ Rules for the ANSWER line:
 - Amounts: the number in the units used by the context, e.g. ANSWER: 9119
 - Yes/no questions: ANSWER: yes or ANSWER: no
 - Keep at least two decimal places unless the result is a whole number.
-- If the context does not contain what is needed: ANSWER: INSUFFICIENT"""
+- Most questions need arithmetic (differences, sums, ratios, averages, percent changes)
+  over figures in the context: do the calculation rather than abstaining.
+- Only if a figure the calculation needs is absent from the context: ANSWER: INSUFFICIENT"""
 USER_TEMPLATE = "Context:\n{context}\n\nQuestion: {question}"
 
 
@@ -111,11 +113,11 @@ async def _answer_one(
     mode: str,
     case: Case,
     corpus: Corpus,
-    hits: list[Hit],
+    hits: list[tuple[Chunk, float]],
 ) -> dict[str, Any]:
     evidence = corpus.evidence(case.document_id)
     k = parse_mode(mode)
-    context = list(evidence.chunks) if k is None else [hit.chunk for hit in hits[:k]]
+    context = list(evidence.chunks) if k is None else [chunk for chunk, _ in hits[:k]]
     completion = await client.complete(config, messages(case.question, context))
     parsed = parse_structured(completion.text)
     result = score(parsed, case.answer, case.answer_text)
@@ -143,7 +145,7 @@ async def _answer_one(
         "format_error": parsed.format_error if not completion.error else None,
         "error": completion.error,
         "confidence": parsed.confidence,
-        "top_retrieval_score": hits[0].score if hits and k is not None else None,
+        "top_retrieval_score": hits[0][1] if hits and k is not None else None,
         "context": [f"{c.document_id}#{c.ordinal}" for c in context],
         "gold_page_in_context": any(c.document_id == case.document_id for c in context),
         "context_evidence_recall": (
@@ -256,27 +258,76 @@ def paired_answer_differences(
     return out
 
 
-async def answers(
-    args: argparse.Namespace, corpus: Corpus, cases: list[Case], client: ChatClient
+def sample_cases(args: argparse.Namespace, cases: list[Case]) -> list[Case]:
+    return random.Random(args.seed).sample(cases, min(args.answer_samples, len(cases)))
+
+
+async def retrieve_contexts(
+    args: argparse.Namespace, corpus: Corpus, cases: list[Case]
 ) -> dict[str, Any]:
-    configs = [parse_model(spec, args) for spec in args.llm_models]
+    """Company-scoped answer retrieval for the sampled cases (the only GPU-bound step).
+
+    Saved separately so LLM generation can run later without embedder/reranker.
+    """
+    sample = sample_cases(args, cases)
     ks = [k for k in (parse_mode(mode) for mode in args.answer_modes) if k is not None]
-    sample = random.Random(args.seed).sample(cases, min(args.answer_samples, len(cases)))
-    hits_by_case: dict[str, list[Hit]] = {case.id: [] for case in sample}
+    top_k = max(ks, default=0)
+    hits: dict[str, list[list[Any]]] = {case.id: [] for case in sample}
     retrieval_ms: list[float] = []
-    if ks:
+    if top_k:
         fusion, rerank, _ = arm_name(args.answer_retrieval)
         queries = [
-            (
-                QueryRequest(question=case.question, top_k=max(ks)),
-                principal(case, "company", corpus),
-            )
+            (QueryRequest(question=case.question, top_k=top_k), principal(case, "company", corpus))
             for case in sample
         ]
         outcomes = await search_all(args, fusion, rerank, queries, "answer-retrieval")
-        for case, (hits, elapsed) in zip(sample, outcomes, strict=True):
-            hits_by_case[case.id] = hits
+        for case, (found, elapsed) in zip(sample, outcomes, strict=True):
+            hits[case.id] = [[h.chunk.document_id, h.chunk.id, h.score] for h in found]
             retrieval_ms.append(elapsed)
+    return {
+        "answer_retrieval": args.answer_retrieval,
+        "scope": "company",
+        "top_k": top_k,
+        "sample_seed": args.seed,
+        "samples": len(sample),
+        "retrieval_latency": latency(retrieval_ms),
+        "hits": hits,
+    }
+
+
+def _resolve(
+    contexts: dict[str, Any], corpus: Corpus, sample: list[Case], ks: list[int], arm: str
+) -> dict[str, list[tuple[Chunk, float]]]:
+    """Validate saved contexts against this run and map chunk ids back to chunks."""
+    if ks and (contexts["answer_retrieval"] != arm or contexts["top_k"] < max(ks)):
+        raise ValueError("Saved contexts were built with a different retrieval arm or top-k")
+    if set(contexts["hits"]) != {case.id for case in sample}:
+        raise ValueError("Saved contexts do not cover exactly the sampled cases")
+    resolved: dict[str, list[tuple[Chunk, float]]] = {}
+    for case_id, rows in contexts["hits"].items():
+        pairs = []
+        for document_id, chunk_id, value in rows:
+            chunk = corpus.evidence(document_id).by_id.get(chunk_id)
+            if chunk is None:
+                raise ValueError(f"Saved context chunk {chunk_id} is not in the rebuilt corpus")
+            pairs.append((chunk, float(value)))
+        resolved[case_id] = pairs
+    return resolved
+
+
+async def answers(
+    args: argparse.Namespace,
+    corpus: Corpus,
+    cases: list[Case],
+    client: ChatClient,
+    contexts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    configs = [parse_model(spec, args) for spec in args.llm_models]
+    ks = [k for k in (parse_mode(mode) for mode in args.answer_modes) if k is not None]
+    sample = sample_cases(args, cases)
+    if contexts is None:
+        contexts = await retrieve_contexts(args, corpus, cases)
+    hits_by_case = _resolve(contexts, corpus, sample, ks, args.answer_retrieval)
     started = time.perf_counter()
     done = 0
 
@@ -303,7 +354,7 @@ async def answers(
         "answer_retrieval": args.answer_retrieval if ks else None,
         "samples": len(sample),
         "sample_seed": args.seed,
-        "retrieval_latency": latency(retrieval_ms),
+        "retrieval_latency": contexts["retrieval_latency"],
         "wall_seconds": round(time.perf_counter() - started, 1),
         "llm_calls": {
             "completions": len(records),
@@ -311,6 +362,7 @@ async def answers(
             "retries": client.stats.retries,
             "failures": client.stats.failures,
             "status_counts": client.stats.status_counts,
+            "error_samples": client.stats.error_samples,
         },
         "summary": summarize_answers(records, seed=seed, samples=samples),
         "paired_differences": paired_answer_differences(records, seed=seed, samples=samples),

@@ -532,7 +532,11 @@ def _temperature(value: str) -> float | None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="FinQA benchmark on production code paths")
-    parser.add_argument("command", choices=["stats", "ingest", "retrieval", "answers"])
+    parser.add_argument(
+        "command",
+        choices=["stats", "ingest", "retrieval", "contexts", "answers"],
+        help="contexts: save answer-retrieval hits so answers can run without GPU services",
+    )
     parser.add_argument("--data", type=Path, default=Path("data/finqa"))
     parser.add_argument(
         "--split",
@@ -598,6 +602,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--llm-concurrency", type=int, default=8)
     parser.add_argument(
+        "--llm-rpm", type=float, default=None, help="Client-side requests/minute per model"
+    )
+    parser.add_argument(
+        "--contexts", type=Path, help="Saved 'contexts' report; answers then skip retrieval"
+    )
+    parser.add_argument(
         "--temperature",
         type=_temperature,
         default=0.0,
@@ -628,6 +638,8 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         parser.error("--retrieval-concurrency must be between 1 and 16")
     if not 1 <= args.llm_concurrency <= 8:
         parser.error("--llm-concurrency must be between 1 and 8")
+    if args.llm_rpm is not None and args.llm_rpm <= 0:
+        parser.error("--llm-rpm must be positive")
     try:
         for config in args.configs:
             arm_name(config)
@@ -687,7 +699,7 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
         "quantization": args.quantization,
         "oversampling": args.oversampling,
     }
-    if args.command in {"retrieval", "answers"}:
+    if args.command in {"retrieval", "contexts", "answers"}:
         require_valid_gold(cases)
         report["dataset"]["evidence_mapping"] = evidence_audit(corpus, cases)
     if args.command == "ingest":
@@ -700,13 +712,39 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "scopes": args.scopes,
         }
         report["retrieval"] = await retrieval(args, corpus, cases)
+    elif args.command == "contexts":
+        from ledger_rag.evaluation.benchmarks.finqa_answers import retrieve_contexts
+
+        report["contexts"] = await retrieve_contexts(args, corpus, cases)
+        report["lineage"]["rerank_candidates"] = args.rerank_candidates
     elif args.command == "answers":
         from ledger_rag.evaluation.benchmarks.finqa_answers import answers
         from ledger_rag.evaluation.llm import ChatClient
 
-        client = ChatClient(args.llm_url, args.llm_key, concurrency=args.llm_concurrency)
+        contexts = None
+        if args.contexts:
+            saved = json.loads(args.contexts.read_text())
+            if "lineage" not in saved:  # Modal job wrapper: {run_id, contexts: report}
+                saved = {**saved["contexts"], "run_id": saved.get("run_id")}
+            lineage = saved["lineage"]
+            if lineage["corpus_sha256"] != fingerprint or lineage["collection"] != args.collection:
+                raise ValueError("Saved contexts come from a different corpus or collection")
+            contexts = saved["contexts"]
+            report["lineage"]["contexts_source"] = {
+                "path": str(args.contexts),
+                "run_id": saved.get("run_id"),
+                "git_sha": lineage["git_sha"],
+                "embedding_space_id": lineage["embedding_space_id"],
+                "reranker_revision": lineage["reranker_revision"],
+            }
+        client = ChatClient(
+            args.llm_url,
+            args.llm_key,
+            concurrency=args.llm_concurrency,
+            requests_per_minute=args.llm_rpm,
+        )
         try:
-            report["answers"] = await answers(args, corpus, cases, client)
+            report["answers"] = await answers(args, corpus, cases, client, contexts)
         finally:
             await client.close()
         report["lineage"].update(
@@ -716,6 +754,8 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                 "temperature": args.temperature,
                 "max_tokens": args.max_tokens,
                 "llm_seed": args.llm_seed,
+                "llm_rpm_per_model": args.llm_rpm,
+                "llm_concurrency": args.llm_concurrency,
                 "prompt_sha256": report["answers"]["prompt_sha256"],
                 "rerank_candidates": args.rerank_candidates,
             }

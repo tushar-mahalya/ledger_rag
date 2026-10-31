@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -38,7 +39,8 @@ EMBED_PORT, RERANK_PORT = 8000, 8001
 # The TEI ``89-*`` image needs compute capability 8.9: L4 preferred, L40S when L4
 # capacity is unavailable. The actual device is recorded in the report.
 GPU = ["L4", "L40S"]
-COMMANDS = ("retrieval", "answers")
+GPU_COMMANDS = ("retrieval", "contexts")
+COMMANDS = (*GPU_COMMANDS, "answers")
 SECRET_ENV = {
     "LEDGER_QDRANT_URL",
     "LEDGER_QDRANT_API_KEY",
@@ -72,10 +74,12 @@ llm_secret = modal.Secret.from_name(
 )
 
 
-def benchmark_argv(command: str, options: dict[str, Any], data_dir: str, key: str) -> list[str]:
+def benchmark_argv(
+    command: str, options: dict[str, Any], data_dir: str, key: str, contexts: str = ""
+) -> list[str]:
     """Translate validated job options into ``finqa`` CLI arguments; endpoints are fixed."""
     if command not in COMMANDS:
-        raise ValueError("Evaluation job only runs read-only retrieval/answers commands")
+        raise ValueError("Evaluation job only runs read-only retrieval/contexts/answers commands")
     argv = [
         command,
         "--data",
@@ -131,6 +135,10 @@ def benchmark_argv(command: str, options: dict[str, Any], data_dir: str, key: st
         "--git-sha",
         str(options.get("git_sha", "unknown")),
     ]
+    if options.get("llm_rpm"):
+        argv += ["--llm-rpm", str(float(options["llm_rpm"]))]
+    if contexts:
+        argv += ["--contexts", contexts]
     if options.get("llm_seed") is not None:
         argv += ["--llm-seed", str(int(options["llm_seed"]))]
     if options.get("unseal_test"):
@@ -217,7 +225,8 @@ def _write_report(output: Path, report: dict[str, Any]) -> None:
 def summarize_report(report: dict[str, Any]) -> dict[str, Any]:
     """Compact, secret-free summary returned to the local entrypoint."""
     summary: dict[str, Any] = {
-        key: report[key] for key in ("run_id", "report_path", "gpu", "gpu_seconds", "git_sha")
+        key: report.get(key)
+        for key in ("run_id", "report_path", "gpu", "gpu_seconds", "cpu_seconds", "git_sha")
     }
     retrieval = report.get("retrieval", {}).get("retrieval")
     if retrieval:
@@ -236,6 +245,13 @@ def summarize_report(report: dict[str, Any]) -> dict[str, Any]:
             }
             | {"latency_p50_ms": values["latency"]["p50_ms"]}
             for arm, values in retrieval["arms"].items()
+        }
+    contexts = report.get("contexts", {}).get("contexts")
+    if contexts:
+        summary["contexts"] = {
+            "samples": contexts["samples"],
+            "top_k": contexts["top_k"],
+            "retrieval_latency": contexts["retrieval_latency"],
         }
     answers = report.get("answers", {}).get("answers")
     if answers:
@@ -283,8 +299,8 @@ async def evaluate(commands: list[str], options: dict[str, Any]) -> dict[str, An
     from ledger_rag.retrieval.qdrant import QdrantRetriever
 
     started = time.perf_counter()
-    if not commands or any(command not in COMMANDS for command in commands):
-        raise ValueError("commands must be a non-empty subset of retrieval, answers")
+    if not commands or any(command not in GPU_COMMANDS for command in commands):
+        raise ValueError("commands must be a non-empty subset of retrieval, contexts")
     if urlsplit(os.environ["LEDGER_QDRANT_URL"]).scheme != "https":
         raise ValueError("Evaluation requires an HTTPS Qdrant URL")
     run_id = uuid4().hex
@@ -342,6 +358,58 @@ async def evaluate(commands: list[str], options: dict[str, Any]) -> dict[str, An
     return summarize_report(report)
 
 
+@app.function(
+    cpu=2,
+    memory=8192,
+    volumes={"/data": data_volume},
+    secrets=[llm_secret],
+    timeout=4 * 3600,
+    max_containers=1,
+    single_use_containers=True,
+    retries=0,
+)
+async def generate(options: dict[str, Any], contexts_path: str) -> dict[str, Any]:
+    """CPU-only LLM stage: answers over contexts saved by the GPU stage (no Qdrant access)."""
+    import tempfile
+    import time
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from ledger_rag.evaluation.benchmarks.finqa import build_parser, execute, validate_args
+
+    started = time.perf_counter()
+    if not re.fullmatch(r"/data/evaluation/[0-9a-f]{32}\.json", contexts_path):
+        raise ValueError("contexts_path must be an evaluation report on the data volume")
+    source = Path(contexts_path)
+    await data_volume.reload.aio()  # type: ignore[no-untyped-call]
+    run_id = uuid4().hex
+    report: dict[str, Any] = {
+        "run_id": run_id,
+        "started_at": datetime.now(UTC).isoformat(),
+        "git_sha": options.get("git_sha", "unknown"),
+        "gpu": None,
+        "options": {k: v for k, v in options.items() if "key" not in k},
+    }
+    with tempfile.TemporaryDirectory(prefix="ledger-eval-") as directory:
+        fetch = await asyncio.create_subprocess_exec(
+            "bash", "/opt/ledger/fetch_finqa.sh", directory
+        )
+        if await fetch.wait() != 0:
+            raise RuntimeError("Pinned FinQA fetch or checksum verification failed")
+        parser = build_parser()
+        args = parser.parse_args(
+            benchmark_argv("answers", options, directory, "unused", str(source))
+        )
+        validate_args(parser, args)
+        report["answers"] = await execute(args)
+    report["cpu_seconds"] = round(time.perf_counter() - started, 1)
+    output = DATA / "evaluation" / f"{run_id}.json"
+    report["report_path"] = str(output)
+    await asyncio.to_thread(_write_report, output, report)
+    await data_volume.commit.aio()  # type: ignore[no-untyped-call]
+    return summarize_report(report)
+
+
 def _git_sha() -> str:
     sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip():
@@ -366,12 +434,17 @@ def main(
     answer_modes: str = "retrieved@3,retrieved@5,oracle",
     temperature: str = "default",
     max_tokens: int = 2048,
-    llm_concurrency: int = 8,
+    llm_concurrency: int = 4,
+    llm_rpm: float = 0.0,
     retrieval_concurrency: int = 4,
     seed: int = 13,
+    contexts_run: str = "",
 ) -> None:
-    commands = list(COMMANDS) if command == "all" else [command]
-    if any(item not in COMMANDS for item in commands):
+    """``--command retrieval|answers|all``; answers = GPU contexts stage then CPU LLM stage.
+
+    ``--contexts-run <run_id>`` reuses saved contexts and skips the GPU stage.
+    """
+    if command not in {"retrieval", "answers", "all"}:
         raise SystemExit("--command must be retrieval, answers or all")
     if split == "test" and not unseal_test:
         raise SystemExit("the test split is sealed; pass --unseal-test after configuration freeze")
@@ -387,8 +460,20 @@ def main(
         "temperature": temperature,
         "max_tokens": max_tokens,
         "llm_concurrency": llm_concurrency,
+        "llm_rpm": llm_rpm or None,
         "retrieval_concurrency": retrieval_concurrency,
         "seed": seed,
         "git_sha": _git_sha(),
     }
-    print(json.dumps(evaluate.remote(commands, options), indent=2))
+    gpu_commands = []
+    if command in {"retrieval", "all"}:
+        gpu_commands.append("retrieval")
+    if command in {"answers", "all"} and not contexts_run:
+        gpu_commands.append("contexts")
+    contexts_path = f"/data/evaluation/{contexts_run}.json" if contexts_run else ""
+    if gpu_commands:
+        summary = evaluate.remote(gpu_commands, options)
+        print(json.dumps(summary, indent=2))
+        contexts_path = contexts_path or str(summary["report_path"])
+    if command in {"answers", "all"}:
+        print(json.dumps(generate.remote(options, contexts_path), indent=2))

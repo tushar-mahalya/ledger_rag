@@ -8,6 +8,7 @@ small client instead. It never logs request bodies, keys or response bodies.
 
 import asyncio
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -38,6 +39,8 @@ class Completion:
     attempts: int
     latency_ms: float
     error: str | None = None
+    # Duration of the final HTTP attempt only (excludes pacing and retry waits).
+    service_ms: float | None = None
 
 
 @dataclass
@@ -46,6 +49,7 @@ class CallStats:
     retries: int = 0
     failures: int = 0
     status_counts: dict[str, int] = field(default_factory=dict)
+    error_samples: list[str] = field(default_factory=list)
 
 
 def _usage(payload: dict[str, Any]) -> dict[str, int]:
@@ -61,10 +65,13 @@ def _usage(payload: dict[str, Any]) -> dict[str, int]:
 
 
 def _retry_after(response: httpx.Response) -> float | None:
+    """Retry-After header, else the ``retryDelay`` hint Gemini puts in 429 bodies."""
     try:
         return max(0.0, float(response.headers.get("retry-after", "")))
     except ValueError:
-        return None
+        pass
+    match = re.search(r'"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"', response.text)
+    return float(match.group(1)) if match else None
 
 
 class ChatClient:
@@ -77,6 +84,7 @@ class ChatClient:
         deadline_seconds: float = 180,
         request_timeout: float = 120,
         max_attempts: int = 6,
+        requests_per_minute: float | None = None,
         rng: random.Random | None = None,
     ) -> None:
         if not 1 <= concurrency <= 8:
@@ -93,7 +101,27 @@ class ChatClient:
         self._deadline = deadline_seconds
         self._max_attempts = max_attempts
         self._rng = rng or random.Random(0)
+        if requests_per_minute is not None and requests_per_minute <= 0:
+            raise ValueError("requests_per_minute must be positive")
+        self._interval = 60 / requests_per_minute if requests_per_minute else 0.0
+        self._next_slot: dict[str, float] = {}
+        self._pace_lock = asyncio.Lock()
         self.stats = CallStats()
+
+    async def _pace(self, model: str) -> None:
+        """Per-model client-side pacing so provider quotas are not hit by design."""
+        if not self._interval:
+            return
+        async with self._pace_lock:
+            now = time.monotonic()
+            slot = max(now, self._next_slot.get(model, now))
+            self._next_slot[model] = slot + self._interval
+        await asyncio.sleep(slot - now)
+
+    def _sample_error(self, response: httpx.Response) -> None:
+        sample = f"{response.status_code}: {' '.join(response.text.split())[:300]}"
+        if len(self.stats.error_samples) < 5 and sample not in self.stats.error_samples:
+            self.stats.error_samples.append(sample)
 
     def _count(self, status: str) -> None:
         self.stats.status_counts[status] = self.stats.status_counts.get(status, 0) + 1
@@ -113,15 +141,19 @@ class ChatClient:
         if config.seed is not None:
             body["seed"] = config.seed
         async with self._semaphore:
+            await self._pace(config.model)
             start = time.perf_counter()
             deadline = start + self._deadline
             attempt = 0
             error = "unknown"
             while attempt < self._max_attempts:
                 attempt += 1
+                if attempt > 1:
+                    await self._pace(config.model)
                 self.stats.requests += 1
                 delay: float | None = None
                 try:
+                    sent = time.perf_counter()
                     response = await self._client.post(self._url, json=body)
                     self._count(str(response.status_code))
                     if response.status_code == 200:
@@ -135,8 +167,10 @@ class ChatClient:
                             usage=_usage(payload),
                             attempts=attempt,
                             latency_ms=round((time.perf_counter() - start) * 1000, 1),
+                            service_ms=round((time.perf_counter() - sent) * 1000, 1),
                         )
                     error = f"http_{response.status_code}"
+                    self._sample_error(response)
                     if response.status_code not in RETRYABLE_STATUS:
                         break
                     delay = _retry_after(response)

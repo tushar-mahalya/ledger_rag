@@ -235,3 +235,57 @@ def test_chat_client_does_not_retry_client_errors_and_bounds_concurrency() -> No
         await client.close()
 
     asyncio.run(run())
+
+
+def test_retry_delay_hint_and_per_model_pacing() -> None:
+    from ledger_rag.evaluation.llm import _retry_after
+
+    body = '{"error": {"details": [{"retryDelay": "37s"}]}}'
+    assert _retry_after(httpx.Response(429, text=body)) == 37.0
+    assert _retry_after(httpx.Response(429, headers={"retry-after": "2"})) == 2.0
+    assert _retry_after(httpx.Response(429)) is None
+    with pytest.raises(ValueError):
+        ChatClient("https://llm.test/v1", "k", requests_per_minute=0)
+    ok = {"choices": [{"message": {"content": "ANSWER: 1"}, "finish_reason": "stop"}]}
+
+    async def run() -> float:
+        client = ChatClient("https://llm.test/v1", "k", requests_per_minute=600)
+        client._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, json=ok))
+        )
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        await asyncio.gather(*(client.complete(GenerationConfig("m"), []) for _ in range(3)))
+        await client.close()
+        return loop.time() - start
+
+    assert asyncio.run(run()) >= 0.19  # three requests, 0.1 s apart
+
+
+def test_saved_contexts_must_match_sample_and_arm() -> None:
+    from ledger_rag.evaluation.benchmarks.finqa import Case, Corpus, page_document
+    from ledger_rag.evaluation.benchmarks.finqa_answers import _resolve
+
+    example = {
+        "filename": "ACME/2020/page_4.pdf",
+        "pre_text": ["revenue grew ."],
+        "post_text": [],
+        "table": [["", "2020"], ["net sales", "$ 120"]],
+    }
+    document, units = page_document(example)
+    corpus = Corpus(documents={document.id: document}, units={document.id: units})
+    chunk = corpus.evidence(document.id).chunks[0]
+    case = Case("q", "?", document.id, "ACME", [], 1.0, "")
+    saved = {"answer_retrieval": "hybrid:rerank", "top_k": 5, "hits": {"q": []}}
+    saved["hits"]["q"] = [[document.id, chunk.id, 0.9]]
+    resolved = _resolve(saved, corpus, [case], [3, 5], "hybrid:rerank")
+    assert resolved["q"] == [(chunk, 0.9)]
+    with pytest.raises(ValueError, match="arm or top-k"):
+        _resolve(saved, corpus, [case], [10], "hybrid:rerank")
+    with pytest.raises(ValueError, match="arm or top-k"):
+        _resolve(saved, corpus, [case], [3], "dense")
+    with pytest.raises(ValueError, match="sampled cases"):
+        _resolve({**saved, "hits": {}}, corpus, [case], [3], "hybrid:rerank")
+    with pytest.raises(ValueError, match="rebuilt corpus"):
+        bad = {**saved, "hits": {"q": [[document.id, "nope", 0.1]]}}
+        _resolve(bad, corpus, [case], [3], "hybrid:rerank")

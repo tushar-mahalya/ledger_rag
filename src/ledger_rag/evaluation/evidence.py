@@ -53,6 +53,10 @@ class DocumentEvidence:
     chunks: list[Chunk]
     units: dict[str, UnitMapping] = field(default_factory=dict)
 
+    @property
+    def by_id(self) -> dict[str, Chunk]:
+        return {chunk.id: chunk for chunk in self.chunks}
+
 
 def map_units(units: dict[str, str], chunks: Sequence[Chunk]) -> dict[str, UnitMapping]:
     texts = [(chunk.id, _norm(chunk.text)) for chunk in chunks]
