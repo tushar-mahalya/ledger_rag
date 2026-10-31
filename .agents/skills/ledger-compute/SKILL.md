@@ -23,7 +23,9 @@ Credentials: [headless authentication](../../../docs/AGENT_WORKFLOWS.md#headless
   environment. A profile selection alone is not proof of access. Missing auth
   blocks remote work; do not silently substitute local CPU inference.
 - Platform tokens authenticate CLI/SDK calls. `ledger-tei` / `TEI_API_KEY` protects
-  HTTP inference separately; use [Vault projection](../../../scripts/sync_modal_secrets.sh).
+  HTTP inference separately. Jobs should fetch data-plane keys through Vault
+  [workload identity](../../../docs/OPERATIONS.md#modal-workload-identity); the
+  [Vault projection](../../../scripts/sync_modal_secrets.sh) is the fallback.
 
 ## Job and release checks
 

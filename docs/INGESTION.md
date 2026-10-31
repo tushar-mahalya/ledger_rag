@@ -40,8 +40,10 @@ unauthenticated database or tunnel it publicly as a shortcut.
    ingestion credential. The deployed server must support collection metadata
    (the reference uses Qdrant 1.20.0). Collection creation needs the corresponding
    permission; query credentials should not have write access.
-3. Store the database key at `secret/ledger/api#qdrant_api_key` in Vault.
-   With an authenticated Vault session, project it into the Modal environment:
+3. Store the database key at `secret/ledger/qdrant#api_key` in Vault. Prefer
+   [Modal workload identity](OPERATIONS.md#modal-workload-identity) so the job reads
+   it directly; otherwise, with an authenticated Vault session, project it into the
+   Modal environment:
 
    ```bash
    LEDGER_QDRANT_URL=https://YOUR-DATABASE \

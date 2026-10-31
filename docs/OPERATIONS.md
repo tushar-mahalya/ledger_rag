@@ -91,11 +91,14 @@ flowchart LR
     Agent --> Files["Read-only API secret files"]
     Files --> Wait["Startup waiter: required files"]
     Wait --> API["API loads settings once"]
-    Vault --> Project["Authorized secret projection"]
+    Vault --> Project["Authorized secret projection (fallback)"]
     Project --> DBSecret["Modal database secret"]
     DBSecret --> Job["GPU ingestion job"]
     Project --> TEISecret["Modal serving key"]
     TEISecret --> TEI["Embedding / reranking endpoint"]
+    OIDC["Modal identity token (RS256 JWT)"] --> JWT["Vault auth/jwt-modal"]
+    JWT -->|"5-minute scoped token"| Job
+    JWT -->|"5-minute scoped token"| TEI
     Platform["Modal platform token"] --> Submitter["CLI / SDK submitter"]
     Submitter --> Job
     Rotation["Operator rotates provider credentials"] --> Vault
@@ -132,14 +135,16 @@ SecretID delivery or platform workload identity for a managed deployment.
 Populate these **KV v2 logical paths** through an approved secret-management
 workflow, not literal credentials in shell history:
 
-* `secret/ledger/api`: `llm_api_key`, `embedding_api_key`, `qdrant_api_key`.
+* `secret/ledger/llm`, `secret/ledger/embedding`, `secret/ledger/qdrant`: one
+  `api_key` field each. Separate paths exist because Vault ACLs are path-scoped:
+  a GPU job that needs the database key must not be able to read the LLM key.
 * `secret/ledger/telemetry`: `metrics_token`, a short-lived OIDC access token with
   the API audience, required tenant claim, and `admin` role, plus
   `otlp_headers_json` (the JSON object `{}` for the local Collector, or protected
   OTLP headers when directly using an authenticated OTLP backend).
 
 The templates intentionally address the KV v2 HTTP paths
-`secret/data/ledger/api` and `secret/data/ledger/telemetry`. Vault Agent AppRole
+`secret/data/ledger/{llm,embedding,qdrant,telemetry}`. Vault Agent AppRole
 auto-auth fetches these records and renders separate files, mode `0600`, without a
 token sink or dotenv output. API secrets use tmpfs-backed `ledger-secrets`; the
 Collector's bearer credential uses a separate `telemetry-secrets` tmpfs volume.
@@ -173,6 +178,69 @@ version/integration requires it. Do not use a long-lived demo token in productio
 Because the present API requires `admin` for metrics, this monitoring principal is
 also capable of ingestion; use a dedicated identity and tightly restrict network
 access until a distinct metrics-only role is implemented.
+
+### Modal workload identity
+
+Modal injects `MODAL_IDENTITY_TOKEN`, an RS256 JWT issued by
+`https://oidc.modal.com`, into every container. Vault's JWT auth method verifies it
+against Modal's published JWKS, so GPU jobs can fetch their own credentials and no
+provider key has to be copied into a Modal Secret. Only the Modal platform token
+remains outside Vault: it submits jobs and is not a data-plane credential.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Job as Modal container (ledger-evaluation)
+    participant Vault as Vault auth/jwt-modal
+    participant JWKS as oidc.modal.com JWKS
+    participant KV as Vault KV v2
+    Job->>Vault: login(role, MODAL_IDENTITY_TOKEN)
+    Vault->>JWKS: verify RS256 signature (cached keys)
+    Vault->>Vault: check iss, aud, workspace, environment, app, function
+    Vault-->>Job: service token, policy ledger-modal-evaluation, TTL 5m
+    Job->>KV: read secret/ledger/qdrant, secret/ledger/llm
+    KV-->>Job: api_key values (process environment only)
+    Job->>Vault: revoke-self
+```
+
+Configure once with an administrative Vault session:
+
+```bash
+MODAL_WORKSPACE_ID=ac-YOUR-WORKSPACE MODAL_ENVIRONMENT=main \
+  scripts/vault_configure_modal_jwt.sh
+```
+
+The script is idempotent. It enables `auth/jwt-modal`, installs the policies in
+[`deploy/vault/modal/`](../deploy/vault/modal/), and binds each role to the token's
+`workspace_id`, `environment_name`, `app_name` and (for ingestion) `function_name`
+claims:
+
+| Role | Modal apps | Readable KV paths |
+|---|---|---|
+| `ledger-ingestion` | `ledger-ingestion` (function `ingest`) | `qdrant`, `llm` (contextual summaries) |
+| `ledger-evaluation` | `ledger-evaluation` | `qdrant`, `llm` |
+| `ledger-serving` | `ledger-inference`, `ledger-reranker`, `ledger-verifier`, `ledger-decisions` | `embedding` |
+
+Vault tokens are service tokens with a 5-minute TTL (10-minute hard cap), no
+`default` policy, and only `lookup-self`/`revoke-self` beyond the KV reads. Jobs
+read secrets once at start-up through
+[`workload_identity.py`](../src/ledger_rag/security/workload_identity.py) and revoke
+the token immediately. A container sets `LEDGER_VAULT_ADDR`, `LEDGER_VAULT_ROLE`
+and, for a private CA, `LEDGER_VAULT_CA_PEM`; none of these is secret. Without
+`LEDGER_VAULT_ADDR` the helper is a no-op and the job uses environment variables
+projected by `scripts/sync_modal_secrets.sh` (policy `ledger-modal-sync`).
+
+Modal identity tokens are valid for 48 hours, so the claim bindings, not the token
+lifetime, carry the security boundary: never bind a role to the workspace alone.
+Vault must be reachable from Modal over public TLS (for example a hosted Vault or
+OpenBao cluster with cloud-KMS auto-unseal); a workstation Vault is not.
+
+This flow was verified against the reference Vault 2.2.1 with a real
+Modal-issued token:
+- A role bound to the probe app read exactly its two permitted paths.
+- The same token was rejected by `ledger-ingestion` (claim `app_name` mismatch).
+- The evaluation policy received HTTP 403 for `secret/ledger/embedding`.
+- The token-accessor count was unchanged after the job, confirming revocation.
 
 ## Optional self-hosted inference
 
