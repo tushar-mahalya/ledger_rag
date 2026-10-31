@@ -98,6 +98,8 @@ def benchmark_argv(command: str, options: dict[str, Any], data_dir: str, key: st
         EMBEDDING_SPACE_ID,
         "--reranker-url",
         f"http://127.0.0.1:{RERANK_PORT}",
+        "--reranker-key",
+        key,
         "--reranker-model",
         RERANKER_MODEL,
         "--reranker-revision",

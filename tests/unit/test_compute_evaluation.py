@@ -6,7 +6,7 @@ from types import ModuleType
 
 import pytest
 
-from ledger_rag.evaluation.benchmarks.finqa import build_parser, validate_args
+from ledger_rag.evaluation.benchmarks.finqa import bench_settings, build_parser, validate_args
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -37,6 +37,8 @@ def test_evaluation_job_pins_revisions_and_builds_valid_read_only_argv(
         assert args.temperature is None  # Gemini 3: keep the provider default
         assert args.expected_corpus_sha256 == job.CORPUS_SHA256
         assert args.reranker_url.startswith("http://127.0.0.1:")
+        assert args.reranker_key == args.embedding_key == "k"
+        assert bench_settings(args).reranker_api_key is not None
     with pytest.raises(ValueError, match="read-only"):
         job.benchmark_argv("ingest", {}, "data", "k")
     sealed = parser.parse_args(job.benchmark_argv("answers", {"split": "test"}, "data", "k"))

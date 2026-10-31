@@ -567,6 +567,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--oversampling", type=float, default=2.0)
     parser.add_argument("--reranker-url", default="http://localhost:8081")
+    parser.add_argument("--reranker-key", default=os.environ.get("LEDGER_RERANKER_API_KEY", ""))
     parser.add_argument("--reranker-model", default="Alibaba-NLP/gte-reranker-modernbert-base")
     parser.add_argument("--reranker-revision", default="", help="Recorded for lineage only")
     parser.add_argument("--rerank-candidates", type=int, default=20)
