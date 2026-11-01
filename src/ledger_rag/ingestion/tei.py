@@ -2,8 +2,10 @@
 
 import asyncio
 import os
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import TextIO
 
 import httpx
 
@@ -11,6 +13,27 @@ from ledger_rag.ingestion.bulk import IngestSpec
 
 TEI_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:89-1.8"
 TEI_URL = "http://127.0.0.1:8000"
+REDACTED = "[REDACTED]"
+_LINE_LIMIT = 1 << 20
+
+
+async def _forward_redacted(stream: asyncio.StreamReader | None, sink: TextIO, secret: str) -> None:
+    """Copy router output to the job log with the per-job key removed.
+
+    TEI logs its parsed ``Args`` at startup, including ``api_key: Some(...)``,
+    so its output must never reach the Modal log unfiltered.
+    """
+    if stream is None:
+        return
+    while True:
+        try:
+            line = await stream.readline()
+        except ValueError:
+            line = await stream.read(_LINE_LIMIT)
+        if not line:
+            return
+        sink.write(line.decode(errors="replace").replace(secret, REDACTED))
+        sink.flush()
 
 
 @asynccontextmanager
@@ -45,7 +68,14 @@ async def embedding_server(
         "32768",
         "--json-output",
         env=environment,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        limit=_LINE_LIMIT,
     )
+    forwarders = [
+        asyncio.create_task(_forward_redacted(process.stdout, sys.stdout, api_key)),
+        asyncio.create_task(_forward_redacted(process.stderr, sys.stderr, api_key)),
+    ]
     try:
         deadline = asyncio.get_running_loop().time() + startup_timeout
         async with httpx.AsyncClient(
@@ -76,3 +106,6 @@ async def embedding_server(
             except TimeoutError:
                 process.kill()
                 await process.wait()
+        _, pending = await asyncio.wait(forwarders, timeout=5)
+        for task in pending:
+            task.cancel()

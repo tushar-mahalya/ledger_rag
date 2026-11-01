@@ -5,6 +5,7 @@ from typing import Any
 import structlog
 
 from ledger_rag.core.models import (
+    MAX_CITATIONS,
     ActivityTool,
     Calculation,
     Citation,
@@ -54,7 +55,7 @@ async def execute_tool(
             additional, _ = await retrieve(search_query, principal)
             added = []
             for hit in additional:
-                if hit.chunk.id in evidence_ids or len(citations) >= 12:
+                if hit.chunk.id in evidence_ids or len(citations) >= MAX_CITATIONS:
                     continue
                 evidence_ids.add(hit.chunk.id)
                 citation = citation_from_hit(hit, len(citations) + 1)

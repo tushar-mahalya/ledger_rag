@@ -20,10 +20,10 @@ import {
   describeReason,
   finalResult,
   formatDerivation,
-  formatValue,
-  presentations,
+  formatShown,
+  shownLabel,
+  stepDisplays,
   stepRef,
-  unitLabel,
 } from "../grounding";
 
 type OnCitation = (citation: Citation, quote?: string) => void;
@@ -55,7 +55,7 @@ export function CalculationTrace({
       </summary>
       <div className="calc-body">
         {calculations.map((calculation, program) => {
-          const shown = presentations(calculation);
+          const shown = stepDisplays(calculation);
           const final = finalResult(calculation);
           const id = (index: number) => `${prefix}-p${program}-s${index}`;
           return (
@@ -99,10 +99,9 @@ export function CalculationTrace({
                               <button
                                 type="button"
                                 className="operand-chip step"
-                                aria-label={`Result of step ${stepRef(operand.step ?? 0)}: ${formatValue(
+                                aria-label={`Result of step ${stepRef(operand.step ?? 0)}: ${formatShown(
                                   calculation.steps[operand.step ?? 0]
                                     ?.result ?? operand.value,
-                                  calculation.steps[operand.step ?? 0]?.kind,
                                   shown[operand.step ?? 0],
                                 )}. Go to step`}
                                 onClick={() => {
@@ -118,10 +117,9 @@ export function CalculationTrace({
                                 <CornerDownRight size={11} />
                                 {stepRef(operand.step ?? 0)}
                                 <span className="chip-value">
-                                  {formatValue(
+                                  {formatShown(
                                     calculation.steps[operand.step ?? 0]
                                       ?.result ?? operand.value,
-                                    calculation.steps[operand.step ?? 0]?.kind,
                                     shown[operand.step ?? 0],
                                   )}
                                 </span>
@@ -145,10 +143,10 @@ export function CalculationTrace({
                       <span className="calc-outcome">
                         <span className="calc-equals">=</span>
                         <strong className="calc-result">
-                          {formatValue(step.result, step.kind, shown[index])}
+                          {formatShown(step.result, shown[index])}
                         </strong>
                         <span className="calc-kind">
-                          {unitLabel(step.kind)}
+                          {shownLabel(shown[index])}
                         </span>
                       </span>
                     </span>
@@ -158,7 +156,7 @@ export function CalculationTrace({
               <div className="calc-final">
                 <span>Result</span>
                 <strong>{final.text}</strong>
-                <span className="calc-unit">{unitLabel(final.kind)}</span>
+                <span className="calc-unit">{final.label}</span>
                 <span className="calc-exact" title="Exact backend value">
                   exact {calculation.result}
                 </span>
@@ -168,7 +166,8 @@ export function CalculationTrace({
         })}
         <p className="calc-note">
           Inputs are exact spans of cited evidence. Constants are limited to
-          scaling factors. Amounts are shown in the evidence scale.
+          scaling factors. Units, currency and scale come from the evidence and
+          are carried through each step by the calculator.
         </p>
       </div>
     </details>
@@ -222,8 +221,11 @@ const STATUS_TEXT = {
 
 export function VerificationBadge({
   verification,
+  unsupportedCount,
 }: {
   verification: Verification;
+  /** From abstention features; abstained answers withhold the mentions themselves. */
+  unsupportedCount?: number;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
@@ -231,6 +233,8 @@ export function VerificationBadge({
   const id = useId();
   const { status, unsupported_numbers: unsupported } = verification;
   const score = verification.verifier_score;
+  const count = Math.max(unsupported.length, unsupportedCount ?? 0);
+  const withheld = count > unsupported.length;
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent | FocusEvent) => {
@@ -253,7 +257,7 @@ export function VerificationBadge({
           : ShieldMinus;
   const summary = `Numeric verification: ${STATUS_TEXT[status].toLowerCase()}. ${verification.checked_numbers} ${
     verification.checked_numbers === 1 ? "number" : "numbers"
-  } checked, ${unsupported.length || "none"} unsupported.${
+  } checked, ${count || "none"} unsupported.${
     score != null ? ` Groundedness score ${score.toFixed(2)}.` : ""
   }`;
   return (
@@ -317,6 +321,11 @@ export function VerificationBadge({
                   </li>
                 ))}
               </ul>
+            ) : withheld ? (
+              <p>
+                {count} {count === 1 ? "number" : "numbers"} did not match cited
+                evidence. The draft was withheld, so they are not shown.
+              </p>
             ) : (
               <p>None. Every checked number matched cited evidence.</p>
             )}
@@ -330,7 +339,9 @@ export function VerificationBadge({
           )}
           <p className="verify-note">
             Checks numbers against cited evidence and bound calculations. It
-            does not prove every statement is true.
+            does not prove every statement is true. Unsupported numbers are
+            highlighted inline only in flag mode; enforce mode withholds the
+            answer instead.
           </p>
         </div>
       )}
@@ -346,6 +357,7 @@ export function AbstentionNotice({
   abstention: AbstentionDecision;
 }) {
   const id = useId();
+  const unsupported = abstention.features.unsupported_number_count;
   return (
     <section className="abstain-card" aria-labelledby={id}>
       <div className="abstain-heading">
@@ -361,7 +373,16 @@ export function AbstentionNotice({
           aria-label="Why the answer was withheld"
         >
           {abstention.reasons.map((reason) => (
-            <li key={reason}>{describeReason(reason)}</li>
+            <li key={reason}>
+              {describeReason(reason)}
+              {reason === "verification_failed" && unsupported > 0 && (
+                <>
+                  {" "}
+                  {unsupported} {unsupported === 1 ? "number" : "numbers"} in
+                  the draft did not match cited evidence.
+                </>
+              )}
+            </li>
           ))}
         </ul>
       )}

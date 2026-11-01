@@ -9,7 +9,8 @@ const fixtures = JSON.parse(
     "utf8",
   ),
 ) as Record<string, Record<string, unknown>> & {
-  activities: Record<string, unknown>[];
+  activities: Record<string, Record<string, unknown>[]>;
+  evidence: Record<string, unknown>;
 };
 const shots = process.env.SCREENSHOT_DIR;
 const sse = (event: string, data: unknown) =>
@@ -31,29 +32,22 @@ async function shot(page: Page, name: string, project: string) {
   });
 }
 
-async function live(page: Page, answer: unknown) {
+// Replays a recorded backend run: retrieval and planning, evidence, then generation.
+async function live(page: Page, name: string) {
+  const activities = fixtures.activities[name];
+  const split = activities.findIndex((item) => item.stage === "generation");
+  const before = split < 0 ? activities : activities.slice(0, split);
+  const after = split < 0 ? [] : activities.slice(split);
+  const events = (items: unknown[]) =>
+    items.map((item) => sse("activity", item)).join("");
   await page.route("**/v1/query/stream", (route) =>
     route.fulfill({
       contentType: "text/event-stream",
       body:
-        sse("activity", {
-          stage: "retrieval",
-          status: "started",
-          label: "Retrieving evidence",
-        }) +
-        sse("activity", {
-          stage: "retrieval",
-          status: "completed",
-          label: "Retrieving evidence",
-        }) +
-        fixtures.activities.map((item) => sse("activity", item)).join("") +
-        sse("activity", {
-          stage: "tool",
-          status: "completed",
-          label: "Calculating",
-          tool: "calculator",
-        }) +
-        sse("answer", answer) +
+        events(before) +
+        sse("evidence", fixtures.evidence[name]) +
+        events(after) +
+        sse("answer", fixtures[name]) +
         sse("done", {}),
     }),
   );
@@ -103,6 +97,9 @@ test("demo shows a traced calculation, verification and an abstention", async ({
     /Validating citations/,
     /Verifying grounding/,
   ]);
+  const plan = turn.getByRole("group", { name: "Query plan" });
+  await expect(plan).toContainText("Measure a change");
+  await expect(plan).toContainText("AURORA");
 
   const trace = turn.locator("details.calc-trace");
   await expect(trace.locator("summary")).toContainText("3 steps");
@@ -146,7 +143,7 @@ test("demo shows a traced calculation, verification and an abstention", async ({
 
   await page
     .getByRole("button", {
-      name: "Will Aurora's revenue keep growing in 2027?",
+      name: "Forecast the share price for Aurora in 2027.",
     })
     .click();
   const abstained = page.locator(".turn").last();
@@ -154,7 +151,9 @@ test("demo shows a traced calculation, verification and an abstention", async ({
     abstained.getByRole("heading", { name: "Ledger held back an answer" }),
   ).toBeVisible();
   await expect(abstained).toContainText("Thresholds uncalibrated.");
-  await expect(abstained).toContainText("No answer passed citation validation");
+  await expect(abstained).toContainText(
+    "outside what the disclosures can support",
+  );
   await expect(abstained.locator("details.calc-trace")).toHaveCount(0);
   await abstained.scrollIntoViewIfNeeded();
   await shot(page, "abstention", info.project.name);
@@ -163,7 +162,7 @@ test("demo shows a traced calculation, verification and an abstention", async ({
 test("unverified live answer marks unsupported numbers inline", async ({
   page,
 }, info) => {
-  await live(page, fixtures.unverified);
+  await live(page, "unverified");
   const turn = page.locator(".turn").last();
   await expect(turn.locator("mark.unsupported-number")).toHaveText([
     /31%/,
@@ -183,26 +182,82 @@ test("unverified live answer marks unsupported numbers inline", async ({
   await page.mouse.click(5, 5);
   await expect(details).toHaveCount(0);
   await turn.getByText("Execution activity").click();
+  // Flag mode has no groundedness model configured, so only citation validation runs.
   await expect(turn.locator(".timeline-row")).toHaveText([
     /Retrieving evidence\s*done/,
-    /Planning query\s*done/,
+    /Planning query.*done/,
+    /Generating answer\s*done/,
     /Calculating\s*done/,
-    /Verifying grounding\s*done/,
+    /Generating answer\s*done/,
+    /Validating citations\s*done/,
   ]);
+  const plan = turn.getByRole("group", { name: "Query plan" });
+  await expect(plan).toContainText("Measure a percentage change");
+  await expect(plan).toContainText("Searches (3)");
+  await expect(plan).toContainText("AURORA revenue 2025");
+  await expect(plan).toContainText("2024");
+  await turn.locator("details.calc-trace summary").click();
+  const final = turn.locator(".calc-final");
+  await expect(final).toContainText("25%");
+  await expect(final).toContainText("Percent");
+  await expect(turn.locator(".calc-steps li").first()).toContainText(
+    "Currency · USD million",
+  );
+});
+
+test("verified live answer separates the two validation steps", async ({
+  page,
+}) => {
+  await live(page, "verified");
+  const turn = page.locator(".turn").last();
+  await expect(
+    turn.getByRole("button", {
+      name: /Numeric verification: verified\. 3 numbers checked, none unsupported\. Groundedness score 0\.93/,
+    }),
+  ).toBeVisible();
+  await turn.getByText("Execution activity").click();
+  await expect(turn.locator(".timeline-row.citation_validation")).toHaveText(
+    /Validating citations\s*done/,
+  );
+  await expect(turn.locator(".timeline-row.grounding_verification")).toHaveText(
+    /Verifying grounding\s*done/,
+  );
 });
 
 test("abstained live answer explains reasons calmly", async ({ page }) => {
-  await live(page, fixtures.abstained);
+  await live(page, "abstained");
   const turn = page.locator(".turn").last();
   await expect(
     turn.getByRole("heading", { name: "Ledger held back an answer" }),
   ).toBeVisible();
-  await expect(turn).toContainText("Numeric verification failed");
+  await expect(turn).toContainText(
+    "Numeric verification failed, so the answer was withheld. 2 numbers in the draft did not match cited evidence.",
+  );
   await expect(turn).toContainText("Thresholds uncalibrated.");
-  await expect(
-    turn.getByRole("button", { name: /Numeric verification: failed/ }),
-  ).toBeVisible();
+  // Enforce mode never sends the rejected draft, so nothing is highlighted inline.
+  await expect(turn.locator("mark.unsupported-number")).toHaveCount(0);
+  await expect(turn.locator("details.calc-trace")).toHaveCount(0);
+  const pill = turn.getByRole("button", {
+    name: /Numeric verification: failed\. 3 numbers checked, 2 unsupported/,
+  });
+  await pill.click();
+  const details = turn.getByRole("group", { name: "Verification details" });
+  await expect(details).toContainText("2 numbers did not match cited evidence");
+  await expect(details.locator("mark")).toHaveCount(0);
   await expect(turn.getByText("Abstained", { exact: true })).toBeVisible();
+});
+
+test("refused live answer shows the out-of-scope plan and reason", async ({
+  page,
+}) => {
+  await live(page, "refused");
+  const turn = page.locator(".turn").last();
+  await expect(turn).toContainText("outside what the disclosures can support");
+  await turn.getByText("Execution activity").click();
+  const plan = turn.getByRole("group", { name: "Query plan" });
+  await expect(plan).toContainText("Decline: outside the disclosures' scope");
+  await expect(plan).toContainText("2027");
+  await expect(plan).not.toContainText("Searches");
 });
 
 test("grounding UI passes accessibility checks with reduced motion", async ({
@@ -229,8 +284,13 @@ test("grounding UI passes accessibility checks with reduced motion", async ({
   expect(results.violations).toEqual([]);
   await page
     .getByRole("button", {
-      name: "Will Aurora's revenue keep growing in 2027?",
+      name: "Forecast the share price for Aurora in 2027.",
     })
+    .click();
+  await page
+    .locator(".turn")
+    .last()
+    .getByText("Example activity · not executed")
     .click();
   const after = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21aa"])

@@ -9,7 +9,14 @@ from langsmith import tracing_context
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.contracts import Provider
-from ledger_rag.core.models import Calculation, Citation, Principal, QueryRequest, Verification
+from ledger_rag.core.models import (
+    MAX_CALCULATIONS,
+    Calculation,
+    Citation,
+    Principal,
+    QueryRequest,
+    Verification,
+)
 from ledger_rag.generation.chat_tools import Retrieve, execute_tool
 from ledger_rag.generation.evidence import validate_citations
 from ledger_rag.generation.tools import CALCULATOR, SEARCH_EVIDENCE
@@ -35,6 +42,8 @@ class ChatState(TypedDict):
     verification: NotRequired[Verification | None]
     # Observability-only plan summary (no raw text); absent when planning is disabled.
     plan: NotRequired[dict[str, str | int | float | bool]]
+    # A confident out-of-scope refusal: the model is skipped and the answer abstains.
+    refused: NotRequired[bool]
 
 
 class ChatUpdate(TypedDict, total=False):
@@ -48,6 +57,7 @@ class ChatUpdate(TypedDict, total=False):
     tool_errors: int
     verification: Verification | None
     plan: dict[str, str | int | float | bool]
+    refused: bool
 
 
 @dataclass(frozen=True)
@@ -70,27 +80,30 @@ async def plan(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpdate:
     current = context.plan or recorded
     if current is None and found:
         return {}  # planner_enabled=false for this request
-    async with activity(context.on_activity, "planning", span_name="rag.chat.plan") as span:
-        if current is None:
-            # Deterministic, offline plan: never re-runs the LLM rewrite or remote decisions.
-            planner = context.planner or _DETERMINISTIC
-            current = planner.deterministic(context.query, context.principal)
+    if current is None:
+        # Deterministic, offline plan: never re-runs the LLM rewrite or remote decisions.
+        planner = context.planner or _DETERMINISTIC
+        current = planner.deterministic(context.query, context.principal)
+    async with activity(
+        context.on_activity,
+        "planning",
+        span_name="rag.chat.plan",
+        plan=current.client_summary(),
+    ) as span:
         summary = current.attributes()
         for key, value in summary.items():
             span.set_attribute(key, value)
-    return {"plan": summary}
+    # A confident out-of-scope refusal with no evidence skips the model and abstains.
+    refused = (
+        current.decision.route == "refuse_out_of_scope"
+        and current.skip_retrieval
+        and not state["citations"]
+    )
+    return {"plan": summary, "refused": refused}
 
 
 def after_plan(state: ChatState, runtime: Runtime[ChatContext]) -> Literal["model", "validation"]:
-    # A confident out-of-scope refusal with no evidence skips the model and abstains.
-    summary = state.get("plan") or {}
-    if (
-        summary.get("rag.plan.route") == "refuse_out_of_scope"
-        and summary.get("rag.plan.subqueries") == 0
-        and not state["citations"]
-    ):
-        return "validation"
-    return entry(state, runtime)
+    return "validation" if state.get("refused") else entry(state, runtime)
 
 
 def entry(state: ChatState, runtime: Runtime[ChatContext]) -> Literal["model", "validation"]:
@@ -168,12 +181,37 @@ async def tools(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpdate:
     }
 
 
+def cited_calculations(
+    calculations: list[Calculation], cited: list[Citation], pool: list[Citation]
+) -> tuple[list[Calculation], list[Citation]]:
+    """Keep programs that support cited text and add their evidence lineage, in pool order.
+
+    A program supports a sentence citing any of its lineage ids, so its remaining lineage
+    citations join the answer; programs unrelated to the cited text are dropped. The
+    result never references a citation missing from the returned list.
+    """
+    ids = {citation.id for citation in cited}
+    kept = [
+        calculation
+        for calculation in calculations
+        if ids & set(calculation.citation_ids)
+        or any(step.evidence_backed and ids & set(step.citation_ids) for step in calculation.steps)
+    ][-MAX_CALCULATIONS:]
+    lineage = ids.union(*(calculation.referenced_citations() for calculation in kept))
+    linked = [citation for citation in pool if citation.id in lineage]
+    if {citation.id for citation in linked} != lineage:  # a lineage id outside the pool
+        return [], cited
+    return kept, linked
+
+
 async def validation(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpdate:
     context = runtime.context
-    calculations = state.get("calculations", [])
     verification: Verification | None = None
     async with activity(context.on_activity, "validation", span_name="rag.chat.validation") as span:
-        content, citations = validate_citations(state["content"], state["citations"])
+        content, cited = validate_citations(state["content"], state["citations"])
+        calculations, citations = cited_calculations(
+            state.get("calculations", []), cited, state["citations"]
+        )
         if context.verifier is not None:
             verification = context.verifier.check(content, citations, calculations)
             span.set_attribute("rag.verification", verification.status)
@@ -188,7 +226,12 @@ async def validation(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpd
             profile=context.query.profile,
             on_activity=context.on_activity,
         )
-    return {"content": content, "citations": citations, "verification": verification}
+    return {
+        "content": content,
+        "citations": citations,
+        "calculations": calculations,
+        "verification": verification,
+    }
 
 
 builder = StateGraph(ChatState, context_schema=ChatContext)
@@ -222,4 +265,5 @@ async def run_chat(state: ChatState, context: ChatContext) -> ChatState:
         calculations=result.get("calculations", []),
         tool_errors=result.get("tool_errors", 0),
         verification=result.get("verification"),
+        refused=result.get("refused", False),
     )

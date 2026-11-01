@@ -1,10 +1,20 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { answerSchema } from "./schemas";
+import type {
+  Activity,
+  Calculation,
+  CalculationUnit,
+  PlanSummary,
+} from "./contracts";
 import {
+  activityKind,
+  describePlan,
   describeReason,
+  describeUnit,
   finalResult,
   formatDerivation,
+  formatUnit,
   formatValue,
   groupDecimal,
   highlightSpan,
@@ -47,6 +57,70 @@ describe("decimal formatting", () => {
   });
 });
 
+const unit = (
+  kind: CalculationUnit["kind"],
+  extra: Partial<CalculationUnit> = {},
+): CalculationUnit => ({
+  kind,
+  currency: null,
+  scale: null,
+  display:
+    kind === "percent" ? "percent" : kind === "ratio" ? "ratio" : "amount",
+  ...extra,
+});
+
+describe("unit formatting", () => {
+  it("renders amounts in the evidence currency and scale", () => {
+    const usd = unit("currency", { currency: "USD", scale: "million" });
+    expect(formatUnit("30000000", usd)).toBe("USD 30 million");
+    expect(formatUnit("-2500000", usd)).toBe("-USD 2.5 million");
+    expect(formatUnit("0", usd)).toBe("USD 0 million");
+    expect(formatUnit("1234", unit("currency", { currency: "EUR" }))).toBe(
+      "EUR 1,234",
+    );
+    // An ambiguous symbol such as C$ arrives without an ISO code; never guess one.
+    expect(formatUnit("5000000", unit("currency", { scale: "million" }))).toBe(
+      "5 million",
+    );
+  });
+
+  it("renders percent, ratio, per-share, count and boolean results", () => {
+    expect(formatUnit("25", unit("percent"))).toBe("25%");
+    expect(formatUnit("-3.456", unit("percent"))).toBe("-3.46%");
+    expect(formatUnit("0.25", unit("ratio"))).toBe("0.25");
+    expect(formatUnit("0.333333", unit("ratio"))).toBe("0.3333");
+    expect(formatUnit("0.25", unit("ratio", { display: "percent" }))).toBe(
+      "25%",
+    );
+    expect(formatUnit("1.5", unit("per_share", { currency: "USD" }))).toBe(
+      "USD 1.5 per share",
+    );
+    expect(formatUnit("12000", unit("count", { scale: "thousand" }))).toBe(
+      "12 thousand",
+    );
+    expect(formatUnit("1", unit("unitless", { display: "boolean" }))).toBe(
+      "true",
+    );
+    expect(formatUnit("0", unit("unitless", { display: "boolean" }))).toBe(
+      "false",
+    );
+  });
+
+  it("describes units for the trace", () => {
+    expect(
+      describeUnit(unit("currency", { currency: "USD", scale: "million" })),
+    ).toBe("Currency · USD million");
+    expect(describeUnit(unit("currency"))).toBe(
+      "Currency · currency unspecified",
+    );
+    expect(describeUnit(unit("ratio", { display: "percent" }))).toBe("Percent");
+    expect(describeUnit(unit("count"))).toBe("Count");
+    expect(describeUnit(unit("unitless", { display: "boolean" }))).toBe(
+      "Yes / no",
+    );
+  });
+});
+
 describe("derivation formatting", () => {
   it("renders each step with evidence quotes, step refs and constants", () => {
     expect(formatDerivation(calculation, 0)).toBe(
@@ -61,7 +135,38 @@ describe("derivation formatting", () => {
   });
 
   it("reports the final result and its unit", () => {
-    expect(finalResult(calculation)).toEqual({ text: "25%", kind: "percent" });
+    expect(finalResult(calculation)).toEqual({
+      text: "25%",
+      kind: "percent",
+      label: "Percent",
+    });
+  });
+
+  it("prefers server units over the step-kind guess", () => {
+    // The legacy guess reads currency and scale from the operands: USD million.
+    const steps = calculation.steps.map((step) => ({
+      ...step,
+      unit: unit("currency", { currency: "EUR", scale: "thousand" }),
+    }));
+    const eur: Calculation = { ...calculation, steps, unit: steps[2].unit };
+    expect(formatDerivation(eur, 0)).toBe(
+      "subtract(“USD 150 million” [C1], “USD 120 million” [C2]) = EUR 30,000 thousand",
+    );
+    expect(finalResult(eur).label).toBe("Currency · EUR thousand");
+  });
+
+  it("falls back to the legacy guess for payloads without units", () => {
+    const legacy: Calculation = {
+      ...calculation,
+      unit: undefined,
+      steps: calculation.steps.map((step) => ({ ...step, unit: undefined })),
+    };
+    expect(formatDerivation(legacy, 0)).toBe(formatDerivation(calculation, 0));
+    expect(finalResult(legacy)).toEqual({
+      text: "25%",
+      kind: "percent",
+      label: "Percent",
+    });
   });
 });
 
@@ -126,6 +231,111 @@ describe("reasons and timeline", () => {
   it("describes known and unknown reasons", () => {
     expect(describeReason("verification_failed")).toMatch(/withheld/);
     expect(describeReason("new_backend_reason")).toBe("New backend reason.");
+  });
+
+  it("explains an out-of-scope refusal", () => {
+    expect(describeReason("out_of_scope")).toMatch(
+      /outside what the disclosures/,
+    );
+  });
+
+  it("keys rows on kind, not label, and merges the completed plan", () => {
+    const plan: PlanSummary = {
+      intent: "percent_change",
+      route: "retrieve",
+      subquestion_count: 1,
+      subquestions: ["AURORA revenue 2025"],
+      companies: ["AURORA"],
+      periods: ["2025"],
+    };
+    const rows = timeline([
+      {
+        stage: "planning",
+        status: "started",
+        label: "Planning query",
+        kind: "planning",
+      },
+      {
+        stage: "validation",
+        status: "started",
+        label: "Display text A",
+        kind: "citation_validation",
+      },
+      {
+        stage: "validation",
+        status: "started",
+        label: "Display text A",
+        kind: "grounding_verification",
+      },
+      {
+        stage: "validation",
+        status: "completed",
+        label: "Display text A",
+        kind: "citation_validation",
+      },
+      {
+        stage: "planning",
+        status: "completed",
+        label: "Planning query",
+        kind: "planning",
+        plan,
+      },
+    ]);
+    expect(rows.map((row) => [row.kind, row.done])).toEqual([
+      ["planning", true],
+      ["citation_validation", true],
+      ["grounding_verification", false],
+    ]);
+    expect(rows[0].plan).toEqual(plan);
+    expect(new Set(rows.map((row) => row.key)).size).toBe(3);
+  });
+
+  it("derives kinds for activities from older servers", () => {
+    const legacy = (activity: Omit<Activity, "status">) =>
+      activityKind({ ...activity, status: "started" });
+    expect(legacy({ stage: "validation", label: "Verifying grounding" })).toBe(
+      "grounding_verification",
+    );
+    expect(legacy({ stage: "validation", label: "Validating citations" })).toBe(
+      "citation_validation",
+    );
+    expect(legacy({ stage: "tool", label: "x", tool: "calculator" })).toBe(
+      "calculator",
+    );
+    expect(legacy({ stage: "tool", label: "x", tool: "search_evidence" })).toBe(
+      "evidence_search",
+    );
+    expect(legacy({ stage: "tool", label: "Checking tool request" })).toBe(
+      "tool_check",
+    );
+  });
+
+  it("describes plans in plain language", () => {
+    expect(
+      describePlan({
+        intent: "compare",
+        route: "retrieve",
+        subquestion_count: 6,
+        subquestions: ["a", "b", "c", "d"],
+        companies: ["AURORA"],
+        periods: [],
+      }),
+    ).toEqual([
+      { term: "Intent", values: ["Compare figures"] },
+      { term: "Route", values: ["Search the disclosures"] },
+      { term: "Companies", values: ["AURORA"] },
+      { term: "Searches (6)", values: ["a", "b", "c", "d", "and 2 more"] },
+    ]);
+    expect(
+      describePlan({
+        intent: "lookup",
+        route: "refuse_out_of_scope",
+        subquestion_count: 0,
+        subquestions: [],
+        companies: [],
+        periods: ["2027"],
+      }).map((fact) => fact.term),
+    ).toEqual(["Intent", "Route", "Periods"]);
   });
 
   it("folds started/completed pairs including planning and validation", () => {

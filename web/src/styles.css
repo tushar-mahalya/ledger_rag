@@ -1243,7 +1243,7 @@ code {
   margin: 5px 0 20px;
   border: 1px solid #e3e9da;
   border-radius: 6px;
-  color: #698254;
+  color: #56703f;
   background: #f9fcf4;
 }
 .activity-trace summary {
@@ -1656,6 +1656,35 @@ code {
 }
 .activity-status svg {
   vertical-align: -1px;
+}
+.timeline-body {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.timeline-row.has-plan {
+  align-items: flex-start;
+}
+.plan-facts dl {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  font-size: 9px;
+  color: var(--muted);
+}
+.plan-facts dl > div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  column-gap: 8px;
+}
+.plan-facts dt {
+  grid-column: 1;
+  font-weight: 600;
+}
+.plan-facts dd {
+  grid-column: 2;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 .calc-trace {
   margin: 4px 0 18px;

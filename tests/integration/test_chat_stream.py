@@ -63,22 +63,35 @@ def test_stream_activity_and_evidence_contract(settings: Settings, document: Doc
         "done",
     ]
     activities = [event for name, event in events if name == "activity"]
+    retrieval = {"stage": "retrieval", "label": "Retrieving evidence", "kind": "retrieval"}
     assert activities[:2] == [
-        {"stage": "retrieval", "status": "started", "label": "Retrieving evidence"},
-        {"stage": "retrieval", "status": "completed", "label": "Retrieving evidence"},
+        {**retrieval, "status": "started"},
+        {**retrieval, "status": "completed"},
     ]
-    assert activities[2:4] == [
-        {"stage": "planning", "status": "started", "label": "Planning query"},
-        {"stage": "planning", "status": "completed", "label": "Planning query"},
-    ]
+    planning = {"stage": "planning", "label": "Planning query", "kind": "planning"}
+    assert activities[2] == {**planning, "status": "started"}
+    plan = activities[3].pop("plan")
+    assert activities[3] == {**planning, "status": "completed"}
+    # Client-safe allowlist only: no confidences, decision sources, timings or prompts.
+    assert set(plan) == {
+        "intent",
+        "route",
+        "subquestion_count",
+        "subquestions",
+        "companies",
+        "periods",
+    }
+    assert plan["route"] == "retrieve" and plan["subquestion_count"] == len(plan["subquestions"])
+    calculator = {"stage": "tool", "label": "Calculating", "tool": "calculator"}
     assert activities[6:8] == [
-        {"stage": "tool", "status": "started", "label": "Calculating", "tool": "calculator"},
-        {"stage": "tool", "status": "completed", "label": "Calculating", "tool": "calculator"},
+        {**calculator, "status": "started", "kind": "calculator"},
+        {**calculator, "status": "completed", "kind": "calculator"},
     ]
     assert activities[-1] == {
         "stage": "validation",
         "status": "completed",
         "label": "Validating citations",
+        "kind": "citation_validation",
     }
     evidence = events[2][1]
     answer = events[-2][1]
@@ -111,6 +124,35 @@ def test_invalid_answer_is_abstention_only_after_validation(
     assert events[-3][1]["stage"] == "validation"
     assert events[-2][0] == "answer" and events[-2][1]["abstained"]
     assert events[-2][1]["citations"] == []
+
+
+def test_oversized_evidence_fails_explicitly_before_generation(
+    settings: Settings, document: Document
+) -> None:
+    class LargeStore(MemoryRetriever):
+        async def search(self, query: QueryRequest, principal: Principal) -> list[Hit]:
+            chunk = chunk_document(document)[0]
+            return [
+                Hit(
+                    chunk=chunk.model_copy(
+                        update={"id": f"large-{index}", "text": "PRIVATE" + "x" * 99_993}
+                    ),
+                    score=1,
+                )
+                for index in range(10)
+            ]
+
+    provider = FakeProvider([])
+    with TestClient(create_app(settings, LargeStore(), provider)) as client:
+        response = client.post(
+            "/v1/query/stream", json={"question": "Revenue", "top_k": 10}, headers=AUTH
+        )
+        events = parse_events(response.text)
+        assert events[-1][0] == "error"
+        assert not any(name in {"evidence", "answer", "done"} for name, _ in events)
+        assert "PRIVATE" not in response.text
+        assert not provider.messages
+        assert client.app.state.runtime.slots._value == settings.max_concurrent_queries
 
 
 @pytest.mark.parametrize("path", ["/v1/query", "/v1/query/stream"])

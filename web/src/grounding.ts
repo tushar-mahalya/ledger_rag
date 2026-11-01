@@ -1,9 +1,12 @@
 import type {
   Activity,
+  ActivityKind,
   Calculation,
   CalculationKind,
   CalculationOperand,
   CalculationStep,
+  CalculationUnit,
+  PlanSummary,
   VerificationStatus,
 } from "./contracts";
 
@@ -72,7 +75,10 @@ function common<T>(values: (T | undefined)[]): T | undefined {
     : undefined;
 }
 
-/** Scale word and currency shared by every evidence operand a step depends on. */
+/**
+ * Legacy fallback for payloads without `unit`: guesses the scale word and currency
+ * shared by every evidence operand a step depends on.
+ */
 export function presentations(calculation: Calculation): Presentation[] {
   const result: Presentation[] = [];
   for (const step of calculation.steps) {
@@ -139,6 +145,80 @@ export function unitLabel(kind: CalculationKind | null | undefined): string {
   return kind ? KIND_LABELS[kind] : "Unspecified unit";
 }
 
+/** Formats a base-unit value with the backend's unit metadata; no guessing. */
+export function formatUnit(value: string, unit: CalculationUnit): string {
+  if (unit.display === "boolean") return value === "1" ? "true" : "false";
+  if (unit.kind === "percent") return `${groupDecimal(value, 2)}%`;
+  if (unit.kind === "ratio")
+    return unit.display === "percent"
+      ? `${groupDecimal(shiftDecimal(value, -2), 2)}%`
+      : groupDecimal(value, 4);
+  const places = unit.scale ? SCALES[unit.scale] : 0;
+  const shown = groupDecimal(shiftDecimal(value, places), 2);
+  const sign = shown.startsWith("-") ? "-" : "";
+  const currency =
+    unit.kind === "currency" || unit.kind === "per_share"
+      ? unit.currency
+        ? `${unit.currency} `
+        : ""
+      : "";
+  const scale = unit.scale ? ` ${unit.scale}` : "";
+  const perShare = unit.kind === "per_share" ? " per share" : "";
+  return `${sign}${currency}${shown.slice(sign.length)}${scale}${perShare}`;
+}
+
+const UNIT_LABELS: Record<CalculationUnit["kind"], string> = {
+  currency: "Currency",
+  percent: "Percent",
+  ratio: "Ratio",
+  count: "Count",
+  per_share: "Per share",
+  unitless: "Number",
+};
+
+/** e.g. `Currency · USD million`; an ambiguous currency symbol is called out. */
+export function describeUnit(unit: CalculationUnit): string {
+  if (unit.display === "boolean") return KIND_LABELS.boolean;
+  if (unit.kind === "ratio" && unit.display === "percent")
+    return UNIT_LABELS.percent;
+  const money = unit.kind === "currency" || unit.kind === "per_share";
+  const detail = [
+    money ? (unit.currency ?? "currency unspecified") : undefined,
+    unit.scale ?? undefined,
+  ].filter(Boolean);
+  return detail.length
+    ? `${UNIT_LABELS[unit.kind]} · ${detail.join(" ")}`
+    : UNIT_LABELS[unit.kind];
+}
+
+/** How a step result is shown: backend units when present, the legacy guess otherwise. */
+export type Shown = {
+  kind: CalculationKind | null | undefined;
+  unit: CalculationUnit | null | undefined;
+  legacy: Presentation;
+};
+
+export function stepDisplays(calculation: Calculation): Shown[] {
+  const legacy = calculation.steps.some((step) => !step.unit)
+    ? presentations(calculation)
+    : [];
+  return calculation.steps.map((step, index) => ({
+    kind: step.kind,
+    unit: step.unit,
+    legacy: legacy[index] ?? {},
+  }));
+}
+
+export function formatShown(value: string, shown: Shown | undefined): string {
+  return shown?.unit
+    ? formatUnit(value, shown.unit)
+    : formatValue(value, shown?.kind, shown?.legacy);
+}
+
+export function shownLabel(shown: Shown | undefined): string {
+  return shown?.unit ? describeUnit(shown.unit) : unitLabel(shown?.kind);
+}
+
 export function stepRef(index: number): string {
   return `#${index}`;
 }
@@ -146,7 +226,7 @@ export function stepRef(index: number): string {
 export function formatOperand(
   operand: CalculationOperand,
   steps: CalculationStep[],
-  shown: Presentation[],
+  shown: Shown[],
 ): string {
   if (operand.kind === "evidence")
     return `“${operand.quote ?? operand.source_value ?? operand.value}” [${operand.citation_id ?? "?"}]`;
@@ -154,7 +234,7 @@ export function formatOperand(
     const index = operand.step ?? -1;
     const step = steps[index];
     return step
-      ? `${stepRef(index)} (${formatValue(step.result, step.kind, shown[index])})`
+      ? `${stepRef(index)} (${formatShown(step.result, shown[index])})`
       : stepRef(index);
   }
   return operand.value;
@@ -165,24 +245,30 @@ export function formatDerivation(
   calculation: Calculation,
   index: number,
 ): string {
-  const shown = presentations(calculation);
+  const shown = stepDisplays(calculation);
   const step = calculation.steps[index];
   const args = step.operands
     .map((operand) => formatOperand(operand, calculation.steps, shown))
     .join(", ");
-  return `${step.op}(${args}) = ${formatValue(step.result, step.kind, shown[index])}`;
+  return `${step.op}(${args}) = ${formatShown(step.result, shown[index])}`;
 }
 
 export function finalResult(calculation: Calculation): {
   text: string;
   kind: CalculationKind | null | undefined;
+  label: string;
 } {
-  const shown = presentations(calculation);
-  const last = calculation.steps.length - 1;
-  const kind = calculation.steps[last]?.kind;
+  const shown = stepDisplays(calculation);
+  const last = shown.at(-1);
+  // The calculation-level unit is authoritative; it equals the last step's unit.
+  const final: Shown | undefined = last && {
+    ...last,
+    unit: calculation.unit ?? last.unit,
+  };
   return {
-    text: formatValue(calculation.result, kind, shown[last]),
-    kind,
+    text: formatShown(calculation.result, final),
+    kind: final?.kind,
+    label: shownLabel(final),
   };
 }
 
@@ -249,7 +335,10 @@ export const VERIFICATION_LABELS: Record<VerificationStatus, string> = {
   skipped: "Verification skipped",
 };
 
-const REASONS: Record<string, string> = {
+/** Client text for each server reason code; contract.test.ts checks every code is covered. */
+export const REASONS: Record<string, string> = {
+  out_of_scope:
+    "Forecasts, predictions and investment advice are outside what the disclosures can support.",
   unsupported_numbers:
     "Some numbers are not found in the cited evidence or in a calculation bound to it.",
   verifier_unavailable:
@@ -274,31 +363,110 @@ export function describeReason(reason: string): string {
   );
 }
 
-export type TimelineEntry = Activity & { key: string; done: boolean };
+const STAGE_KINDS: Record<Activity["stage"], ActivityKind> = {
+  planning: "planning",
+  retrieval: "retrieval",
+  generation: "generation",
+  tool: "tool_check",
+  validation: "citation_validation",
+};
+
+/** Machine-readable operation. Labels are display text, read only for older servers. */
+export function activityKind(activity: Activity): ActivityKind {
+  if (activity.kind) return activity.kind;
+  if (activity.stage === "tool")
+    return activity.tool === "calculator"
+      ? "calculator"
+      : activity.tool === "search_evidence"
+        ? "evidence_search"
+        : "tool_check";
+  // Before `kind`, the two validation operations differed only by label.
+  if (
+    activity.stage === "validation" &&
+    activity.label === "Verifying grounding"
+  )
+    return "grounding_verification";
+  return STAGE_KINDS[activity.stage];
+}
+
+export type TimelineEntry = Activity & {
+  key: string;
+  done: boolean;
+  kind: ActivityKind;
+};
 
 /** Folds started/completed pairs into one row per operation, preserving order. */
 export function timeline(activities: Activity[]): TimelineEntry[] {
   const rows: TimelineEntry[] = [];
   activities.forEach((activity, index) => {
+    const kind = activityKind(activity);
     if (activity.status === "completed") {
       for (let i = rows.length - 1; i >= 0; i -= 1) {
         const row = rows[i];
         if (
           !row.done &&
-          row.stage === activity.stage &&
-          row.label === activity.label &&
+          row.kind === kind &&
           (row.tool ?? null) === (activity.tool ?? null)
         ) {
-          rows[i] = { ...row, status: "completed", done: true };
+          // The plan summary only arrives with the completed planning event.
+          rows[i] = {
+            ...row,
+            status: "completed",
+            done: true,
+            plan: activity.plan ?? row.plan,
+          };
           return;
         }
       }
     }
     rows.push({
       ...activity,
-      key: `${index}-${activity.stage}`,
+      kind,
+      key: `${index}-${kind}`,
       done: activity.status === "completed",
     });
   });
   return rows;
+}
+
+const INTENTS: Record<PlanSummary["intent"], string> = {
+  lookup: "Look up a reported figure",
+  compare: "Compare figures",
+  ratio: "Compute a ratio",
+  change: "Measure a change",
+  percent_change: "Measure a percentage change",
+  aggregate: "Aggregate figures",
+};
+
+const ROUTES: Record<PlanSummary["route"], string> = {
+  retrieve: "Search the disclosures",
+  direct_answer: "Answer without new evidence",
+  clarify: "Ask for clarification",
+  refuse_out_of_scope: "Decline: outside the disclosures' scope",
+};
+
+/** Plain-language plan facts for the planning timeline row. */
+export function describePlan(
+  plan: PlanSummary,
+): { term: string; values: string[] }[] {
+  const facts = [
+    { term: "Intent", values: [INTENTS[plan.intent]] },
+    { term: "Route", values: [ROUTES[plan.route]] },
+  ];
+  if (plan.companies.length)
+    facts.push({ term: "Companies", values: plan.companies });
+  if (plan.periods.length)
+    facts.push({ term: "Periods", values: plan.periods });
+  if (plan.subquestion_count) {
+    // The server sends at most the first four sub-questions, each clipped.
+    const hidden = plan.subquestion_count - plan.subquestions.length;
+    facts.push({
+      term: `Searches (${plan.subquestion_count})`,
+      values: [
+        ...plan.subquestions,
+        ...(hidden > 0 ? [`and ${hidden} more`] : []),
+      ],
+    });
+  }
+  return facts;
 }

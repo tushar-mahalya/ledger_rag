@@ -4,7 +4,18 @@ from typing import Any
 
 import structlog
 
-from ledger_rag.core.models import Citation, Hit, QueryRequest
+from ledger_rag.core.models import (
+    MAX_ANSWER_CHARS,
+    MAX_CITATIONS,
+    MAX_IDENTIFIER_CHARS,
+    MAX_QUOTE_CHARS,
+    MAX_SOURCE_CHARS,
+    MAX_TITLE_CHARS,
+    Citation,
+    Evidence,
+    Hit,
+    QueryRequest,
+)
 
 logger = structlog.get_logger()
 ABSTENTION = "I do not have sufficient authorized evidence to answer this question."
@@ -27,19 +38,31 @@ Return only the final answer or tool requests, not private reasoning."""
 
 
 def citation_from_hit(hit: Hit, index: int) -> Citation:
+    # Ingested documents already fit these bounds; external indexes are clipped, never
+    # allowed to produce a response the client schema rejects.
     return Citation(
         id=f"C{index}",
-        document_id=hit.chunk.document_id,
-        source=hit.chunk.source,
-        title=hit.chunk.title,
+        document_id=hit.chunk.document_id[:MAX_IDENTIFIER_CHARS],
+        source=hit.chunk.source[:MAX_SOURCE_CHARS],
+        title=hit.chunk.title[:MAX_TITLE_CHARS],
         published_at=hit.chunk.published_at,
-        quote=hit.chunk.text,
+        quote=hit.chunk.text[:MAX_QUOTE_CHARS],
     )
 
 
 def citations_from_hits(hits: list[Hit]) -> list[Citation]:
-    unique = {hit.chunk.id: hit for hit in hits}
-    return [citation_from_hit(hit, index) for index, hit in enumerate(unique.values(), 1)]
+    unique = list({hit.chunk.id: hit for hit in hits}.values())[:MAX_CITATIONS]
+    return [citation_from_hit(hit, index) for index, hit in enumerate(unique, 1)]
+
+
+def evidence_event(request_id: str, retrieval_ms: float, hits: list[Hit]) -> Evidence:
+    """The streaming ``evidence`` event, clipped to the response bounds."""
+    return Evidence(
+        request_id=request_id,
+        retrieval_ms=retrieval_ms,
+        sources=[hit.chunk.source[:MAX_SOURCE_CHARS] for hit in hits[:MAX_CITATIONS]],
+        citations=citations_from_hits(hits),
+    )
 
 
 def evidence_payload(citation: Citation) -> dict[str, str]:
@@ -81,7 +104,8 @@ def validate_citations(content: str, citations: list[Citation]) -> tuple[str, li
     markers = set(re.findall(r"\[(C[0-9]+)\]", content))
     known = {citation.id for citation in citations}
     if content and (
-        not markers
+        len(content) > MAX_ANSWER_CHARS
+        or not markers
         or not markers <= known
         or any(
             not re.search(r"\[C[0-9]+\]", paragraph)
