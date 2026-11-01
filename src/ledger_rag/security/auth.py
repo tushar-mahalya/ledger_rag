@@ -18,8 +18,9 @@ MAX_GROUP_CLAIMS = 128
 
 
 class Authenticator:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, required_scopes: tuple[str, ...] = ()) -> None:
         self.settings = settings
+        self.required_scopes = required_scopes
         self.jwks = (
             PyJWKClient(settings.oidc_jwks_url, cache_jwk_set=True, lifespan=300, timeout=5)
             if settings.auth_mode == "oidc"
@@ -60,6 +61,11 @@ class Authenticator:
         except jwt.PyJWTError as exc:
             raise HTTPException(401, "Invalid credentials") from exc
         subject = claims.get("sub")
+        scope = claims.get("scope", "")
+        if self.required_scopes and (
+            not isinstance(scope, str) or not set(self.required_scopes).issubset(scope.split())
+        ):
+            raise HTTPException(403, "Required MCP scope missing")
         tenant = claims.get("tenant_id")
         roles = claims.get("roles", [])
         groups = claims.get("groups", [])

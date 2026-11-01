@@ -244,12 +244,14 @@ class ExternalData:
             breaker.release()
             raise
         except Exception as exc:
-            logger.exception("external_lookup_failed", provider=provider)
+            logger.error(
+                "external_lookup_failed", provider=provider, error_class=type(exc).__name__
+            )
             unexpected = ExternalDataError(
                 "upstream", f"{PROVIDER_NAMES[provider]} lookup failed unexpectedly"
             )
             breaker.failure(unexpected)
-            raise unexpected from exc
+            raise unexpected from None
         breaker.success()
         return result
 

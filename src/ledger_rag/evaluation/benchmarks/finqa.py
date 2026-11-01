@@ -240,6 +240,9 @@ def bench_settings(args: argparse.Namespace, **overrides: Any) -> Settings:
         "rerank_candidates": args.rerank_candidates,
     }
     values.update(overrides)
+    if values.get("external_data_enabled"):
+        raise ValueError("External data is forbidden in closed-corpus benchmarks")
+    values["external_data_enabled"] = False
     return Settings(**values)
 
 

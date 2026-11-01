@@ -17,6 +17,8 @@ from ledger_rag.core.models import (
     QueryRequest,
     Verification,
 )
+from ledger_rag.external.service import ExternalSession
+from ledger_rag.external.tools import tool_schemas
 from ledger_rag.generation.chat_tools import Retrieve, execute_tool
 from ledger_rag.generation.evidence import validate_citations
 from ledger_rag.generation.tools import CALCULATOR, SEARCH_EVIDENCE
@@ -72,6 +74,7 @@ class ChatContext:
     # Optional explicit plan; otherwise the plan recorded by RagService.retrieve is reused.
     plan: QueryPlan | None = None
     planner: Planner | None = None
+    external: ExternalSession | None = None
 
 
 async def plan(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpdate:
@@ -115,6 +118,7 @@ async def model(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpdate:
     tools = [CALCULATOR]
     if context.principal is not None:
         tools.append(SEARCH_EVIDENCE)
+    tools.extend(tool_schemas(context.external))
     async with activity(context.on_activity, "generation", span_name="rag.chat.model") as span:
         span.set_attribute("gen_ai.request.model", context.provider.model)
         response = await context.provider.complete(state["messages"], tools=tools)
@@ -165,6 +169,7 @@ async def tools(state: ChatState, runtime: Runtime[ChatContext]) -> ChatUpdate:
                 evidence_ids=evidence_ids,
                 on_activity=context.on_activity,
                 calculations=calculations,
+                external=context.external,
             )
             errors += "error" in json.loads(message["content"])
             messages.append(message)

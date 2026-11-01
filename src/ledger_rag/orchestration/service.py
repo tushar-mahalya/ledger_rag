@@ -17,6 +17,7 @@ from ledger_rag.core.models import (
     QueryRequest,
     Verification,
 )
+from ledger_rag.external.service import ExternalData, ExternalSession
 from ledger_rag.generation.abstention import AbstentionPolicy
 from ledger_rag.generation.evidence import (
     ABSTENTION,
@@ -58,6 +59,7 @@ class RagService:
         )
         self.abstention = AbstentionPolicy.from_settings(settings)
         self.planner = planner or make_planner(settings, provider)
+        self.external = ExternalData.from_settings(settings)
 
     async def close(self) -> None:
         """Release clients the service owns: the planner and groundedness verifier.
@@ -67,7 +69,11 @@ class RagService:
         try:
             await self.planner.close()
         finally:
-            await self.verifier.close()
+            try:
+                await self.verifier.close()
+            finally:
+                if self.external is not None:
+                    await self.external.aclose()
 
     async def retrieve(
         self,
@@ -176,6 +182,16 @@ class RagService:
                         max_tool_calls=self.settings.max_tool_rounds,
                         on_activity=on_activity,
                         verifier=self.verifier,
+                        external=(
+                            ExternalSession(
+                                self.external,
+                                principal.model_copy(deep=True),
+                                self.external.as_of(query.as_of),
+                                self.external.providers(principal),
+                            )
+                            if self.external is not None and principal is not None
+                            else None
+                        ),
                     ),
                 )
                 content, citations, tool_count = (

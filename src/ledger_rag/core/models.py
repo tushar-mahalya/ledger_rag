@@ -175,6 +175,8 @@ ActivityKind = Literal[
     "generation",
     "calculator",
     "evidence_search",
+    "company_facts_lookup",
+    "macro_series_lookup",
     "tool_check",
     "citation_validation",
     "grounding_verification",
@@ -185,6 +187,8 @@ ACTIVITY_KINDS: dict[ActivityKind, tuple[ActivityStage, ActivityLabel]] = {
     "generation": ("generation", "Generating answer"),
     "calculator": ("tool", "Calculating"),
     "evidence_search": ("tool", "Searching evidence"),
+    "company_facts_lookup": ("tool", "Looking up SEC filings"),
+    "macro_series_lookup": ("tool", "Looking up macro data"),
     "tool_check": ("tool", "Checking tool request"),
     "citation_validation": ("validation", "Validating citations"),
     "grounding_verification": ("validation", "Verifying grounding"),
@@ -233,6 +237,11 @@ class Activity(BaseModel):
             raise ValueError("Activity kind does not match its stage and label")
         if self.plan is not None and (self.kind != "planning" or self.status != "completed"):
             raise ValueError("Only a completed planning activity carries a plan")
+        if self.outcome is not None and (
+            self.status != "completed"
+            or self.kind not in {"company_facts_lookup", "macro_series_lookup"}
+        ):
+            raise ValueError("Only completed external lookups carry an outcome")
         return self
 
 

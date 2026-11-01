@@ -344,6 +344,8 @@ async def evaluate(
     if remote and not tenant:
         raise ValueError("Remote evaluation requires an explicit --tenant")
     settings = get_settings() if remote else _local_settings()
+    if settings.external_data_enabled:
+        raise ValueError("External data is forbidden in closed-corpus evaluation")
     if remote and settings.retrieval_backend == "qdrant" and not allow_index_write:
         raise ValueError("Corpus upsert mutates the remote index; require --allow-index-write")
     corpus_bytes, cases_bytes = await asyncio.gather(

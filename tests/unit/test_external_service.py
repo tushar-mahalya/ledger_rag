@@ -441,7 +441,11 @@ async def test_external_quotes_drive_programs_and_numeric_verification() -> None
 
 def test_external_activity_outcome_stays_off_the_wire_until_set() -> None:
     started = Activity(
-        stage="tool", status="started", label="Looking up SEC filings", tool="lookup_company_facts"
+        stage="tool",
+        status="started",
+        label="Looking up SEC filings",
+        tool="lookup_company_facts",
+        kind="company_facts_lookup",
     )
     assert "outcome" not in started.model_dump(exclude_none=True)
     done = started.model_copy(update={"status": "completed", "outcome": "timeout"})

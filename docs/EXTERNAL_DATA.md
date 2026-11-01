@@ -1,0 +1,79 @@
+# SEC and FRED evidence
+
+External evidence is an opt-in **chat-only** extension, not a replacement for the
+authorized corpus or a financial-advice service. It uses the existing SEC EDGAR
+and FRED/ALFRED clients. No external tools are offered or executed on voice.
+
+## Enablement and authorization
+
+`LEDGER_EXTERNAL_DATA_ENABLED=false` is the default. With it enabled,
+`LEDGER_SEC_ENABLED` and `LEDGER_FRED_ENABLED` control providers independently.
+A principal needs the `reader` role and, when configured,
+`LEDGER_EXTERNAL_REQUIRED_GROUP` and membership in
+`LEDGER_EXTERNAL_ALLOWED_TENANTS`. These come from authentication, never tool
+arguments. A missing or rejected FRED credential disables FRED rather than
+falling back to current observations.
+
+SEC requires `LEDGER_SEC_USER_AGENT` with a contact email. FRED credentials come
+from a Vault-rendered configuration file; never source that file, put credentials
+in command arguments, record request URLs, or log upstream bodies.
+
+## Read-only tools
+
+| Tool | Selection | Bounds |
+| --- | --- | --- |
+| `lookup_company_facts` | Ticker, CIK or exact registrant; XBRL concepts and fiscal/calendar periods | Four concepts, four periods, eight pairs by default |
+| `lookup_macro_series` | Series plus up to six dates, a date range, or latest observation | Six requested dates; bounded client output and response bytes |
+
+The chat session fixes the authenticated principal and `as_of`, capped at today,
+for the entire turn. **`as_of` means publication availability**, not fiscal year:
+SEC filing dates and ALFRED vintage dates must precede the cutoff. Missing
+values remain explicit misses; a current FRED response cannot substitute for
+unavailable vintage history. Amendment, restatement, staleness and later
+revision indicators stay attached to the original value.
+
+Facts join the existing twelve-citation pool as `C<n>`. Calculator bindings,
+numeric verification and final citation validation apply to them exactly as to
+corpus evidence. `source_kind` is `corpus`, `sec_xbrl` or `fred`; external
+citations require matching typed provenance. Source links use only HTTPS SEC
+and FRED human-facing hosts. Tool results and documents remain untrusted data.
+
+## Failure and resource limits
+
+- Two external calls per chat turn by default, inside the existing overall tool
+  budget; exhausted budgets return explicit tool errors.
+- Eight seconds per lookup by default, also bounded by the query deadline.
+  Cancellation propagates and releases half-open breaker probes.
+- Independent provider breakers: five health failures, thirty-second reset by
+  default. Input errors do not count as provider failures.
+- SEC defaults to five requests/second; FRED to sixty/minute. These limits,
+  caches and breakers are **per process**. Coordinate gateway/replica quotas
+  before scaling; SEC's fair-access ceiling is not a per-replica allowance.
+- Fifteen-minute bounded response cache; sixteen-megabyte response limit by
+  default. No arbitrary URL fetches, redirects, ingestion or mutations.
+- Activity completion reports `ok`, `error`, `timeout` or `unavailable`.
+  Failures contain sanitized categories, never credential-bearing URLs or
+  raw upstream exception text. No silent corpus/provider fallback.
+
+## Benchmarks and verification
+
+Closed-corpus evaluation refuses external enablement before reading corpus data
+or constructing remote clients. FinQA settings explicitly disable ambient
+external enablement and reject attempts to override it. External activity and
+provenance are tested separately from benchmark correctness.
+
+```sh
+uv run --locked pytest -q tests/unit/test_external_*.py tests/unit/test_mcp_adapter.py
+uv run --locked python scripts/dump_contract_fixtures.py --check
+cd web && npm test -- src/external.test.ts src/contract.test.ts
+```
+
+Recorded provider fixtures are verified locally; a regression rejects any
+`api_key` occurrence or fixture credential value in their contents. The FRED
+credential-error fixture has its field spelling and documentation URL sanitized.
+The web demo labels its SEC/FRED replay as an example, not a live request.
+No live FRED verification, paid jobs or deployments were performed for this
+implementation. Live provider validation remains an explicit release check.
+
+Sources: [SEC APIs and fair access](https://www.sec.gov/search-filings/edgar-application-programming-interfaces),
+[FRED observations and real-time periods](https://fred.stlouisfed.org/docs/api/fred/series_observations.html).

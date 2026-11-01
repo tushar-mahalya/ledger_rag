@@ -1,7 +1,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -10,6 +10,7 @@ import structlog
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from starlette.routing import Route
 
 from ledger_rag.api.streaming import SendEvent, buffered_events
 from ledger_rag.core.config import Settings, get_settings
@@ -26,6 +27,7 @@ from ledger_rag.core.models import (
 from ledger_rag.core.retry import request_deadline
 from ledger_rag.generation.evidence import evidence_event
 from ledger_rag.ingestion.chunking import chunk_document
+from ledger_rag.mcp_adapter.server import MCPAdapter, MCPRoute
 from ledger_rag.observability.telemetry import (
     BodyTooLarge,
     Metrics,
@@ -111,7 +113,12 @@ def create_app(
                 retrieval=resolved.retrieval_backend,
                 provider=resolved.provider,
             )
-            yield
+            async with AsyncExitStack() as stack:
+                if resolved.mcp_enabled:
+                    adapter = MCPAdapter(resolved)
+                    app.state.mcp = adapter
+                    await stack.enter_async_context(adapter.manager.run())
+                yield
         finally:
             if service is not None:
                 await service.close()
@@ -125,6 +132,16 @@ def create_app(
     app = FastAPI(title="Ledger RAG", version="0.1.0", lifespan=lifespan)
     app.add_middleware(RequestMiddleware)
     app.include_router(voice_router)
+
+    app.router.routes.append(Route("/mcp", endpoint=MCPRoute(), methods=["GET", "POST", "DELETE"]))
+
+    @app.get("/.well-known/oauth-protected-resource/mcp", include_in_schema=False)
+    @app.get("/.well-known/oauth-protected-resource", include_in_schema=False)
+    async def protected_resource() -> JSONResponse:
+        adapter = getattr(app.state, "mcp", None)
+        if adapter is None:
+            raise HTTPException(404, "Not found")
+        return JSONResponse(adapter.metadata())
 
     def runtime(request: Request) -> Runtime:
         state: Runtime = request.app.state.runtime
