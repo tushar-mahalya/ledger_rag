@@ -1,5 +1,5 @@
 {
-  "_generated_by": "ledger_rag.core.models + generation.program.run_program + verification.check_numbers (uv run --frozen, read-only). Answers use model_dump_json(); activities use exclude_none=True like the SSE route.",
+  "_generated_by": "scripts/dump_contract_fixtures.py: the RagService chat pipeline run offline (memory retriever, deterministic planner, scripted provider). Do not edit by hand. Answers and evidence use model_dump(mode='json'), activities exclude_none=True like the SSE route, and timings are pinned.",
   "verified": {
     "answer": "Revenue rose from USD 120 million to USD 150 million, a 25% increase. [C1] [C2]",
     "citations": [
@@ -56,8 +56,17 @@
           ],
           "result": "30000000",
           "kind": "currency",
-          "citation_ids": ["C1", "C2"],
-          "evidence_backed": true
+          "citation_ids": [
+            "C1",
+            "C2"
+          ],
+          "evidence_backed": true,
+          "unit": {
+            "kind": "currency",
+            "currency": "USD",
+            "scale": "million",
+            "display": "amount"
+          }
         },
         {
           "index": 1,
@@ -86,8 +95,17 @@
           ],
           "result": "0.25",
           "kind": "ratio",
-          "citation_ids": ["C1", "C2"],
-          "evidence_backed": true
+          "citation_ids": [
+            "C1",
+            "C2"
+          ],
+          "evidence_backed": true,
+          "unit": {
+            "kind": "ratio",
+            "currency": null,
+            "scale": null,
+            "display": "ratio"
+          }
         },
         {
           "index": 2,
@@ -116,12 +134,30 @@
           ],
           "result": "25",
           "kind": "percent",
-          "citation_ids": ["C1", "C2"],
-          "evidence_backed": true
+          "citation_ids": [
+            "C1",
+            "C2"
+          ],
+          "evidence_backed": true,
+          "unit": {
+            "kind": "percent",
+            "currency": null,
+            "scale": null,
+            "display": "percent"
+          }
         }
       ],
       "result": "25",
-      "citation_ids": ["C1", "C2"]
+      "citation_ids": [
+        "C1",
+        "C2"
+      ],
+      "unit": {
+        "kind": "percent",
+        "currency": null,
+        "scale": null,
+        "display": "percent"
+      }
     },
     "calculations": [
       {
@@ -153,8 +189,17 @@
             ],
             "result": "30000000",
             "kind": "currency",
-            "citation_ids": ["C1", "C2"],
-            "evidence_backed": true
+            "citation_ids": [
+              "C1",
+              "C2"
+            ],
+            "evidence_backed": true,
+            "unit": {
+              "kind": "currency",
+              "currency": "USD",
+              "scale": "million",
+              "display": "amount"
+            }
           },
           {
             "index": 1,
@@ -183,8 +228,17 @@
             ],
             "result": "0.25",
             "kind": "ratio",
-            "citation_ids": ["C1", "C2"],
-            "evidence_backed": true
+            "citation_ids": [
+              "C1",
+              "C2"
+            ],
+            "evidence_backed": true,
+            "unit": {
+              "kind": "ratio",
+              "currency": null,
+              "scale": null,
+              "display": "ratio"
+            }
           },
           {
             "index": 2,
@@ -213,12 +267,30 @@
             ],
             "result": "25",
             "kind": "percent",
-            "citation_ids": ["C1", "C2"],
-            "evidence_backed": true
+            "citation_ids": [
+              "C1",
+              "C2"
+            ],
+            "evidence_backed": true,
+            "unit": {
+              "kind": "percent",
+              "currency": null,
+              "scale": null,
+              "display": "percent"
+            }
           }
         ],
         "result": "25",
-        "citation_ids": ["C1", "C2"]
+        "citation_ids": [
+          "C1",
+          "C2"
+        ],
+        "unit": {
+          "kind": "percent",
+          "currency": null,
+          "scale": null,
+          "display": "percent"
+        }
       }
     ],
     "verification": {
@@ -235,11 +307,11 @@
       "reasons": [],
       "features": {
         "hit_count": 2,
-        "top_score": 0.81,
-        "mean_score": 0.74,
+        "top_score": 1.672782,
+        "mean_score": 1.406475,
         "citation_coverage": 1.0,
         "checked_numbers": 3,
-        "unsupported_numbers": 0,
+        "unsupported_number_count": 0,
         "verification_status": "verified",
         "verifier_score": 0.93,
         "tool_calls": 1,
@@ -304,8 +376,17 @@
           ],
           "result": "30000000",
           "kind": "currency",
-          "citation_ids": ["C1", "C2"],
-          "evidence_backed": true
+          "citation_ids": [
+            "C1",
+            "C2"
+          ],
+          "evidence_backed": true,
+          "unit": {
+            "kind": "currency",
+            "currency": "USD",
+            "scale": "million",
+            "display": "amount"
+          }
         },
         {
           "index": 1,
@@ -334,8 +415,17 @@
           ],
           "result": "0.25",
           "kind": "ratio",
-          "citation_ids": ["C1", "C2"],
-          "evidence_backed": true
+          "citation_ids": [
+            "C1",
+            "C2"
+          ],
+          "evidence_backed": true,
+          "unit": {
+            "kind": "ratio",
+            "currency": null,
+            "scale": null,
+            "display": "ratio"
+          }
         },
         {
           "index": 2,
@@ -364,12 +454,30 @@
           ],
           "result": "25",
           "kind": "percent",
-          "citation_ids": ["C1", "C2"],
-          "evidence_backed": true
+          "citation_ids": [
+            "C1",
+            "C2"
+          ],
+          "evidence_backed": true,
+          "unit": {
+            "kind": "percent",
+            "currency": null,
+            "scale": null,
+            "display": "percent"
+          }
         }
       ],
       "result": "25",
-      "citation_ids": ["C1", "C2"]
+      "citation_ids": [
+        "C1",
+        "C2"
+      ],
+      "unit": {
+        "kind": "percent",
+        "currency": null,
+        "scale": null,
+        "display": "percent"
+      }
     },
     "calculations": [
       {
@@ -401,8 +509,17 @@
             ],
             "result": "30000000",
             "kind": "currency",
-            "citation_ids": ["C1", "C2"],
-            "evidence_backed": true
+            "citation_ids": [
+              "C1",
+              "C2"
+            ],
+            "evidence_backed": true,
+            "unit": {
+              "kind": "currency",
+              "currency": "USD",
+              "scale": "million",
+              "display": "amount"
+            }
           },
           {
             "index": 1,
@@ -431,8 +548,17 @@
             ],
             "result": "0.25",
             "kind": "ratio",
-            "citation_ids": ["C1", "C2"],
-            "evidence_backed": true
+            "citation_ids": [
+              "C1",
+              "C2"
+            ],
+            "evidence_backed": true,
+            "unit": {
+              "kind": "ratio",
+              "currency": null,
+              "scale": null,
+              "display": "ratio"
+            }
           },
           {
             "index": 2,
@@ -461,20 +587,43 @@
             ],
             "result": "25",
             "kind": "percent",
-            "citation_ids": ["C1", "C2"],
-            "evidence_backed": true
+            "citation_ids": [
+              "C1",
+              "C2"
+            ],
+            "evidence_backed": true,
+            "unit": {
+              "kind": "percent",
+              "currency": null,
+              "scale": null,
+              "display": "percent"
+            }
           }
         ],
         "result": "25",
-        "citation_ids": ["C1", "C2"]
+        "citation_ids": [
+          "C1",
+          "C2"
+        ],
+        "unit": {
+          "kind": "percent",
+          "currency": null,
+          "scale": null,
+          "display": "percent"
+        }
       }
     ],
     "verification": {
       "status": "unverified",
       "mode": "flag",
       "checked_numbers": 3,
-      "unsupported_numbers": ["31%", "USD 115 million"],
-      "reasons": ["unsupported_numbers"],
+      "unsupported_numbers": [
+        "31%",
+        "USD 115 million"
+      ],
+      "reasons": [
+        "unsupported_numbers"
+      ],
       "verifier": null,
       "verifier_score": null
     },
@@ -483,11 +632,11 @@
       "reasons": [],
       "features": {
         "hit_count": 2,
-        "top_score": 0.81,
-        "mean_score": 0.74,
+        "top_score": 1.672782,
+        "mean_score": 1.406475,
         "citation_coverage": 1.0,
         "checked_numbers": 3,
-        "unsupported_numbers": 2,
+        "unsupported_number_count": 2,
         "verification_status": "unverified",
         "verifier_score": null,
         "tool_calls": 1,
@@ -506,222 +655,75 @@
     "request_id": "req-abstained",
     "model": "ledger-chat",
     "tool_calls": 1,
-    "calculation": {
-      "steps": [
-        {
-          "index": 0,
-          "op": "subtract",
-          "operands": [
-            {
-              "kind": "evidence",
-              "value": "150000000",
-              "citation_id": "C1",
-              "quote": "USD 150 million",
-              "source_value": "USD 150 million",
-              "scale": "million",
-              "unit": "currency",
-              "step": null
-            },
-            {
-              "kind": "evidence",
-              "value": "120000000",
-              "citation_id": "C2",
-              "quote": "USD 120 million",
-              "source_value": "USD 120 million",
-              "scale": "million",
-              "unit": "currency",
-              "step": null
-            }
-          ],
-          "result": "30000000",
-          "kind": "currency",
-          "citation_ids": ["C1", "C2"],
-          "evidence_backed": true
-        },
-        {
-          "index": 1,
-          "op": "divide",
-          "operands": [
-            {
-              "kind": "step",
-              "value": "30000000",
-              "citation_id": null,
-              "quote": null,
-              "source_value": null,
-              "scale": null,
-              "unit": null,
-              "step": 0
-            },
-            {
-              "kind": "evidence",
-              "value": "120000000",
-              "citation_id": "C2",
-              "quote": "USD 120 million",
-              "source_value": "USD 120 million",
-              "scale": "million",
-              "unit": "currency",
-              "step": null
-            }
-          ],
-          "result": "0.25",
-          "kind": "ratio",
-          "citation_ids": ["C1", "C2"],
-          "evidence_backed": true
-        },
-        {
-          "index": 2,
-          "op": "multiply",
-          "operands": [
-            {
-              "kind": "step",
-              "value": "0.25",
-              "citation_id": null,
-              "quote": null,
-              "source_value": null,
-              "scale": null,
-              "unit": null,
-              "step": 1
-            },
-            {
-              "kind": "constant",
-              "value": "100",
-              "citation_id": null,
-              "quote": null,
-              "source_value": null,
-              "scale": null,
-              "unit": null,
-              "step": null
-            }
-          ],
-          "result": "25",
-          "kind": "percent",
-          "citation_ids": ["C1", "C2"],
-          "evidence_backed": true
-        }
-      ],
-      "result": "25",
-      "citation_ids": ["C1", "C2"]
-    },
-    "calculations": [
-      {
-        "steps": [
-          {
-            "index": 0,
-            "op": "subtract",
-            "operands": [
-              {
-                "kind": "evidence",
-                "value": "150000000",
-                "citation_id": "C1",
-                "quote": "USD 150 million",
-                "source_value": "USD 150 million",
-                "scale": "million",
-                "unit": "currency",
-                "step": null
-              },
-              {
-                "kind": "evidence",
-                "value": "120000000",
-                "citation_id": "C2",
-                "quote": "USD 120 million",
-                "source_value": "USD 120 million",
-                "scale": "million",
-                "unit": "currency",
-                "step": null
-              }
-            ],
-            "result": "30000000",
-            "kind": "currency",
-            "citation_ids": ["C1", "C2"],
-            "evidence_backed": true
-          },
-          {
-            "index": 1,
-            "op": "divide",
-            "operands": [
-              {
-                "kind": "step",
-                "value": "30000000",
-                "citation_id": null,
-                "quote": null,
-                "source_value": null,
-                "scale": null,
-                "unit": null,
-                "step": 0
-              },
-              {
-                "kind": "evidence",
-                "value": "120000000",
-                "citation_id": "C2",
-                "quote": "USD 120 million",
-                "source_value": "USD 120 million",
-                "scale": "million",
-                "unit": "currency",
-                "step": null
-              }
-            ],
-            "result": "0.25",
-            "kind": "ratio",
-            "citation_ids": ["C1", "C2"],
-            "evidence_backed": true
-          },
-          {
-            "index": 2,
-            "op": "multiply",
-            "operands": [
-              {
-                "kind": "step",
-                "value": "0.25",
-                "citation_id": null,
-                "quote": null,
-                "source_value": null,
-                "scale": null,
-                "unit": null,
-                "step": 1
-              },
-              {
-                "kind": "constant",
-                "value": "100",
-                "citation_id": null,
-                "quote": null,
-                "source_value": null,
-                "scale": null,
-                "unit": null,
-                "step": null
-              }
-            ],
-            "result": "25",
-            "kind": "percent",
-            "citation_ids": ["C1", "C2"],
-            "evidence_backed": true
-          }
-        ],
-        "result": "25",
-        "citation_ids": ["C1", "C2"]
-      }
-    ],
+    "calculation": null,
+    "calculations": [],
     "verification": {
       "status": "failed",
       "mode": "enforce",
       "checked_numbers": 3,
-      "unsupported_numbers": ["31%", "USD 115 million"],
-      "reasons": ["unsupported_numbers"],
+      "unsupported_numbers": [],
+      "reasons": [
+        "unsupported_numbers"
+      ],
       "verifier": null,
       "verifier_score": null
     },
     "abstention": {
       "abstained": true,
-      "reasons": ["verification_failed"],
+      "reasons": [
+        "verification_failed"
+      ],
       "features": {
         "hit_count": 2,
-        "top_score": 0.81,
-        "mean_score": 0.74,
+        "top_score": 1.672782,
+        "mean_score": 1.406475,
         "citation_coverage": 1.0,
         "checked_numbers": 3,
-        "unsupported_numbers": 2,
+        "unsupported_number_count": 2,
         "verification_status": "failed",
         "verifier_score": null,
         "tool_calls": 1,
+        "tool_errors": 0
+      },
+      "calibrated": false
+    }
+  },
+  "refused": {
+    "answer": "I do not have sufficient authorized evidence to answer this question.",
+    "citations": [],
+    "abstained": true,
+    "profile": "chat",
+    "retrieval_ms": 0.412,
+    "generation_ms": 1.25,
+    "request_id": "req-refused",
+    "model": "ledger-chat",
+    "tool_calls": 0,
+    "calculation": null,
+    "calculations": [],
+    "verification": {
+      "status": "skipped",
+      "mode": "enforce",
+      "checked_numbers": 0,
+      "unsupported_numbers": [],
+      "reasons": [],
+      "verifier": null,
+      "verifier_score": null
+    },
+    "abstention": {
+      "abstained": true,
+      "reasons": [
+        "out_of_scope"
+      ],
+      "features": {
+        "hit_count": 0,
+        "top_score": null,
+        "mean_score": null,
+        "citation_coverage": null,
+        "checked_numbers": 0,
+        "unsupported_number_count": 0,
+        "verification_status": "skipped",
+        "verifier_score": null,
+        "tool_calls": 0,
         "tool_errors": 0
       },
       "calibrated": false
@@ -751,36 +753,436 @@
     "profile": "chat",
     "retrieval_ms": 12.345,
     "generation_ms": 842.1,
-    "request_id": "req-verified",
-    "model": "ledger-chat",
-    "tool_calls": 1
+    "request_id": "req-legacy",
+    "model": "ledger-chat"
   },
-  "activities": [
-    {
-      "stage": "planning",
-      "status": "started",
-      "label": "Planning query"
+  "activities": {
+    "verified": [
+      {
+        "stage": "retrieval",
+        "status": "started",
+        "label": "Retrieving evidence",
+        "kind": "retrieval"
+      },
+      {
+        "stage": "retrieval",
+        "status": "completed",
+        "label": "Retrieving evidence",
+        "kind": "retrieval"
+      },
+      {
+        "stage": "planning",
+        "status": "started",
+        "label": "Planning query",
+        "kind": "planning"
+      },
+      {
+        "stage": "planning",
+        "status": "completed",
+        "label": "Planning query",
+        "kind": "planning",
+        "plan": {
+          "intent": "percent_change",
+          "route": "retrieve",
+          "subquestion_count": 3,
+          "subquestions": [
+            "What was the percentage change in Aurora Devices revenue from 2024 to 2025?",
+            "AURORA revenue 2024",
+            "AURORA revenue 2025"
+          ],
+          "companies": [
+            "AURORA"
+          ],
+          "periods": [
+            "2024",
+            "2025"
+          ]
+        }
+      },
+      {
+        "stage": "generation",
+        "status": "started",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "generation",
+        "status": "completed",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "tool",
+        "status": "started",
+        "label": "Calculating",
+        "tool": "calculator",
+        "kind": "calculator"
+      },
+      {
+        "stage": "tool",
+        "status": "completed",
+        "label": "Calculating",
+        "tool": "calculator",
+        "kind": "calculator"
+      },
+      {
+        "stage": "generation",
+        "status": "started",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "generation",
+        "status": "completed",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "validation",
+        "status": "started",
+        "label": "Validating citations",
+        "kind": "citation_validation"
+      },
+      {
+        "stage": "validation",
+        "status": "completed",
+        "label": "Validating citations",
+        "kind": "citation_validation"
+      },
+      {
+        "stage": "validation",
+        "status": "started",
+        "label": "Verifying grounding",
+        "kind": "grounding_verification"
+      },
+      {
+        "stage": "validation",
+        "status": "completed",
+        "label": "Verifying grounding",
+        "kind": "grounding_verification"
+      }
+    ],
+    "unverified": [
+      {
+        "stage": "retrieval",
+        "status": "started",
+        "label": "Retrieving evidence",
+        "kind": "retrieval"
+      },
+      {
+        "stage": "retrieval",
+        "status": "completed",
+        "label": "Retrieving evidence",
+        "kind": "retrieval"
+      },
+      {
+        "stage": "planning",
+        "status": "started",
+        "label": "Planning query",
+        "kind": "planning"
+      },
+      {
+        "stage": "planning",
+        "status": "completed",
+        "label": "Planning query",
+        "kind": "planning",
+        "plan": {
+          "intent": "percent_change",
+          "route": "retrieve",
+          "subquestion_count": 3,
+          "subquestions": [
+            "What was the percentage change in Aurora Devices revenue from 2024 to 2025?",
+            "AURORA revenue 2024",
+            "AURORA revenue 2025"
+          ],
+          "companies": [
+            "AURORA"
+          ],
+          "periods": [
+            "2024",
+            "2025"
+          ]
+        }
+      },
+      {
+        "stage": "generation",
+        "status": "started",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "generation",
+        "status": "completed",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "tool",
+        "status": "started",
+        "label": "Calculating",
+        "tool": "calculator",
+        "kind": "calculator"
+      },
+      {
+        "stage": "tool",
+        "status": "completed",
+        "label": "Calculating",
+        "tool": "calculator",
+        "kind": "calculator"
+      },
+      {
+        "stage": "generation",
+        "status": "started",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "generation",
+        "status": "completed",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "validation",
+        "status": "started",
+        "label": "Validating citations",
+        "kind": "citation_validation"
+      },
+      {
+        "stage": "validation",
+        "status": "completed",
+        "label": "Validating citations",
+        "kind": "citation_validation"
+      }
+    ],
+    "abstained": [
+      {
+        "stage": "retrieval",
+        "status": "started",
+        "label": "Retrieving evidence",
+        "kind": "retrieval"
+      },
+      {
+        "stage": "retrieval",
+        "status": "completed",
+        "label": "Retrieving evidence",
+        "kind": "retrieval"
+      },
+      {
+        "stage": "planning",
+        "status": "started",
+        "label": "Planning query",
+        "kind": "planning"
+      },
+      {
+        "stage": "planning",
+        "status": "completed",
+        "label": "Planning query",
+        "kind": "planning",
+        "plan": {
+          "intent": "percent_change",
+          "route": "retrieve",
+          "subquestion_count": 3,
+          "subquestions": [
+            "What was the percentage change in Aurora Devices revenue from 2024 to 2025?",
+            "AURORA revenue 2024",
+            "AURORA revenue 2025"
+          ],
+          "companies": [
+            "AURORA"
+          ],
+          "periods": [
+            "2024",
+            "2025"
+          ]
+        }
+      },
+      {
+        "stage": "generation",
+        "status": "started",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "generation",
+        "status": "completed",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "tool",
+        "status": "started",
+        "label": "Calculating",
+        "tool": "calculator",
+        "kind": "calculator"
+      },
+      {
+        "stage": "tool",
+        "status": "completed",
+        "label": "Calculating",
+        "tool": "calculator",
+        "kind": "calculator"
+      },
+      {
+        "stage": "generation",
+        "status": "started",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "generation",
+        "status": "completed",
+        "label": "Generating answer",
+        "kind": "generation"
+      },
+      {
+        "stage": "validation",
+        "status": "started",
+        "label": "Validating citations",
+        "kind": "citation_validation"
+      },
+      {
+        "stage": "validation",
+        "status": "completed",
+        "label": "Validating citations",
+        "kind": "citation_validation"
+      }
+    ],
+    "refused": [
+      {
+        "stage": "retrieval",
+        "status": "started",
+        "label": "Retrieving evidence",
+        "kind": "retrieval"
+      },
+      {
+        "stage": "retrieval",
+        "status": "completed",
+        "label": "Retrieving evidence",
+        "kind": "retrieval"
+      },
+      {
+        "stage": "planning",
+        "status": "started",
+        "label": "Planning query",
+        "kind": "planning"
+      },
+      {
+        "stage": "planning",
+        "status": "completed",
+        "label": "Planning query",
+        "kind": "planning",
+        "plan": {
+          "intent": "lookup",
+          "route": "refuse_out_of_scope",
+          "subquestion_count": 0,
+          "subquestions": [],
+          "companies": [
+            "AURORA"
+          ],
+          "periods": [
+            "2027"
+          ]
+        }
+      },
+      {
+        "stage": "validation",
+        "status": "started",
+        "label": "Validating citations",
+        "kind": "citation_validation"
+      },
+      {
+        "stage": "validation",
+        "status": "completed",
+        "label": "Validating citations",
+        "kind": "citation_validation"
+      }
+    ]
+  },
+  "evidence": {
+    "verified": {
+      "request_id": "req-verified",
+      "retrieval_ms": 12.345,
+      "sources": [
+        "urn:ledger:synthetic:aurora:2025",
+        "urn:ledger:synthetic:aurora:2024"
+      ],
+      "citations": [
+        {
+          "id": "C1",
+          "document_id": "aurora-2025",
+          "source": "urn:ledger:synthetic:aurora:2025",
+          "title": "Aurora Devices · FY2025",
+          "published_at": "2026-02-01",
+          "quote": "In fiscal year 2025, Aurora Devices reported revenue of USD 150 million, compared with USD 120 million in fiscal year 2024."
+        },
+        {
+          "id": "C2",
+          "document_id": "aurora-2024",
+          "source": "urn:ledger:synthetic:aurora:2024",
+          "title": "Aurora Devices · FY2024",
+          "published_at": "2025-02-01",
+          "quote": "In fiscal year 2024, Aurora Devices reported revenue of USD 120 million."
+        }
+      ]
     },
-    {
-      "stage": "planning",
-      "status": "completed",
-      "label": "Planning query"
+    "unverified": {
+      "request_id": "req-unverified",
+      "retrieval_ms": 12.345,
+      "sources": [
+        "urn:ledger:synthetic:aurora:2025",
+        "urn:ledger:synthetic:aurora:2024"
+      ],
+      "citations": [
+        {
+          "id": "C1",
+          "document_id": "aurora-2025",
+          "source": "urn:ledger:synthetic:aurora:2025",
+          "title": "Aurora Devices · FY2025",
+          "published_at": "2026-02-01",
+          "quote": "In fiscal year 2025, Aurora Devices reported revenue of USD 150 million, compared with USD 120 million in fiscal year 2024."
+        },
+        {
+          "id": "C2",
+          "document_id": "aurora-2024",
+          "source": "urn:ledger:synthetic:aurora:2024",
+          "title": "Aurora Devices · FY2024",
+          "published_at": "2025-02-01",
+          "quote": "In fiscal year 2024, Aurora Devices reported revenue of USD 120 million."
+        }
+      ]
     },
-    {
-      "stage": "tool",
-      "status": "started",
-      "label": "Calculating",
-      "tool": "calculator"
+    "abstained": {
+      "request_id": "req-abstained",
+      "retrieval_ms": 12.345,
+      "sources": [
+        "urn:ledger:synthetic:aurora:2025",
+        "urn:ledger:synthetic:aurora:2024"
+      ],
+      "citations": [
+        {
+          "id": "C1",
+          "document_id": "aurora-2025",
+          "source": "urn:ledger:synthetic:aurora:2025",
+          "title": "Aurora Devices · FY2025",
+          "published_at": "2026-02-01",
+          "quote": "In fiscal year 2025, Aurora Devices reported revenue of USD 150 million, compared with USD 120 million in fiscal year 2024."
+        },
+        {
+          "id": "C2",
+          "document_id": "aurora-2024",
+          "source": "urn:ledger:synthetic:aurora:2024",
+          "title": "Aurora Devices · FY2024",
+          "published_at": "2025-02-01",
+          "quote": "In fiscal year 2024, Aurora Devices reported revenue of USD 120 million."
+        }
+      ]
     },
-    {
-      "stage": "validation",
-      "status": "started",
-      "label": "Verifying grounding"
-    },
-    {
-      "stage": "validation",
-      "status": "completed",
-      "label": "Verifying grounding"
+    "refused": {
+      "request_id": "req-refused",
+      "retrieval_ms": 0.412,
+      "sources": [],
+      "citations": []
     }
-  ]
+  }
 }

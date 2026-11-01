@@ -218,22 +218,22 @@ def test_ambiguous_quote_requires_more_context() -> None:
             "zero",
         ),
         ([("exp", [ev("2,500"), ev("2,500")])], "exponent magnitude"),
-        ([("exp", [ev("USD 120 million"), {"constant": 2}])], "base magnitude"),
+        ([("exp", [ev("1.2 billion"), {"constant": 2}])], "base magnitude"),
         (
             [
-                ("multiply", [ev("$1.2 billion"), ev("$1.2 billion")]),
+                ("multiply", [ev("1.2 billion"), ev("1.2 billion")]),
                 ("multiply", [{"ref": "#0"}, {"ref": "#0"}]),
             ],
             "magnitude",
         ),
-        ([("exp", [ev("$(7)"), ev("0.5")])], "positive base"),
+        ([("exp", [ev("(7)"), ev("0.5")])], "positive base"),
         ([("percent_change", [ev("0"), ev("2,500")])], "undefined"),
     ],
 )
 def test_program_dos_and_arithmetic_guards(
     steps: list[tuple[str, list[dict[str, Any]]]], message: str
 ) -> None:
-    text = EVIDENCE + " Also $1.2 billion, $(7), 0.5 and 0."
+    text = EVIDENCE + " Also 1.2 billion, (7), 0.5 and 0."
     with pytest.raises(ProgramError, match=message):
         run_program(program(*steps), [citation(text)])
 
@@ -398,3 +398,184 @@ def test_strict_mode_still_rejects_glued_numbers_as_operands() -> None:
             run_program(program(("multiply", [ev(quote), {"constant": 1}])), [citation(text)])
     loose = [(m.text, m.value, m.scale) for m in extract_numbers(text, loose=True)]
     assert loose == [("3.5x", Decimal("3.5"), 1), ("12k", Decimal(12), 1000)]
+
+
+# --- Result units --------------------------------------------------------------------
+
+UNITS = (
+    "Revenue was USD 120 million in 2024 and $150 million in 2025, with a 15 percent "
+    "margin and a 12% tax rate. Net loss was $(3) million. Diluted EPS was $2.50 per "
+    "diluted share on 60 million diluted shares. Headcount was 1,200 employees. The "
+    "Canadian unit earned C$40 million and the European unit \u20ac30 million; Japan "
+    "reported \u00a5500 million and 20 million Canadian dollars. Backlog was 90 and 0."
+)
+
+
+def unit_of(*steps: tuple[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    calculation = run_program(program(*steps), [citation(UNITS)])
+    assert calculation.unit == calculation.steps[-1].unit
+    assert calculation.unit is not None
+    return calculation.unit.model_dump()
+
+
+def amount(kind: str, currency: str | None = None, scale: str | None = None) -> dict[str, Any]:
+    return {"kind": kind, "currency": currency, "scale": scale, "display": "amount"}
+
+
+@pytest.mark.parametrize(
+    "steps,expected",
+    [
+        # Differences keep the currency; a bare "$" is USD; the finest common scale wins.
+        (
+            [("subtract", [ev("$150 million"), ev("USD 120 million")])],
+            amount("currency", "USD", "million"),
+        ),
+        (
+            [("add", [ev("$(3) million"), ev("90")])],
+            amount("currency", "USD"),
+        ),
+        (
+            [("table_sum", [ev("\u20ac30 million"), ev("0")])],
+            amount("currency", "EUR"),
+        ),
+        # Currency / currency is a fraction; x100 becomes a percent.
+        (
+            [("divide", [ev("$150 million"), ev("USD 120 million")])],
+            {"kind": "ratio", "currency": None, "scale": None, "display": "ratio"},
+        ),
+        (
+            [
+                ("divide", [ev("$150 million"), ev("USD 120 million")]),
+                ("multiply", [{"ref": "#0"}, {"constant": 100}]),
+            ],
+            {"kind": "percent", "currency": None, "scale": None, "display": "percent"},
+        ),
+        (
+            [("percent_change", [ev("USD 120 million"), ev("$150 million")])],
+            {"kind": "percent", "currency": None, "scale": None, "display": "percent"},
+        ),
+        # Percent of percent stays a percent-displayed fraction; rate x amount keeps it.
+        (
+            [("multiply", [ev("15 percent"), ev("12%")])],
+            {"kind": "ratio", "currency": None, "scale": None, "display": "percent"},
+        ),
+        (
+            [("multiply", [ev("USD 120 million"), ev("15 percent")])],
+            amount("currency", "USD", "million"),
+        ),
+        (
+            [("subtract", [ev("15 percent"), ev("12%")])],
+            {"kind": "ratio", "currency": None, "scale": None, "display": "percent"},
+        ),
+        # Per-share: totals over shares, and per-share times shares back to a total.
+        (
+            [("divide", [ev("$150 million"), ev("60 million diluted shares")])],
+            amount("per_share", "USD"),
+        ),
+        (
+            [("multiply", [ev("$2.50"), ev("60 million diluted shares")])],
+            amount("currency", "USD", "million"),
+        ),
+        (
+            [("divide", [ev("$150 million"), ev("$2.50")])],
+            amount("count"),
+        ),
+        # Counts and per-unit amounts.
+        ([("add", [ev("1,200 employees"), ev("90")])], amount("count")),
+        (
+            [("divide", [ev("$150 million"), ev("1,200 employees")])],
+            amount("currency", "USD"),
+        ),
+        # Ambiguous symbols keep the currency kind without claiming an ISO code.
+        (
+            [("multiply", [ev("C$40 million"), {"constant": 1}])],
+            amount("currency", None, "million"),
+        ),
+        (
+            [("multiply", [ev("\u00a5500 million"), {"constant": 1}])],
+            amount("currency", None, "million"),
+        ),
+        (
+            [("multiply", [ev("20 million Canadian"), {"constant": 1}])],
+            amount("currency", None, "million"),
+        ),
+        # Growth factors and yes/no flags.
+        (
+            [
+                ("divide", [ev("$150 million"), ev("USD 120 million")]),
+                ("exp", [{"ref": "#0"}, {"constant": 2}]),
+            ],
+            {"kind": "ratio", "currency": None, "scale": None, "display": "ratio"},
+        ),
+        (
+            [("greater", [ev("$150 million"), ev("USD 120 million")])],
+            {"kind": "unitless", "currency": None, "scale": None, "display": "boolean"},
+        ),
+        (
+            [("divide", [ev("15 percent"), {"constant": 100}])],
+            {"kind": "ratio", "currency": None, "scale": None, "display": "percent"},
+        ),
+    ],
+)
+def test_result_units_are_derived_from_operands(
+    steps: list[tuple[str, list[dict[str, Any]]]], expected: dict[str, Any]
+) -> None:
+    assert unit_of(*steps) == expected
+
+
+@pytest.mark.parametrize(
+    "steps,message",
+    [
+        ([("add", [ev("C$40 million"), ev("$150 million")])], "different currencies"),
+        ([("subtract", [ev("\u20ac30 million"), ev("USD 120 million")])], "different currencies"),
+        ([("divide", [ev("\u20ac30 million"), ev("$150 million")])], "different currencies"),
+        ([("greater", [ev("\u00a5500 million"), ev("$150 million")])], "different currencies"),
+        (
+            [("percent_change", [ev("20 million Canadian"), ev("$150 million")])],
+            "different currencies",
+        ),
+        ([("multiply", [ev("$150 million"), ev("USD 120 million")])], "two currency amounts"),
+        ([("exp", [ev("$150 million"), {"constant": 2}])], "unitless base"),
+        ([("add", [ev("1,200 employees"), ev("$150 million")])], "counts such as shares"),
+        ([("add", [ev("$2.50"), ev("$150 million")])], "per-share amounts"),
+        ([("add", [ev("15 percent"), ev("$150 million")])], "cannot mix percentages"),
+    ],
+)
+def test_unit_mismatches_fail_closed(
+    steps: list[tuple[str, list[dict[str, Any]]]], message: str
+) -> None:
+    with pytest.raises(ProgramError, match=message):
+        run_program(program(*steps), [citation(UNITS)])
+
+
+def test_zero_and_negative_results_keep_units() -> None:
+    zero = run_program(program(("subtract", [ev("90"), ev("90")])), [citation(UNITS)])
+    assert zero.result == "0" and zero.unit is not None and zero.unit.kind == "unitless"
+    negative = run_program(
+        program(("subtract", [ev("$(3) million"), ev("USD 120 million")])), [citation(UNITS)]
+    )
+    assert negative.result == "-123000000"
+    assert negative.unit is not None and negative.unit.currency == "USD"
+
+
+def test_currency_tokens_are_conservative() -> None:
+    tokens = [
+        m.currency
+        for m in extract_numbers("US$5, $5, C$5, HK$5, \u20ac5, \u00a35, \u00a55, EUR 5 and 5.")
+    ]
+    assert tokens == ["USD", "$", "C$", "HK$", "EUR", "GBP", "\u00a5", "EUR", None]
+
+
+def test_tool_result_reports_units() -> None:
+    from ledger_rag.generation.program import program_tool_result
+
+    calculation = run_program(
+        program(("subtract", [ev("$150 million"), ev("USD 120 million")])), [citation(UNITS)]
+    )
+    [step] = program_tool_result(calculation)["steps"]
+    assert step["unit"] == {
+        "kind": "currency",
+        "currency": "USD",
+        "scale": "million",
+        "display": "amount",
+    }

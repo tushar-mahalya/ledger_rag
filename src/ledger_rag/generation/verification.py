@@ -30,6 +30,7 @@ from ledger_rag.core.models import (
     Citation,
     Profile,
     Verification,
+    VerificationReason,
     VerificationStatus,
 )
 from ledger_rag.generation.program import NumberMention, extract_numbers
@@ -283,7 +284,7 @@ class AnswerVerifier:
         self.min_score = settings.groundedness_verifier_min_score
         self.timeout = settings.groundedness_verifier_timeout_seconds
 
-    def _outcome(self, reasons: list[str]) -> VerificationStatus:
+    def _outcome(self, reasons: Sequence[VerificationReason]) -> VerificationStatus:
         if not reasons:
             return "verified"
         return "failed" if self.mode == "enforce" else "unverified"
@@ -297,7 +298,7 @@ class AnswerVerifier:
         if self.mode == "off" or not content:
             return Verification(status="skipped", mode=self.mode)
         result = check_numbers(content, citations, list(calculations), self.policy)
-        reasons = ["unsupported_numbers"] if result.unsupported else []
+        reasons: list[VerificationReason] = ["unsupported_numbers"] if result.unsupported else []
         return Verification(
             status=self._outcome(reasons),
             mode=self.mode,
@@ -326,7 +327,7 @@ class AnswerVerifier:
         async with activity(
             on_activity,
             "validation",
-            label_override="Verifying grounding",
+            kind="grounding_verification",
             span_name="rag.verifier",
         ) as span:
             try:
@@ -346,7 +347,9 @@ class AnswerVerifier:
                 )
             span.set_attribute("rag.verifier.available", True)
             span.set_attribute("rag.verifier.score", result.score)
-        reasons = [] if result.score >= self.min_score else ["verifier_below_threshold"]
+        reasons: list[VerificationReason] = (
+            [] if result.score >= self.min_score else ["verifier_below_threshold"]
+        )
         return verification.model_copy(
             update={
                 "status": self._outcome(reasons),

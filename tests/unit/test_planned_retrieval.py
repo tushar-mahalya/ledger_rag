@@ -207,7 +207,7 @@ async def test_plan_node_reuses_recorded_plan(
     await rag.generate(query, hits, retrieval_ms, "plan", finqa)
     finished = {span.name: span for span in span_exporter.get_finished_spans()}
     node = dict(finished["rag.chat.plan"].attributes or {})
-    assert node.pop("rag.stage") == "planning"
+    assert node.pop("rag.stage") == "planning" and node.pop("rag.activity") == "planning"
     assert node == dict(finished["rag.plan"].attributes or {})
 
 

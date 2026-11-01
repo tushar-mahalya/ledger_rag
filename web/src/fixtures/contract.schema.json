@@ -1,0 +1,865 @@
+{
+  "$defs": {
+    "AbstentionDecision": {
+      "description": "Policy output and inputs; thresholds are uncalibrated until fitted on dev data.",
+      "properties": {
+        "abstained": {
+          "title": "Abstained",
+          "type": "boolean"
+        },
+        "reasons": {
+          "items": {
+            "enum": [
+              "out_of_scope",
+              "no_validated_answer",
+              "verification_failed",
+              "retrieval_score_below_threshold",
+              "citation_coverage_below_threshold",
+              "tool_errors_above_threshold"
+            ],
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Reasons",
+          "type": "array"
+        },
+        "features": {
+          "$ref": "#/$defs/AbstentionFeatures"
+        },
+        "calibrated": {
+          "default": false,
+          "title": "Calibrated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "abstained",
+        "features"
+      ],
+      "title": "AbstentionDecision",
+      "type": "object"
+    },
+    "AbstentionFeatures": {
+      "properties": {
+        "hit_count": {
+          "minimum": 0,
+          "title": "Hit Count",
+          "type": "integer"
+        },
+        "top_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top Score"
+        },
+        "mean_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean Score"
+        },
+        "citation_coverage": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Citation Coverage"
+        },
+        "checked_numbers": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Checked Numbers",
+          "type": "integer"
+        },
+        "unsupported_number_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unsupported Number Count",
+          "type": "integer"
+        },
+        "verification_status": {
+          "default": "skipped",
+          "enum": [
+            "verified",
+            "unverified",
+            "failed",
+            "skipped"
+          ],
+          "title": "Verification Status",
+          "type": "string"
+        },
+        "verifier_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verifier Score"
+        },
+        "tool_calls": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Tool Calls",
+          "type": "integer"
+        },
+        "tool_errors": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Tool Errors",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "hit_count"
+      ],
+      "title": "AbstentionFeatures",
+      "type": "object"
+    },
+    "Activity": {
+      "additionalProperties": false,
+      "properties": {
+        "stage": {
+          "enum": [
+            "planning",
+            "retrieval",
+            "generation",
+            "tool",
+            "validation"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "started",
+            "completed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "label": {
+          "enum": [
+            "Planning query",
+            "Retrieving evidence",
+            "Generating answer",
+            "Calculating",
+            "Searching evidence",
+            "Checking tool request",
+            "Validating citations",
+            "Verifying grounding"
+          ],
+          "title": "Label",
+          "type": "string"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "enum": [
+                "calculator",
+                "search_evidence"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool"
+        },
+        "kind": {
+          "enum": [
+            "planning",
+            "retrieval",
+            "generation",
+            "calculator",
+            "evidence_search",
+            "tool_check",
+            "citation_validation",
+            "grounding_verification"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "stage",
+        "status",
+        "label",
+        "kind"
+      ],
+      "title": "Activity",
+      "type": "object"
+    },
+    "Answer": {
+      "properties": {
+        "answer": {
+          "maxLength": 100000,
+          "title": "Answer",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "maxItems": 12,
+          "title": "Citations",
+          "type": "array"
+        },
+        "abstained": {
+          "title": "Abstained",
+          "type": "boolean"
+        },
+        "profile": {
+          "$ref": "#/$defs/Profile"
+        },
+        "retrieval_ms": {
+          "minimum": 0,
+          "title": "Retrieval Ms",
+          "type": "number"
+        },
+        "generation_ms": {
+          "minimum": 0,
+          "title": "Generation Ms",
+          "type": "number"
+        },
+        "request_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 500,
+          "title": "Model",
+          "type": "string"
+        },
+        "tool_calls": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Tool Calls",
+          "type": "integer"
+        },
+        "calculation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Calculation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "calculations": {
+          "items": {
+            "$ref": "#/$defs/Calculation"
+          },
+          "maxItems": 16,
+          "title": "Calculations",
+          "type": "array"
+        },
+        "verification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Verification"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "abstention": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AbstentionDecision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "answer",
+        "citations",
+        "abstained",
+        "profile",
+        "retrieval_ms",
+        "generation_ms",
+        "request_id",
+        "model"
+      ],
+      "title": "Answer",
+      "type": "object"
+    },
+    "Calculation": {
+      "description": "A deterministic evidence-bound program trace; ``result`` is in base units.",
+      "properties": {
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/CalculationStep"
+          },
+          "maxItems": 16,
+          "title": "Steps",
+          "type": "array"
+        },
+        "result": {
+          "maxLength": 64,
+          "title": "Result",
+          "type": "string"
+        },
+        "citation_ids": {
+          "items": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Citation Ids",
+          "type": "array"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CalculationUnit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "steps",
+        "result",
+        "citation_ids"
+      ],
+      "title": "Calculation",
+      "type": "object"
+    },
+    "CalculationOperand": {
+      "description": "A program input with provenance: an evidence span, a prior step or a constant.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "evidence",
+            "step",
+            "constant"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 64,
+          "title": "Value",
+          "type": "string"
+        },
+        "citation_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Citation Id"
+        },
+        "quote": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quote"
+        },
+        "source_value": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Value"
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scale"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "title": "CalculationOperand",
+      "type": "object"
+    },
+    "CalculationStep": {
+      "properties": {
+        "index": {
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "op": {
+          "maxLength": 64,
+          "title": "Op",
+          "type": "string"
+        },
+        "operands": {
+          "items": {
+            "$ref": "#/$defs/CalculationOperand"
+          },
+          "maxItems": 64,
+          "title": "Operands",
+          "type": "array"
+        },
+        "result": {
+          "maxLength": 64,
+          "title": "Result",
+          "type": "string"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "currency",
+                "amount",
+                "ratio",
+                "percent",
+                "boolean"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "citation_ids": {
+          "items": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Citation Ids",
+          "type": "array"
+        },
+        "evidence_backed": {
+          "default": false,
+          "title": "Evidence Backed",
+          "type": "boolean"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CalculationUnit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "index",
+        "op",
+        "operands",
+        "result"
+      ],
+      "title": "CalculationStep",
+      "type": "object"
+    },
+    "CalculationUnit": {
+      "additionalProperties": false,
+      "description": "Deterministic unit of a result, derived from evidence operands by the program DSL.\n\n``kind`` gives the meaning of the base-unit value: ``percent`` values are already\nmultiplied by 100, ``ratio`` values are fractions. ``currency`` is an ISO 4217 code,\nor null when the evidence symbol is ambiguous (for example ``C$``). ``scale`` is the\nevidence scale word to display amounts in. ``display`` is a rendering hint: a\n``ratio`` shown as ``percent`` is multiplied by 100, and ``boolean`` is a yes/no flag.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "currency",
+            "percent",
+            "ratio",
+            "count",
+            "per_share",
+            "unitless"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currency"
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "enum": [
+                "thousand",
+                "million",
+                "billion",
+                "trillion"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scale"
+        },
+        "display": {
+          "enum": [
+            "amount",
+            "percent",
+            "ratio",
+            "boolean"
+          ],
+          "title": "Display",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "display"
+      ],
+      "title": "CalculationUnit",
+      "type": "object"
+    },
+    "Citation": {
+      "properties": {
+        "id": {
+          "maxLength": 16,
+          "pattern": "^C\\d+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "document_id": {
+          "maxLength": 200,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 2048,
+          "title": "Source",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 500,
+          "title": "Title",
+          "type": "string"
+        },
+        "published_at": {
+          "format": "date",
+          "title": "Published At",
+          "type": "string"
+        },
+        "quote": {
+          "maxLength": 100000,
+          "title": "Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "document_id",
+        "source",
+        "title",
+        "published_at",
+        "quote"
+      ],
+      "title": "Citation",
+      "type": "object"
+    },
+    "Evidence": {
+      "description": "The streaming ``evidence`` event: authorized sources retrieved before generation.",
+      "properties": {
+        "request_id": {
+          "maxLength": 200,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "retrieval_ms": {
+          "minimum": 0,
+          "title": "Retrieval Ms",
+          "type": "number"
+        },
+        "sources": {
+          "items": {
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Sources",
+          "type": "array"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "maxItems": 12,
+          "title": "Citations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "retrieval_ms",
+        "sources"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "PlanSummary": {
+      "additionalProperties": false,
+      "description": "Client-safe plan digest: an explicit allowlist with bounded sizes.\n\nNever carries prompts, history, decision or analysis confidences, or timings.\n``subquestions`` holds at most the first four (truncated) retrieval sub-questions;\n``subquestion_count`` is the full count.",
+      "properties": {
+        "intent": {
+          "enum": [
+            "lookup",
+            "compare",
+            "ratio",
+            "change",
+            "percent_change",
+            "aggregate"
+          ],
+          "title": "Intent",
+          "type": "string"
+        },
+        "route": {
+          "enum": [
+            "retrieve",
+            "direct_answer",
+            "clarify",
+            "refuse_out_of_scope"
+          ],
+          "title": "Route",
+          "type": "string"
+        },
+        "subquestion_count": {
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Subquestion Count",
+          "type": "integer"
+        },
+        "subquestions": {
+          "items": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "maxItems": 4,
+          "title": "Subquestions",
+          "type": "array"
+        },
+        "companies": {
+          "items": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Companies",
+          "type": "array"
+        },
+        "periods": {
+          "items": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Periods",
+          "type": "array"
+        }
+      },
+      "required": [
+        "intent",
+        "route",
+        "subquestion_count"
+      ],
+      "title": "PlanSummary",
+      "type": "object"
+    },
+    "Profile": {
+      "enum": [
+        "voice",
+        "chat"
+      ],
+      "title": "Profile",
+      "type": "string"
+    },
+    "Verification": {
+      "properties": {
+        "status": {
+          "enum": [
+            "verified",
+            "unverified",
+            "failed",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "off",
+            "flag",
+            "enforce"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "checked_numbers": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Checked Numbers",
+          "type": "integer"
+        },
+        "unsupported_numbers": {
+          "items": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Unsupported Numbers",
+          "type": "array"
+        },
+        "reasons": {
+          "items": {
+            "enum": [
+              "unsupported_numbers",
+              "verifier_unavailable",
+              "verifier_below_threshold"
+            ],
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Reasons",
+          "type": "array"
+        },
+        "verifier": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verifier"
+        },
+        "verifier_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verifier Score"
+        }
+      },
+      "required": [
+        "status",
+        "mode"
+      ],
+      "title": "Verification",
+      "type": "object"
+    }
+  }
+}

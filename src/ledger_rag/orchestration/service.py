@@ -8,9 +8,9 @@ from opentelemetry.trace import Span
 from ledger_rag.core.config import Settings
 from ledger_rag.core.contracts import Provider, Retriever
 from ledger_rag.core.models import (
+    MAX_CALCULATIONS,
     Answer,
     Calculation,
-    Citation,
     Hit,
     Principal,
     Profile,
@@ -34,7 +34,7 @@ from ledger_rag.observability.spans import safe_span
 from ledger_rag.orchestration.activity import ActivityCallback, activity
 from ledger_rag.orchestration.chat import ChatContext, ChatState, run_chat
 from ledger_rag.planning.decomposition import reciprocal_rank_fusion
-from ledger_rag.planning.planner import Planner, make_planner, remember
+from ledger_rag.planning.planner import Planner, make_planner, recall, remember
 from ledger_rag.retrieval.memory import authorized
 
 logger = structlog.get_logger()
@@ -151,6 +151,7 @@ class RagService:
         tool_count = tool_errors = 0
         calculations: list[Calculation] = []
         verification: Verification | None = None
+        refused = False
         with safe_span("rag.generate") as span:
             span.set_attribute("gen_ai.request.model", self.provider.model)
             span.set_attribute("rag.profile", query.profile.value)
@@ -184,6 +185,7 @@ class RagService:
                 )
                 calculations, tool_errors = state["calculations"], state["tool_errors"]
                 verification = state["verification"]
+                refused = state.get("refused", False)
             else:
                 content = ""
                 if citations:
@@ -200,6 +202,13 @@ class RagService:
                     content, citations = validate_citations(content, citations)
                     # Voice stays on the deterministic path: no model verifier, no extra calls.
                     verification = self.verifier.check(content, citations, [])
+                _, plan = recall(query)
+                refused = bool(
+                    plan is not None
+                    and plan.decision.route == "refuse_out_of_scope"
+                    and plan.skip_retrieval
+                    and not hits
+                )
             decision = self.abstention.decide(
                 content=content,
                 hits=hits,
@@ -207,45 +216,37 @@ class RagService:
                 citation_coverage=citation_coverage(content) if content else None,
                 tool_calls=tool_count,
                 tool_errors=tool_errors,
+                out_of_scope=refused,
             )
             if decision.abstained:
-                content, citations = "", []
+                # Nothing that points at evidence or echoes the rejected draft is emitted;
+                # the decision keeps client-safe reason codes and the unsupported count.
+                content, citations, calculations = "", [], []
+                if verification is not None:
+                    verification = verification.model_copy(update={"unsupported_numbers": []})
             span.set_attribute("rag.tool_calls", tool_count)
             span.set_attribute("rag.abstained", decision.abstained)
             if verification is not None:
                 span.set_attribute("rag.verification", verification.status)
         elapsed = (time.perf_counter() - start) * 1000
         generation_ms = elapsed if hits or (query.profile == Profile.CHAT and principal) else 0
-        answer = self._answer(
-            query, citations, content, retrieval_ms, generation_ms, request_id, tool_count
-        )
-        return answer.model_copy(
-            update={
-                "calculation": calculations[-1] if calculations else None,
-                "calculations": calculations,
-                "verification": verification,
-                "abstention": decision,
+        calculations = calculations[-MAX_CALCULATIONS:]
+        # One validated construction: bounds and evidence references are checked before
+        # anything is emitted (model_copy elsewhere skips validation, so dump first).
+        return Answer.model_validate(
+            {
+                "answer": content or ABSTENTION,
+                "citations": [citation.model_dump() for citation in citations],
+                "abstained": not bool(content),
+                "profile": query.profile,
+                "retrieval_ms": round(retrieval_ms, 3),
+                "generation_ms": round(generation_ms, 3),
+                "request_id": request_id,
+                "model": self.provider.model,
+                "tool_calls": tool_count,
+                "calculation": calculations[-1].model_dump() if calculations else None,
+                "calculations": [calculation.model_dump() for calculation in calculations],
+                "verification": verification.model_dump() if verification else None,
+                "abstention": decision.model_dump(),
             }
-        )
-
-    def _answer(
-        self,
-        query: QueryRequest,
-        citations: list[Citation],
-        content: str,
-        retrieval_ms: float,
-        generation_ms: float,
-        request_id: str,
-        tool_count: int,
-    ) -> Answer:
-        return Answer(
-            answer=content or ABSTENTION,
-            citations=citations,
-            abstained=not bool(content),
-            profile=query.profile,
-            retrieval_ms=round(retrieval_ms, 3),
-            generation_ms=round(generation_ms, 3),
-            request_id=request_id,
-            model=self.provider.model,
-            tool_calls=tool_count,
         )

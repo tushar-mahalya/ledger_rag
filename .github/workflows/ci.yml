@@ -47,13 +47,14 @@ jobs:
           python-version: ${{ matrix.python }}
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run --frozen ruff check src tests compute deploy/wait-for-secrets.py scripts/check_agent_skills.py scripts/clone_qdrant_benchmark.py
+      - run: uv run --frozen ruff check src tests compute deploy/wait-for-secrets.py scripts/check_agent_skills.py scripts/clone_qdrant_benchmark.py scripts/dump_contract_fixtures.py
       - run: uv run --frozen ruff format --check .
       - run: uv run --frozen python scripts/check_agent_skills.py
-      - run: uv run --frozen mypy src scripts/clone_qdrant_benchmark.py
+      - run: uv run --frozen mypy src scripts/clone_qdrant_benchmark.py scripts/dump_contract_fixtures.py
       - run: uv run --frozen --group compute mypy --strict --ignore-missing-imports compute
       - run: uv run --frozen --group compute pytest -q
       - run: uv run --frozen python -m ledger_rag.evaluation.harness --smoke --repeats 3
+      - run: uv run --frozen python scripts/dump_contract_fixtures.py --check
       - run: uv build --no-sources
   image:
     runs-on: ubuntu-latest

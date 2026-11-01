@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 export const citationSchema = z.object({
-  id: z.string().regex(/^C\d+$/),
+  id: z
+    .string()
+    .max(16)
+    .regex(/^C\d+$/),
   document_id: z.string().max(200),
   title: z.string().max(500),
   source: z.string().max(2048),
@@ -9,9 +12,12 @@ export const citationSchema = z.object({
   quote: z.string().max(100_000),
 });
 
-// Mirrors ledger_rag.core.models. Decimal values are strings so they round-trip exactly.
+// Mirrors ledger_rag.core.models; contract.test.ts asserts the bounds match the Pydantic
+// JSON Schema in fixtures/contract.schema.json. Decimal values are strings so they
+// round-trip exactly.
 const decimalString = z.string().max(64);
 const shortText = z.string().max(500);
+const count = z.number().int().nonnegative();
 
 export const calculationOperandSchema = z.object({
   kind: z.enum(["evidence", "step", "constant"]),
@@ -21,7 +27,7 @@ export const calculationOperandSchema = z.object({
   source_value: shortText.nullable().optional(),
   scale: z.string().max(64).nullable().optional(),
   unit: z.string().max(64).nullable().optional(),
-  step: z.number().int().nonnegative().nullable().optional(),
+  step: count.nullable().optional(),
 });
 
 export const calculationKindSchema = z.enum([
@@ -32,20 +38,47 @@ export const calculationKindSchema = z.enum([
   "boolean",
 ]);
 
+// Deterministic result unit from the program DSL. Absent from older servers, where the
+// client falls back to guessing from the step kind and operands.
+export const unitKindSchema = z.enum([
+  "currency",
+  "percent",
+  "ratio",
+  "count",
+  "per_share",
+  "unitless",
+]);
+
+export const calculationUnitSchema = z.object({
+  kind: unitKindSchema,
+  currency: z
+    .string()
+    .regex(/^[A-Z]{3}$/)
+    .nullable()
+    .optional(),
+  scale: z
+    .enum(["thousand", "million", "billion", "trillion"])
+    .nullable()
+    .optional(),
+  display: z.enum(["amount", "percent", "ratio", "boolean"]),
+});
+
 export const calculationStepSchema = z.object({
-  index: z.number().int().nonnegative(),
+  index: count,
   op: z.string().max(64),
   operands: z.array(calculationOperandSchema).max(64),
   result: decimalString,
   kind: calculationKindSchema.nullable().optional(),
   citation_ids: z.array(z.string().max(200)).max(64).default([]),
   evidence_backed: z.boolean().default(false),
+  unit: calculationUnitSchema.nullable().optional(),
 });
 
 export const calculationSchema = z.object({
   steps: z.array(calculationStepSchema).max(16),
   result: decimalString,
   citation_ids: z.array(z.string().max(200)).max(64),
+  unit: calculationUnitSchema.nullable().optional(),
 });
 
 export const verificationStatusSchema = z.enum([
@@ -58,25 +91,41 @@ export const verificationStatusSchema = z.enum([
 export const verificationSchema = z.object({
   status: verificationStatusSchema,
   mode: z.enum(["off", "flag", "enforce"]),
-  checked_numbers: z.number().int().nonnegative().default(0),
+  checked_numbers: count.default(0),
+  // Empty on abstained answers: the rejected draft is never sent.
   unsupported_numbers: z.array(z.string().max(200)).max(64).default([]),
   reasons: z.array(shortText).max(32).default([]),
   verifier: shortText.nullable().optional(),
   verifier_score: z.number().finite().nullable().optional(),
 });
 
-export const abstentionFeaturesSchema = z.object({
-  hit_count: z.number().int().nonnegative(),
-  top_score: z.number().finite().nullable().optional(),
-  mean_score: z.number().finite().nullable().optional(),
-  citation_coverage: z.number().finite().nullable().optional(),
-  checked_numbers: z.number().int().nonnegative().default(0),
-  unsupported_numbers: z.number().int().nonnegative().default(0),
-  verification_status: verificationStatusSchema.default("skipped"),
-  verifier_score: z.number().finite().nullable().optional(),
-  tool_calls: z.number().int().nonnegative().default(0),
-  tool_errors: z.number().int().nonnegative().default(0),
-});
+// Older servers sent the count as `unsupported_numbers`; it is read as the new field.
+function legacyFeatures(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
+  const { unsupported_numbers: legacy, ...rest } = raw as Record<
+    string,
+    unknown
+  >;
+  return "unsupported_number_count" in rest || typeof legacy !== "number"
+    ? rest
+    : { ...rest, unsupported_number_count: legacy };
+}
+
+export const abstentionFeaturesSchema = z.preprocess(
+  legacyFeatures,
+  z.object({
+    hit_count: count,
+    top_score: z.number().finite().nullable().optional(),
+    mean_score: z.number().finite().nullable().optional(),
+    citation_coverage: z.number().finite().nullable().optional(),
+    checked_numbers: count.default(0),
+    unsupported_number_count: count.default(0),
+    verification_status: verificationStatusSchema.default("skipped"),
+    verifier_score: z.number().finite().nullable().optional(),
+    tool_calls: count.default(0),
+    tool_errors: count.default(0),
+  }),
+);
 
 export const abstentionDecisionSchema = z.object({
   abstained: z.boolean(),
@@ -94,18 +143,55 @@ export const answerSchema = z.object({
   generation_ms: z.number().nonnegative().finite(),
   request_id: z.string().min(1).max(200),
   model: z.string().max(500),
-  tool_calls: z.number().int().nonnegative().default(0),
+  tool_calls: count.default(0),
   calculation: calculationSchema.nullable().default(null),
   calculations: z.array(calculationSchema).max(16).default([]),
   verification: verificationSchema.nullable().default(null),
   abstention: abstentionDecisionSchema.nullable().default(null),
 });
 
+export const activityKindSchema = z.enum([
+  "planning",
+  "retrieval",
+  "generation",
+  "calculator",
+  "evidence_search",
+  "tool_check",
+  "citation_validation",
+  "grounding_verification",
+]);
+
+// Client-safe plan digest on the completed planning activity: an allowlist, never prompts.
+export const planSummarySchema = z.object({
+  intent: z.enum([
+    "lookup",
+    "compare",
+    "ratio",
+    "change",
+    "percent_change",
+    "aggregate",
+  ]),
+  route: z.enum([
+    "retrieve",
+    "direct_answer",
+    "clarify",
+    "refuse_out_of_scope",
+  ]),
+  subquestion_count: count.max(64),
+  subquestions: z.array(z.string().max(200)).max(4).default([]),
+  companies: z.array(z.string().max(64)).max(8).default([]),
+  periods: z.array(z.string().max(64)).max(8).default([]),
+});
+
 export const activitySchema = z.object({
   stage: z.enum(["planning", "retrieval", "generation", "tool", "validation"]),
   status: z.enum(["started", "completed"]),
+  // The server sends a fixed set of labels; display text only, never a key.
   label: z.string().max(160),
   tool: z.enum(["calculator", "search_evidence"]).nullable().optional(),
+  // Absent from older servers; see activityKind() in grounding.ts.
+  kind: activityKindSchema.optional(),
+  plan: planSummarySchema.nullable().optional(),
 });
 
 export const evidenceSchema = z.object({

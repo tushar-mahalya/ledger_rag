@@ -10,7 +10,17 @@ import structlog
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.contracts import Provider
-from ledger_rag.core.models import Hit, Principal, Profile, QueryRequest
+from ledger_rag.core.models import (
+    MAX_PLAN_ENTITIES,
+    MAX_PLAN_ENTITY_CHARS,
+    MAX_PLAN_SUBQUESTION_CHARS,
+    MAX_PLAN_SUBQUESTIONS,
+    Hit,
+    PlanSummary,
+    Principal,
+    Profile,
+    QueryRequest,
+)
 from ledger_rag.planning.analysis import Gazetteer, QueryAnalysis, analyze
 from ledger_rag.planning.decisions import (
     Decision,
@@ -61,6 +71,35 @@ class QueryPlan:
             "rag.plan.analysis_confidence": self.analysis.confidence,
             "rag.plan.ms": round(self.elapsed_ms, 3),
         }
+
+    def client_summary(self) -> PlanSummary:
+        """Client-safe digest for the planning activity: an allowlist with bounded sizes.
+
+        Excludes prompts, history, confidences, decision sources and timings.
+        """
+        periods = [str(year) for year in self.analysis.years]
+        periods += [quarter.upper() for quarter in self.analysis.quarters]
+        return PlanSummary(
+            intent=self.analysis.operation,
+            route=self.decision.route,
+            subquestion_count=min(len(self.subqueries), 64),
+            subquestions=[
+                _clip(question, MAX_PLAN_SUBQUESTION_CHARS)
+                for question in self.subqueries[:MAX_PLAN_SUBQUESTIONS]
+            ],
+            companies=[
+                _clip(company, MAX_PLAN_ENTITY_CHARS)
+                for company in self.analysis.companies[:MAX_PLAN_ENTITIES]
+            ],
+            periods=[
+                _clip(period, MAX_PLAN_ENTITY_CHARS) for period in periods[:MAX_PLAN_ENTITIES]
+            ],
+        )
+
+
+def _clip(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "\u2026"
 
 
 def fingerprint(query: QueryRequest) -> str:

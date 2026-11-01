@@ -94,24 +94,20 @@ payloads without them still parse; the surfaces simply do not render.
 
 | Surface | Behavior |
 |---|---|
-| Calculation trace | Collapsed `<details>` per answer. Each step reads as `subtract(“USD 150 million” [C1], “USD 120 million” [C2]) = USD 30 million`. Evidence chips open the cited source and highlight the quoted span; step refs (`#0`) focus the earlier step; constants are dashed and labelled. The final result shows its kind and the exact backend value. |
-| Verification badge | Footer pill (Verified, Unverified, Failed, Skipped) with groundedness score when present. Its disclosure lists mode, checked count, unsupported numbers and reasons; Escape or outside focus closes it. |
+| Calculation trace | Collapsed `<details>` per answer. Each step reads as `subtract(“USD 150 million” [C1], “USD 120 million” [C2]) = USD 30 million`. Evidence chips open the cited source and highlight the quoted span; step refs (`#0`) focus the earlier step; constants are dashed and labelled. Units, currency and scale come from the backend `unit` on each step and on the result, so a figure is never re-scaled by guesswork. The final result shows its unit and the exact backend value. |
+| Verification badge | Footer pill (Verified, Unverified, Failed, Skipped) with groundedness score when present. Its disclosure lists mode, checked count, unsupported numbers and reasons; Escape or outside focus closes it. When enforce mode withheld the draft, it reports how many numbers failed (`unsupported_number_count`) without showing them. |
 | Unsupported numbers | Only for non-verified, non-abstained answers: exact mentions from `unsupported_numbers` are wrapped in `<mark>` through a remark plugin, never in links or code, with screen-reader text. |
 | Abstention | Calm notice with reasons, a "Thresholds uncalibrated" note when `calibrated` is false, and rephrasing tips. The trace is hidden because the backend clears the citations it references. |
-| Timeline | Started/completed pairs fold into one row per step, with icons for planning, retrieval, generation, tools and validation (including "Verifying grounding"). |
+| Timeline | Started/completed pairs fold into one row per operation, keyed and iconed by activity `kind` (so "Verifying grounding" is distinct from citation validation). The completed planning row expands into the plan digest: intent, route, sub-questions, companies and periods. |
 
 The demo mode includes a verified three-step growth calculation, verified
 comparison and liquidity answers, and an abstained forecast question. The demo
 texts were checked against the backend number checker. Contract fixtures in
-`web/src/fixtures/answers.json` are dumped from the pydantic models with
-`run_program` and `check_numbers`; regenerate them with `uv run --frozen python`
-when the models change.
-
-Known contract gaps: `Calculation` has no unit or currency field, so the display
-is inferred from the step kind and operand scale. `rag.plan.*` details are not
-sent to the client. "Verifying grounding" shares the `validation` stage and is
-distinguishable only by label. `abstention.features.unsupported_numbers` is a
-count, while `verification.unsupported_numbers` is a list.
+`web/src/fixtures/answers.json` are produced by running the real chat pipeline
+offline. Regenerate them, with the JSON Schema used by the bound-parity test, via
+`uv run --frozen python scripts/dump_contract_fixtures.py` when the models change
+(`--check` fails when they are stale). The wire contract, including units, activity
+kinds, the plan digest and size bounds, is specified in [CHAT_API](CHAT_API.md).
 
 ## Design research and rationale
 
