@@ -235,6 +235,24 @@ def test_single_attempt_discards_partial_200_stream_after_read_timeout() -> None
     assert retries == 0 and failures == 1
 
 
+def test_full_dev_sampling_and_paired_exact_tolerant_metrics_are_distinct() -> None:
+    from ledger_rag.evaluation.uncertainty import paired_cluster_difference
+
+    cases = [Case(str(index), "?", "d", "ACME", [], 1.0, "") for index in range(883)]
+    full = stratified_sample(cases, 883, 13)
+    assert len(full) == len({case.id for case in full}) == 883
+    assert full == cases and len(stratified_sample(cases, 200, 13)) == 200
+    clusters = {"a": "report-a", "b": "report-b"}
+    exact = paired_cluster_difference(
+        {"a": 0.0, "b": 1.0}, {"a": 1.0, "b": 1.0}, clusters, seed=13, samples=200
+    )
+    tolerant = paired_cluster_difference(
+        {"a": 1.0, "b": 1.0}, {"a": 1.0, "b": 1.0}, clusters, seed=13, samples=200
+    )
+    assert exact["delta"] == 0.5 and tolerant["delta"] == 0.0
+    assert exact["n"] == tolerant["n"] == 2
+
+
 def test_probe_waits_for_cold_start_and_fails_fast_on_auth() -> None:
     calls: list[str] = []
 

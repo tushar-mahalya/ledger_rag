@@ -106,13 +106,14 @@ case remained in the denominator. Thus status counters contain 1,200 HTTP 200
 events plus one transport-error event, not 1,201 requests. This is not a zero-failure
 run. CPU answer-worker time was 288.2 seconds.
 
-**Selection remains pending separate approval:** recommend the best retrieved
+**At pilot completion, selection required separate approval:** recommend the best retrieved
 point-estimate arm, `qwen:low/retrieved@5`, plus the best oracle diagnostic arm,
 `qwen:low/oracle`. Literal top-two raw scores would instead select both oracle
 arms; that would not measure end-to-end retrieved QA. Conservative admission for
 the recommended 1,766 full-dev completions is approximately 2,346.648 seconds
 using the larger pilot p95, concurrency 32, 1,200-second readiness allowance and
-300-second cleanup allowance. No full-dev job has been launched.
+300-second cleanup allowance. That separately authorized full-dev measurement is
+reported below; the pilot itself did not include a full-dev run.
 
 These are dev-pilot heuristic numeric scores, not official FinQA program-execution
 accuracy, entailment, financial-advice certification or held-out results. Arm order
@@ -166,6 +167,101 @@ evidence are under `.scratch`; the manifest is `open-model-pilot.json`, summary
 `open-model-pilot-summary.json`, reports `approved-pilot-report.json` and
 `approved-benchmark.json`. Reports are retained, never printed with raw questions,
 documents, prompts or replies.
+
+## Measured selected full-dev arms (2026-11-01)
+
+Selection was explicitly approved **after** the pilot, at
+**2026-11-01T12:57:44Z**: best real-retrieved point estimate (`qwen:low/retrieved@5`)
+plus best oracle diagnostic (`qwen:low/oracle`), not literal top-two raw oracle
+scores. This is post-pilot **dev selection**, not a preregistered or test-tuned result.
+All **883 dev questions / 224 report clusters** were then evaluated for each arm,
+not just the pilot subset. The held-out test split remains sealed.
+
+The second attached ephemeral App, `ap-OKgsunQIvScWNfjyKiAVqm`, ran from 12:58 UTC
+until **13:06:57 UTC**, elapsed **517.879 seconds** versus a 4,500-second cap and
+2,346.648-second conservative forecast. Source Git:
+`e6766556dbb35eff0b4f6d89610bbd30d4b93619`. Evaluation-source hash and all model,
+prompt, corpus and saved-context identities match the pilot; intervening changes
+were documentation/tests. No benchmark rerun, ingestion, retraining, migration,
+deployment or extra account was used.
+
+| Selected arm | Exact [95% CI] | Tolerant [95% CI] | Format failure | Coverage |
+| --- | --- | --- | ---: | ---: |
+| low / retrieved@5 | .5889 [.5469, .6296] | .6127 [.5718, .6532] | .0034 | .9570 |
+| low / oracle | .7248 [.6885, .7596] | .7463 [.7129, .7785] | .0011 | .9694 |
+
+Both have exactly **883 completions / 883 HTTP requests / zero provider failures /
+zero retries**; combined total 1,766. Numeric/format failures remain in the
+denominators. There were three format failures in retrieved@5 and one in oracle.
+Generation p50/p95 was **5.708 / 18.782 seconds** for retrieved@5 and
+**4.474 / 11.153 seconds** for oracle. CPU worker times were 331.5 and 159.2 seconds;
+readiness waits were 110.2 seconds for the first cold arm and 0.7 seconds for the
+second warm arm. These batch timings do not establish voice latency.
+
+Paired **oracle minus retrieved@5** differences over identical cases, using
+2,000 report-cluster bootstrap replicates, seed 13:
+
+- **Exact:** +.1359, 95% CI [.0979, .1712].
+- **Tolerant:** +.1336, 95% CI [.0981, .1683].
+
+This leaves a material retrieved-to-oracle gap, but oracle quality itself is
+imperfect. Context rendering and generation differ between the modes; the gap
+does not prove a retrieval-only cause. The selected full-dev scores are lower
+than the pilot point estimates, reinforcing the limitation of pilot/dev selection.
+These heuristic numeric scores are **not official FinQA program-execution scores,
+held-out test evidence, SOTA evidence, entailment or financial-advice certification**.
+
+### Full-dev report identities and shutdown
+
+- Retrieved@5 run `84cf8232546e457397d40f48e04b75ce`, stored at
+  `ledger-data:/evaluation/84cf8232546e457397d40f48e04b75ce.json`;
+  report SHA-256 `1110ffca344b71adb8d0b41ed2595b09550f79208964bdb543c7ed646137af34`.
+- Oracle run `dcdfd41f28794c1182bc92be1ea77819`, stored at
+  `ledger-data:/evaluation/dcdfd41f28794c1182bc92be1ea77819.json`;
+  report SHA-256 `69fa1f5f3e356f1243bd6ae1fd671001b88ef0cd2e1812e78a38423b748c0113`.
+- Shared full-dev sample-ID SHA-256:
+  `5af3147bb99c17a94dc99510fff26f525d6393ffa4dde7058f1fe0fea6a59642`.
+  Both record the corpus hash `9b455b1b21167b4fee7592f9cc2a68e5d12a336473156137b5ef0692e442ae9d`
+  and source-context hash `be337ed346c960c2f1249cb4fdc725b868d8ea06f76875138a205bd48f492748`.
+
+Read-only App status verified **stopped / zero tasks**, and all three registered
+functions verified **zero runners / zero running inputs** after cancellation and
+App-context exit. Both session Apps are stopped; the untouched persistent serving
+App also remains at zero tasks. This is measured normal-completion cleanup, not
+an additional paid failure-injection/deadline-expiry test.
+
+### Final session accounting and reservation
+
+Snapshot captured **2026-11-01T13:11:25Z**. Second-App accrued resource costs:
+H100 **$0.54641617**, CPU **$0.06537907**, memory **$0.07964439**, egress
+**$0.00088541**, total **$0.69232504**. Combined per-App accrued reports:
+**$1.74530226**. The workspace monthly metered summary instead reports
+**$2.07154255**, with ephemeral-App breakdown **$2.07103178**. The views still do
+not fully reconcile; use **$2.08** as conservative observed session accounting
+pending reconciliation. This is accrued usage, **not a settled per-run invoice**;
+credit adjustments do not redefine gross spending authorization.
+
+Actual elapsed time across both phases was **1,304.513 seconds**. The second
+phase deliberately added **$1.37 prior observed spending** on top of the retained
+pilot reservation, conservatively double-counting it rather than refunding.
+The unchanged cumulative admission ledger now records:
+
+- reserved elapsed caps **9,000 seconds**;
+- reserved spending **$24.9812** plus prior allowance **$1.37**;
+- committed admission exposure **$26.3512**, leaving **$1.6488 contingency**;
+- **zero remaining elapsed admission** and **no further paid jobs authorized**.
+
+Reservations are not actual billed expenditure. Neither early finish caused a
+ledger reset/refund. Further training, deployments, account switching or test
+unsealing require a new explicit scope; these measurements do not justify
+unbounded spending or a SOTA claim.
+
+Retained artifacts: `.scratch/open-model-full-dev.json` (manifest),
+`.scratch/open-model-full-dev-summary.json` (sanitized summary),
+`.scratch/full-dev-retrieved-report.json`, `.scratch/full-dev-oracle-report.json`,
+`.scratch/full-dev-paired-statistics.json`, selection/admission metadata and
+timestamped billing/shutdown snapshots. The pilot artifacts and
+`.scratch/modal-budget-session.json` are also retained unchanged.
 
 ## Bounded open-model workflow
 
@@ -247,12 +343,14 @@ in an approved selection file. Use `--selected-pairs <file>` and a fresh manifes
 the persistent ledger counts the first reservation too. Re-admit with measured
 conservative runtime `2 * 883 * pilot_p95_seconds / 32 + 1200 + 300` within the
 remaining elapsed/spend allowance; otherwise defer. No automatic pilot selection
-or test unsealing is implemented.
+or test unsealing is implemented. This two-arm scope was separately approved and
+completed as measured above; no further elapsed admission remains in this session.
 
-**Remaining blockers:** exact full-dev arm selection and separate phase approval;
-full-dev answer results, billing-view/invoice reconciliation and remote validation
-of failure/deadline shutdown paths if independently authorized. Composed endpoint
-hydration and normal-completion container shutdown were verified in the pilot.
+**Remaining release gates:** official-scoring/held-out reporting under a separately
+frozen configuration, billing-view/invoice reconciliation and remote validation
+of failure/deadline shutdown paths if independently authorized. Pilot and selected
+full-dev measurements are complete; no further paid phase is authorized here.
+Composed endpoint hydration and normal-completion container shutdown were verified.
 Existing secret projections are the execution prerequisite;
 Vault workload identity is not yet wired into these serving jobs.
 
