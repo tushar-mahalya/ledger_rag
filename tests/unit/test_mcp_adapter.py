@@ -262,3 +262,51 @@ async def test_oidc_mcp_audience_scopes_and_expiration(settings: Settings) -> No
             await adapter.auth.authenticate("Bearer " + token(**changes))
         assert error.value.status_code == code
     assert adapter.metadata()["authorization_servers"] == ["https://issuer.example"]
+
+
+async def test_mcp_deadline_cancels_work_releases_slots_and_sanitizes_failures(
+    settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    configured = enabled(settings).model_copy(update={"query_deadline_seconds": 0.2})
+    app = create_app(configured, MemoryRetriever(), FakeProvider([]))
+    cancelled = asyncio.Event()
+    async with app.router.lifespan_context(app):
+
+        async def slow(query: object, principal: Principal) -> tuple[list, float]:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+            return [], 0
+
+        app.state.runtime.service.retrieve = slow
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "search_evidence", "arguments": {"question": "Revenue"}},
+        }
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            response = await client.post("/mcp", headers=HEADERS, json=body)
+            assert response.status_code == 504 or response.json()["result"]["isError"]
+            assert cancelled.is_set()
+            assert app.state.runtime.slots._value == settings.max_concurrent_queries
+
+            async def broken(query: object, principal: Principal) -> tuple[list, float]:
+                raise RuntimeError("private-document-and-secret-value")
+
+            app.state.runtime.service.retrieve = broken
+            response = await client.post("/mcp", headers=HEADERS, json=body)
+            assert response.json()["result"]["isError"]
+            assert "private-document-and-secret-value" not in response.text
+            logs = capsys.readouterr()
+            assert "private-document-and-secret-value" not in logs.out + logs.err
+            assert app.state.runtime.slots._value == settings.max_concurrent_queries
+
+
+def test_mcp_rejects_oversize_body(settings: Settings) -> None:
+    with TestClient(create_app(enabled(settings), MemoryRetriever(), FakeProvider([]))) as client:
+        response = client.post("/mcp", headers=HEADERS, content="x" * 65537)
+        assert response.status_code == 413

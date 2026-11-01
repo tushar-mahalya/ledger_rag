@@ -67,7 +67,8 @@ Each stateless external tool call is one new bounded turn; budgets do not span
 separate HTTP calls. Use gateway quotas for aggregate/distributed limits.
 
 Invalid schemas, unavailable external services and deadlines return
-`isError=true` with sanitized content. Unexpected retriever/provider exceptions
+`isError=true` with sanitized content (an overall HTTP deadline returns a fixed
+504, or closes an already-started response). Unexpected retriever/provider exceptions
 return a fixed service error, without raw documents, URLs or exception details.
 Cancelled work releases its concurrency slot and provider breaker probe.
 

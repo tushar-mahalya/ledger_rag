@@ -23,7 +23,7 @@ from mcp.types import (
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.types import Receive, Scope, Send
+from starlette.types import Message, Receive, Scope, Send
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import Citation, Principal, QueryRequest
@@ -44,10 +44,12 @@ class SearchArguments(BaseModel):
     top_k: int = Field(default=5, ge=1, le=10)
 
 
-@dataclass(frozen=True)
+@dataclass
 class CallContext:
     service: RagService
     principal: Principal
+    task: asyncio.Task[Any] | None = None
+    closed: bool = False
 
 
 _context: ContextVar[CallContext] = ContextVar("mcp_call_context")
@@ -89,6 +91,18 @@ async def call_tool(
     ctx: ServerRequestContext[Any], params: CallToolRequestParams
 ) -> CallToolResult:
     context = _context.get()
+    if context.closed:
+        return CallToolResult(
+            content=[TextContent(type="text", text='{"error":"Request is closed"}')], is_error=True
+        )
+    context.task = asyncio.current_task()
+    try:
+        return await run_tool(context, params)
+    finally:
+        context.task = None
+
+
+async def run_tool(context: CallContext, params: CallToolRequestParams) -> CallToolResult:
     try:
         async with request_deadline(context.service.settings.query_deadline_seconds):
             if params.name == "search_evidence":
@@ -179,6 +193,14 @@ class MCPAdapter:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         request = Request(scope, receive)
         state = request.app.state.runtime
+        started = False
+
+        async def guarded_send(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
         try:
             origin = request.headers.get("origin")
             if origin is not None and origin not in self.settings.mcp_allowed_origins:
@@ -192,11 +214,17 @@ class MCPAdapter:
             except TimeoutError:
                 raise HTTPException(503, "Service is at capacity") from None
             try:
-                token = _context.set(CallContext(state.service, principal))
+                context = CallContext(state.service, principal)
+                token = _context.set(context)
                 try:
                     async with request_deadline(self.settings.query_deadline_seconds):
-                        await self.manager.handle_request(scope, receive, send)
+                        await self.manager.handle_request(scope, receive, guarded_send)
                 finally:
+                    context.closed = True
+                    task = context.task
+                    if task is not None and task is not asyncio.current_task():
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
                     _context.reset(token)
             finally:
                 state.slots.release()
@@ -210,6 +238,11 @@ class MCPAdapter:
             await JSONResponse(
                 {"detail": error.detail}, status_code=error.status_code, headers=headers
             )(scope, receive, send)
+        except TimeoutError:
+            if not started:
+                await JSONResponse({"detail": "MCP request deadline exceeded"}, status_code=504)(
+                    scope, receive, send
+                )
 
 
 class MCPRoute:
