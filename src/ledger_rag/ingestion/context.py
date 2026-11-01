@@ -242,6 +242,8 @@ def _clip(text: str, limit: int) -> str:
 
 SUMMARY_MODEL = "gemini-3.5-flash-lite"
 SUMMARY_PROMPT_VERSION = "s1"
+# Recorded in v3 collection metadata so serving can detect a stale summary cache.
+SUMMARY_VERSION = f"{SUMMARY_PROMPT_VERSION}/{SUMMARY_MODEL}"
 SUMMARY_SYSTEM = (
     "You summarize one page of an SEC 10-K filing for a search index. Write at most "
     "three sentences (under 80 words) naming the topics, line items, segments and "

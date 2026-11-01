@@ -21,6 +21,8 @@ services:
       LEDGER_RETRIEVAL_BACKEND: qdrant
       LEDGER_QDRANT_URL: ${LEDGER_QDRANT_URL:-http://qdrant:6333}
       LEDGER_QDRANT_COLLECTION: ${LEDGER_QDRANT_COLLECTION:-ledger_chunks}
+      LEDGER_CHUNK_PROFILE: ${LEDGER_CHUNK_PROFILE:-v1}
+      LEDGER_CHUNK_SUMMARY_VERSION: ${LEDGER_CHUNK_SUMMARY_VERSION:-}
       LEDGER_SECRETS_DIR: /run/ledger-secrets
       LEDGER_OTLP_ENDPOINT: http://otel-collector:4318
     volumes: !override

@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # Instruction prefix some embedding models expect on queries only (e.g. BGE, E5, Arctic).
     embedding_query_prefix: str = Field(default="", max_length=200)
     retrieval_fusion: Literal["hybrid", "dense", "sparse"] = "hybrid"
+    # Chunk profile the Qdrant collection was built with; checked against its metadata.
+    chunk_profile: Literal["v1", "v2", "v3"] = "v1"
+    # Summary cache version (``<prompt>/<model>``) a v3 collection was built from.
+    chunk_summary_version: str = Field(default="", max_length=128, pattern=r"^[a-zA-Z0-9._:/@+-]*$")
     embedding_batch_size: int = Field(default=32, ge=1, le=2048)
     qdrant_quantization: Literal["none", "scalar", "binary"] = "none"
     qdrant_oversampling: float = Field(default=2.0, ge=1.0, le=16.0)
@@ -113,6 +117,10 @@ class Settings(BaseSettings):
         ]:
             if endpoint:
                 validate_service_url(endpoint)
+        if self.chunk_profile == "v3" and not self.chunk_summary_version:
+            raise ValueError("Chunk profile v3 requires LEDGER_CHUNK_SUMMARY_VERSION")
+        if self.chunk_profile != "v3" and self.chunk_summary_version:
+            raise ValueError("LEDGER_CHUNK_SUMMARY_VERSION applies only to chunk profile v3")
         if self.auth_mode == "demo" and (
             self.demo_token is None or len(self.demo_token.get_secret_value()) < 8
         ):

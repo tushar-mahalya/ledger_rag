@@ -46,6 +46,14 @@ def _sparse(text: str, *, document: bool) -> models.SparseVector:
     return models.SparseVector(indices=indices, values=[weights[index] for index in indices])
 
 
+# Text formula each chunk profile embeds; v1 keeps its original identity value.
+CHUNK_TEXT = {"v1": "title-header-v1", "v2": "contextual-v2", "v3": "contextual-v3"}
+
+
+def _describe_profile(profile: object, summary_version: object) -> str:
+    return f"{profile} (summaries {summary_version})" if summary_version else str(profile)
+
+
 class QdrantRetriever:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -63,9 +71,9 @@ class QdrantRetriever:
         self._operation_lock = asyncio.Lock()
         self._write_uncertain = False
         self._staging_collection = False
-        self._identity = {
+        self._identity: dict[str, str | int] = {
             "ledger_schema": 2,
-            "chunk_text": "title-header-v1",
+            "chunk_text": CHUNK_TEXT[settings.chunk_profile],
             "embedding_model": settings.embedding_model,
             "embedding_endpoint": settings.embedding_base_url.rstrip("/"),
             "embedding_dimensions": settings.embedding_dimensions,
@@ -75,6 +83,11 @@ class QdrantRetriever:
             self._identity["ledger_schema"] = 3
             self._identity["embedding_space_id"] = settings.embedding_space_id
             del self._identity["embedding_endpoint"]
+        if settings.chunk_profile != "v1":
+            # v1 collections predate these keys, so their absence means v1.
+            self._identity["chunk_profile"] = settings.chunk_profile
+        if settings.chunk_summary_version:
+            self._identity["chunk_summary_version"] = settings.chunk_summary_version
 
     async def _create_collection(self) -> None:
         created = await self._client.create_collection(
@@ -124,6 +137,21 @@ class QdrantRetriever:
             await self._ensure_collection(create=False)
             return (await self._client.count(self._collection, exact=True)).count
 
+    def _check_chunk_identity(self, metadata: dict[str, object]) -> None:
+        stored = (
+            metadata.get("chunk_profile", "v1"),
+            metadata.get("chunk_summary_version", ""),
+        )
+        configured = (self._settings.chunk_profile, self._settings.chunk_summary_version)
+        if stored != configured:
+            raise RetrievalError(
+                f"Qdrant collection {self._collection!r} was built with chunk profile "
+                f"{_describe_profile(*stored)} but the service is configured for "
+                f"{_describe_profile(*configured)}; set LEDGER_CHUNK_PROFILE and "
+                "LEDGER_CHUNK_SUMMARY_VERSION to match the collection or point "
+                "LEDGER_QDRANT_COLLECTION at a matching collection"
+            )
+
     async def _ensure_collection(self, *, create: bool) -> None:
         async with self._lock:
             if create and not await self._client.collection_exists(self._collection):
@@ -132,6 +160,7 @@ class QdrantRetriever:
             vectors = info.config.params.vectors
             sparse = info.config.params.sparse_vectors
             metadata = info.config.metadata
+            self._check_chunk_identity(metadata or {})
             if (
                 not isinstance(vectors, dict)
                 or "dense" not in vectors

@@ -626,3 +626,66 @@ async def test_embedding_requests_are_sub_batched_in_order() -> None:
     await retriever.upsert(chunks)
     assert [len(json.loads(r.content)["input"]) for r in requests] == [2, 2, 1]
     assert json.loads(requests[2].content)["input"] == ["Results\ntext 4"]
+
+
+async def profiled_store(
+    profile: str, summary_version: str = "", *, collection_metadata: dict[str, Any]
+) -> QdrantRetriever:
+    retriever, client, _ = await store()
+    retriever._settings = retriever._settings.model_copy(
+        update={"chunk_profile": profile, "chunk_summary_version": summary_version}
+    )
+    client.get_collection.return_value.config.metadata = collection_metadata
+    return retriever
+
+
+async def test_v1_identity_stays_compatible_with_legacy_collections() -> None:
+    retriever, _, _ = await store()
+    assert "chunk_profile" not in retriever._identity
+    assert "chunk_summary_version" not in retriever._identity
+    await retriever._ensure_collection(create=False)
+    await retriever.close()
+
+
+def test_contextual_profiles_extend_the_collection_identity() -> None:
+    base = {
+        "demo_token": SecretStr("demo-test-token"),
+        "retrieval_backend": "qdrant",
+        "embedding_api_key": SecretStr("embedding-secret"),
+    }
+    v2 = QdrantRetriever(Settings(**base, chunk_profile="v2"))
+    assert v2._identity["chunk_text"] == "contextual-v2"
+    assert v2._identity["chunk_profile"] == "v2"
+    assert "chunk_summary_version" not in v2._identity
+    v3 = QdrantRetriever(
+        Settings(**base, chunk_profile="v3", chunk_summary_version="s1/gemini-3.5-flash-lite")
+    )
+    assert v3._identity["chunk_text"] == "contextual-v3"
+    assert v3._identity["chunk_summary_version"] == "s1/gemini-3.5-flash-lite"
+
+
+async def test_profile_mismatch_fails_closed_with_actionable_error() -> None:
+    legacy, _, _ = await store()
+    retriever = await profiled_store("v2", collection_metadata=dict(legacy._identity))
+    with pytest.raises(RetrievalError, match=r"chunk profile v1 .* configured for v2"):
+        await retriever._ensure_collection(create=False)
+    await retriever.close()
+    await legacy.close()
+
+
+async def test_summary_version_mismatch_fails_closed() -> None:
+    built = await profiled_store("v3", "s1/model-a", collection_metadata={})
+    stale = dict(built._identity, chunk_profile="v3", chunk_summary_version="s0/model-a")
+    retriever = await profiled_store("v3", "s1/model-a", collection_metadata=stale)
+    with pytest.raises(RetrievalError, match=r"summaries s0/model-a"):
+        await retriever._ensure_collection(create=False)
+    await retriever.close()
+    await built.close()
+
+
+def test_summary_version_is_required_exactly_for_v3() -> None:
+    base = {"demo_token": SecretStr("demo-test-token")}
+    with pytest.raises(ValueError, match="requires LEDGER_CHUNK_SUMMARY_VERSION"):
+        Settings(**base, chunk_profile="v3")
+    with pytest.raises(ValueError, match="applies only to chunk profile v3"):
+        Settings(**base, chunk_profile="v2", chunk_summary_version="s1/model")

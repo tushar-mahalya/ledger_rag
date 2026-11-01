@@ -79,6 +79,7 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
     from ledger_rag.core.config import Settings
     from ledger_rag.evaluation.benchmarks.finqa import DATASET_COMMIT, load
     from ledger_rag.ingestion.bulk import ingest_documents, jsonl_documents
+    from ledger_rag.ingestion.context import SUMMARY_VERSION
     from ledger_rag.ingestion.tei import TEI_URL, embedding_server
     from ledger_rag.observability.telemetry import configure_telemetry
     from ledger_rag.retrieval.qdrant import QdrantRetriever
@@ -89,6 +90,7 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
     if urlsplit(url).scheme != "https" or not key.strip():
         raise ValueError("Cloud ingestion requires an HTTPS Qdrant URL and a nonempty API key")
     local_key = secrets.token_urlsafe(32)
+    summary_version = SUMMARY_VERSION if spec.chunk_profile == "v3" else ""
     settings = Settings(
         demo_token=SecretStr("offline-ingestion-no-api"),
         retrieval_backend="qdrant",
@@ -103,6 +105,8 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
         embedding_space_id=spec.embedding_space_id,
         embedding_dimensions=spec.dimensions,
         embedding_batch_size=spec.batch_size,
+        chunk_profile=spec.chunk_profile,
+        chunk_summary_version=summary_version,
         llm_timeout_seconds=120,
         query_deadline_seconds=120,
     )
@@ -157,6 +161,8 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
             "source": spec.source,
             "dataset_commit": DATASET_COMMIT if spec.source == "finqa" else None,
             "quantization": spec.quantization,
+            "chunk_profile": spec.chunk_profile,
+            "chunk_summary_version": summary_version or None,
             "status": "verified",
         }
         output = DATA / "ingestion" / f"{run_id}.json"

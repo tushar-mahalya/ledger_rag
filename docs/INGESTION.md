@@ -99,6 +99,13 @@ adding concurrency. `max_containers=1` is per function/app, not a global index l
 
 Each profile needs its own new collection. Never reuse a v1 collection name.
 
+The profile is part of the collection identity. Ingestion writes `chunk_text`,
+`chunk_profile` and, for v3, `chunk_summary_version` (`<prompt>/<model>`) into the
+collection metadata. Serving reads `LEDGER_CHUNK_PROFILE` and
+`LEDGER_CHUNK_SUMMARY_VERSION` and refuses to query a collection whose metadata
+disagrees, naming both profiles in the error. A missing `chunk_profile` key means
+`v1`, so existing v1 collections keep working unchanged.
+
 ```bash
 uv run --locked --group compute modal run compute/ingestion.py \
   --collection finqa_gte_modernbert_v2ctx_1 --chunk-profile v2 \
@@ -113,6 +120,13 @@ listed below; ADR 0002 has their run lineage.
 |---|---|---|---:|
 | `finqa_gte_modernbert_v2ctx_1` | gte-modernbert-base, 768-d | `3ad18a9d04494ee0b087b4916960634b` | 8,647 |
 | `finqa_qwen3emb_v2ctx_1` | Qwen3-Embedding-0.6B, 1024-d | `75b8926c58d8462f985e4b2183ebcf9f` | 8,647 |
+
+Both collections were built before profile identity existed, so their metadata still
+reads `chunk_text: title-header-v1` with no `chunk_profile` key. Before serving them
+with `LEDGER_CHUNK_PROFILE=v2`, set `chunk_text: contextual-v2` and
+`chunk_profile: v2` in place with Qdrant's update-collection `metadata` field.
+Serving and the FinQA benchmark both go through this check, so until the metadata
+is updated only the default `v1` setting opens these collections.
 
 `finqa_gte_modernbert_v2ctx` and `finqa_qwen3emb_v2ctx` (8,644 points each) indexed
 v2 text from before the review fixes. That text had no top-left table cells and missed
