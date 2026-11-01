@@ -72,8 +72,22 @@ Recorded provider fixtures are verified locally; a regression rejects any
 `api_key` occurrence or fixture credential value in their contents. The FRED
 credential-error fixture has its field spelling and documentation URL sanitized.
 The web demo labels its SEC/FRED replay as an example, not a live request.
-No live FRED verification, paid jobs or deployments were performed for this
-implementation. Live provider validation remains an explicit release check.
+### Scoped live verification
+
+Verification record `fred-live-20261101T124703Z` used the existing authorized
+Vault credential, with no secret provisioning, fixture recording or raw-value
+logging. Both FRED requests returned **HTTP 200**:
+
+- `FEDFUNDS` metadata: `realtime_start=realtime_end=2023-10-15`.
+- Observations: `observation_start=observation_end=2023-09-01`. The existing
+  client requested vintage history and selected only data known at the cutoff.
+- Selected publication/vintage date: **2023-10-02**, preceding the **2023-10-15**
+  cutoff. The resulting citation passed typed provenance, identity and
+  publication-cutoff validation.
+
+This verifies one tightly bounded historical observation, not every series,
+ongoing availability or real voice latency. Live SEC verification and broader
+provider coverage remain release checks. No paid jobs or deployments ran.
 
 Sources: [SEC APIs and fair access](https://www.sec.gov/search-filings/edgar-application-programming-interfaces),
 [FRED observations and real-time periods](https://fred.stlouisfed.org/docs/api/fred/series_observations.html).

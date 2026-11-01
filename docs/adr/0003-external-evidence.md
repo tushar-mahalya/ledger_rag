@@ -25,6 +25,8 @@ value is an explicit miss or sanitized failure.
 
 Chat gains traceable structured data without changing index identity. Public
 external responses may be cached, but tenant corpus data stays isolated.
-Replica-wide SEC/FRED quotas and authorized live provider verification remain
-release gates; local fixture parity is not a live availability measurement.
+Replica-wide SEC/FRED quotas, live SEC verification and broader FRED coverage
+remain release gates; local fixture parity is not a live availability measurement.
+The scoped FEDFUNDS live check documented below validates one historical
+observation's provenance and publication cutoff, not general availability.
 See [external evidence](../EXTERNAL_DATA.md) for bounds and sources.
