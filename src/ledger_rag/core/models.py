@@ -1,8 +1,15 @@
 from datetime import date
 from enum import StrEnum
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 
 class Profile(StrEnum):
@@ -10,11 +17,30 @@ class Profile(StrEnum):
     CHAT = "chat"
 
 
+MAX_SUBJECT_LENGTH = 256
+MAX_TENANT_LENGTH = 200
+MAX_CLAIM_VALUE_LENGTH = 256
+ClaimValue = Annotated[str, StringConstraints(min_length=1, max_length=MAX_CLAIM_VALUE_LENGTH)]
+
+
 class Principal(BaseModel):
-    subject: str
-    tenant_id: str
-    roles: list[str] = Field(default_factory=list)
-    groups: list[str] = Field(default_factory=list)
+    """Authenticated identity; values are bounded and roles/groups deduplicated in order.
+
+    List counts are bounded where untrusted claims enter (``security.auth``), not
+    here, because trusted evaluation principals legitimately hold many groups.
+    """
+
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    subject: str = Field(min_length=1, max_length=MAX_SUBJECT_LENGTH)
+    tenant_id: str = Field(min_length=1, max_length=MAX_TENANT_LENGTH)
+    roles: list[ClaimValue] = Field(default_factory=list)
+    groups: list[ClaimValue] = Field(default_factory=list)
+
+    @field_validator("roles", "groups")
+    @classmethod
+    def deduplicate(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(values))
 
 
 class Document(BaseModel):
@@ -81,15 +107,17 @@ class QueryRequest(BaseModel):
         return self
 
 
-ActivityStage = Literal["retrieval", "generation", "tool", "validation"]
+ActivityStage = Literal["planning", "retrieval", "generation", "tool", "validation"]
 ActivityTool = Literal["calculator", "search_evidence"]
 ActivityLabel = Literal[
+    "Planning query",
     "Retrieving evidence",
     "Generating answer",
     "Calculating",
     "Searching evidence",
     "Checking tool request",
     "Validating citations",
+    "Verifying grounding",
 ]
 
 
@@ -102,6 +130,76 @@ class Activity(BaseModel):
     tool: ActivityTool | None = None
 
 
+class CalculationOperand(BaseModel):
+    """A program input with provenance: an evidence span, a prior step or a constant."""
+
+    kind: Literal["evidence", "step", "constant"]
+    value: str
+    citation_id: str | None = None
+    quote: str | None = None
+    source_value: str | None = None
+    scale: str | None = None
+    unit: str | None = None
+    step: int | None = None
+
+
+CalculationKind = Literal["currency", "amount", "ratio", "percent", "boolean"]
+
+
+class CalculationStep(BaseModel):
+    index: int
+    op: str
+    operands: list[CalculationOperand]
+    result: str
+    # Additive provenance: ratio/percent/boolean results never support scaled amounts.
+    kind: CalculationKind | None = None
+    citation_ids: list[str] = Field(default_factory=list)
+    evidence_backed: bool = False
+
+
+class Calculation(BaseModel):
+    """A deterministic evidence-bound program trace; ``result`` is in base units."""
+
+    steps: list[CalculationStep]
+    result: str
+    citation_ids: list[str]
+
+
+VerificationStatus = Literal["verified", "unverified", "failed", "skipped"]
+
+
+class Verification(BaseModel):
+    status: VerificationStatus
+    mode: Literal["off", "flag", "enforce"]
+    checked_numbers: int = 0
+    unsupported_numbers: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+    verifier: str | None = None
+    verifier_score: float | None = None
+
+
+class AbstentionFeatures(BaseModel):
+    hit_count: int
+    top_score: float | None = None
+    mean_score: float | None = None
+    citation_coverage: float | None = None
+    checked_numbers: int = 0
+    unsupported_numbers: int = 0
+    verification_status: VerificationStatus = "skipped"
+    verifier_score: float | None = None
+    tool_calls: int = 0
+    tool_errors: int = 0
+
+
+class AbstentionDecision(BaseModel):
+    """Policy output and inputs; thresholds are uncalibrated until fitted on dev data."""
+
+    abstained: bool
+    reasons: list[str] = Field(default_factory=list)
+    features: AbstentionFeatures
+    calibrated: bool = False
+
+
 class Answer(BaseModel):
     answer: str
     citations: list[Citation]
@@ -112,6 +210,10 @@ class Answer(BaseModel):
     request_id: str
     model: str
     tool_calls: int = 0
+    calculation: Calculation | None = None
+    calculations: list[Calculation] = Field(default_factory=list)
+    verification: Verification | None = None
+    abstention: AbstentionDecision | None = None
 
 
 class IngestRequest(BaseModel):

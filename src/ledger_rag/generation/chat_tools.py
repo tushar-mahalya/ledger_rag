@@ -4,9 +4,16 @@ from typing import Any
 
 import structlog
 
-from ledger_rag.core.models import ActivityTool, Citation, Hit, Principal, QueryRequest
+from ledger_rag.core.models import (
+    ActivityTool,
+    Calculation,
+    Citation,
+    Hit,
+    Principal,
+    QueryRequest,
+)
 from ledger_rag.generation.evidence import citation_from_hit, evidence_payload
-from ledger_rag.generation.tools import calculate
+from ledger_rag.generation.program import ProgramError, program_tool_result, run_program
 from ledger_rag.orchestration.activity import ActivityCallback, activity
 
 Retrieve = Callable[[QueryRequest, Principal], Awaitable[tuple[list[Hit], float]]]
@@ -22,6 +29,7 @@ async def execute_tool(
     citations: list[Citation],
     evidence_ids: set[str],
     on_activity: ActivityCallback | None,
+    calculations: list[Calculation] | None = None,
 ) -> dict[str, Any]:
     name, arguments = call.get("name"), call.get("arguments")
     if not isinstance(arguments, dict):
@@ -33,11 +41,8 @@ async def execute_tool(
         and isinstance(arguments["question"], str)
         and 0 < len(arguments["question"].strip()) <= 4000
     )
-    allowed_calculator = (
-        name == "calculator"
-        and set(arguments) == {"expression"}
-        and isinstance(arguments["expression"], str)
-    )
+    # Program arguments are validated by run_program, which returns correctable errors.
+    allowed_calculator = name == "calculator" and isinstance(call.get("arguments"), dict)
     tool: ActivityTool | None = (
         "search_evidence" if allowed_search else "calculator" if allowed_calculator else None
     )
@@ -58,10 +63,18 @@ async def execute_tool(
             result = {"evidence": added, "exhausted": not bool(added)}
         elif allowed_calculator:
             try:
-                result = {"result": calculate(arguments["expression"])}
-            except ValueError as exc:
+                calculation = run_program(arguments, citations)
+            except ProgramError as exc:
                 result = {"error": str(exc)}
                 logger.warning("tool_input_rejected")
+            except (TypeError, ValueError, ArithmeticError, KeyError, IndexError) as exc:
+                # Defense in depth: malformed arguments must never become a 500.
+                result = {"error": "calculator arguments could not be parsed; check the schema"}
+                logger.warning("tool_input_rejected", error_class=type(exc).__name__)
+            else:
+                if calculations is not None:
+                    calculations.append(calculation)
+                result = program_tool_result(calculation)
         else:
             result = {"error": "Tool or arguments are not allowed"}
             logger.warning("tool_call_rejected")

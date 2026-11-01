@@ -1,9 +1,10 @@
-import type { Root, Link, Text } from "mdast";
+import type { Emphasis, Root, Link, Text } from "mdast";
 import { toString } from "mdast-util-to-string";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
+import { splitUnsupported } from "./grounding";
 
 export function remarkCitations() {
   return (tree: Root) => {
@@ -31,6 +32,39 @@ export function remarkCitations() {
       if (!parts.length) return;
       if (start < node.value.length)
         parts.push({ type: "text", value: node.value.slice(start) });
+      parent.children.splice(index, 1, ...parts);
+      return index + parts.length;
+    });
+  };
+}
+
+/** Wraps verifier-reported unsupported numbers in `<mark>` without touching links or code. */
+export function remarkUnsupported(numbers: string[]) {
+  return () => (tree: Root) => {
+    if (!numbers.length) return;
+    visit(tree, "text", (node, index, parent) => {
+      if (
+        index === undefined ||
+        !parent ||
+        parent.type === "link" ||
+        parent.type === "linkReference" ||
+        (parent as { data?: { hName?: string } }).data?.hName === "mark"
+      )
+        return;
+      const segments = splitUnsupported(node.value, numbers);
+      if (!segments.some((segment) => segment.unsupported)) return;
+      const parts: (Text | Emphasis)[] = segments.map((segment) =>
+        segment.unsupported
+          ? {
+              type: "emphasis",
+              data: {
+                hName: "mark",
+                hProperties: { className: ["unsupported-number"] },
+              },
+              children: [{ type: "text", value: segment.text }],
+            }
+          : { type: "text", value: segment.text },
+      );
       parent.children.splice(index, 1, ...parts);
       return index + parts.length;
     });

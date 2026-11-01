@@ -8,8 +8,14 @@ and database writes instead. The warm CPU query tier needs measured INT8 parity;
 Deploy::
 
     scripts/sync_modal_secrets.sh        # projects Vault's embedding key into Modal
-    LEDGER_EMBED_MODEL=/models/ledger-embedder/v0001 \
-        uv run --group compute modal deploy compute/inference.py
+    uv run --group compute modal deploy compute/inference.py
+    uv run --group compute modal run compute/inference.py::space_id  # LEDGER_EMBEDDING_SPACE_ID
+
+Hub models are pinned to immutable 40-character commits (``LEDGER_EMBED_REVISION``,
+``LEDGER_RERANK_REVISION``); branch or tag names are rejected at import so a moved
+``main`` can never silently change the served weights. A fine-tuned model on the
+``ledger-models`` volume (``LEDGER_EMBED_MODEL=/models/...``) takes no revision and
+has no derived space ID: label such a space explicitly after a compatibility check.
 
 Endpoints: ``https://<workspace>--ledger-inference-embed.modal.run/v1/embeddings`` and
 ``https://<workspace>--ledger-inference-rerank.modal.run/rerank`` (Bearer TEI_API_KEY).
@@ -18,6 +24,7 @@ Endpoints: ``https://<workspace>--ledger-inference-embed.modal.run/v1/embeddings
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 
 import modal
@@ -26,10 +33,39 @@ APP_NAME = "ledger-inference"
 # L4 and L40S are both Ada (sm_89) and share the TEI 89-* image; L4 is cheapest for a
 # ~150M encoder, L40S is the fallback when L4 capacity is short.
 GPUS = ["L4", "L40S"]
-TEI_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:89-1.8"
-EMBED_MODEL = os.environ.get("LEDGER_EMBED_MODEL", "Alibaba-NLP/gte-modernbert-base")
-EMBED_REVISION = os.environ.get("LEDGER_EMBED_REVISION", "")
-RERANK_MODEL = os.environ.get("LEDGER_RERANK_MODEL", "Alibaba-NLP/gte-reranker-modernbert-base")
+# Keep TEI_VERSION and the space-ID format identical to ledger_rag.ingestion (tested);
+# this module cannot import ledger_rag because the serving image does not ship it.
+TEI_VERSION = "1.8"
+TEI_IMAGE = f"ghcr.io/huggingface/text-embeddings-inference:89-{TEI_VERSION}"
+DEFAULT_EMBED = ("Alibaba-NLP/gte-modernbert-base", "e7f32e3c00f91d699e8c43b53106206bcc72bb22")
+DEFAULT_RERANK = (
+    "Alibaba-NLP/gte-reranker-modernbert-base",
+    "f7481e6055501a30fb19d090657df9ec1f79ab2c",
+)
+_COMMIT = re.compile(r"^[a-f0-9]{40}$")
+_HUB_ID = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
+
+
+def _pinned(model_var: str, revision_var: str, default: tuple[str, str]) -> tuple[str, str]:
+    model = os.environ.get(model_var, default[0])
+    revision = os.environ.get(revision_var, default[1] if model == default[0] else "")
+    if model.startswith("/models/") and ".." not in model.split("/"):
+        if revision:
+            raise ValueError(f"{revision_var} must be empty for volume model {model_var}")
+    elif not _HUB_ID.fullmatch(model):
+        raise ValueError(f"{model_var} must be a Hub ID or a /models/ volume path")
+    elif not _COMMIT.fullmatch(revision):
+        raise ValueError(f"{revision_var} must be an immutable 40-character commit SHA")
+    return model, revision
+
+
+EMBED_MODEL, EMBED_REVISION = _pinned("LEDGER_EMBED_MODEL", "LEDGER_EMBED_REVISION", DEFAULT_EMBED)
+RERANK_MODEL, RERANK_REVISION = _pinned(
+    "LEDGER_RERANK_MODEL", "LEDGER_RERANK_REVISION", DEFAULT_RERANK
+)
+EMBEDDING_SPACE_ID = (
+    f"tei-{TEI_VERSION}-float16:{EMBED_MODEL}@{EMBED_REVISION}" if EMBED_REVISION else ""
+)
 PORT = 8000
 
 image = (
@@ -42,6 +78,7 @@ image = (
             "LEDGER_EMBED_MODEL": EMBED_MODEL,
             "LEDGER_EMBED_REVISION": EMBED_REVISION,
             "LEDGER_RERANK_MODEL": RERANK_MODEL,
+            "LEDGER_RERANK_REVISION": RERANK_REVISION,
         }
     )
 )
@@ -51,13 +88,15 @@ cache_volume = modal.Volume.from_name("ledger-hf-cache", create_if_missing=True)
 SECRETS = [modal.Secret.from_name("ledger-tei", required_keys=["TEI_API_KEY"])]
 
 
-def _router(model_id: str, max_batch_tokens: int, revision: str = "") -> None:
+def _router(model_id: str, max_batch_tokens: int, revision: str) -> None:
     subprocess.Popen(
         [
             "text-embeddings-router",
             "--model-id",
             model_id,
-            *(["--revision", revision, "--dtype", "float16"] if revision else []),
+            *(["--revision", revision] if revision else []),
+            "--dtype",
+            "float16",
             "--port",
             str(PORT),
             "--api-key",
@@ -94,7 +133,15 @@ def embed() -> None:
 @modal.concurrent(max_inputs=64)
 @modal.web_server(port=PORT, startup_timeout=600)
 def rerank() -> None:
-    _router(RERANK_MODEL, 32768)
+    _router(RERANK_MODEL, 32768, RERANK_REVISION)
+
+
+@app.local_entrypoint()
+def space_id() -> None:
+    """Print the LEDGER_EMBEDDING_SPACE_ID matching the served embedding weights."""
+    if not EMBEDDING_SPACE_ID:
+        raise SystemExit("volume models have no derived space ID; label one explicitly")
+    print(EMBEDDING_SPACE_ID)
 
 
 @app.local_entrypoint()

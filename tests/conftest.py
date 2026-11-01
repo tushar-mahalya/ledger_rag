@@ -3,8 +3,21 @@ from datetime import date
 import pytest
 from pydantic import SecretStr
 
+from ledger_rag.core import retry
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import Document, Principal
+
+
+@pytest.fixture(autouse=True)
+def no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Record upstream retry backoff instead of sleeping."""
+    delays: list[float] = []
+
+    async def record(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(retry, "_sleep", record)
+    return delays
 
 
 @pytest.fixture

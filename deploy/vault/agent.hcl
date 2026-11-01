@@ -17,19 +17,19 @@ template_config {
   static_secret_render_interval = "1m"
 }
 template {
-  contents = "{{- with secret \"secret/data/ledger/api\" -}}{{ .Data.data.llm_api_key }}{{- end -}}"
+  contents = "{{- with secret \"secret/data/ledger/llm\" -}}{{ .Data.data.api_key }}{{- end -}}"
   destination = "/run/ledger-secrets/LEDGER_LLM_API_KEY"
   perms = "0600"
   error_on_missing_key = true
 }
 template {
-  contents = "{{- with secret \"secret/data/ledger/api\" -}}{{ .Data.data.embedding_api_key }}{{- end -}}"
+  contents = "{{- with secret \"secret/data/ledger/embedding\" -}}{{ .Data.data.api_key }}{{- end -}}"
   destination = "/run/ledger-secrets/LEDGER_EMBEDDING_API_KEY"
   perms = "0600"
   error_on_missing_key = true
 }
 template {
-  contents = "{{- with secret \"secret/data/ledger/api\" -}}{{ .Data.data.qdrant_api_key }}{{- end -}}"
+  contents = "{{- with secret \"secret/data/ledger/qdrant\" -}}{{ .Data.data.api_key }}{{- end -}}"
   destination = "/run/ledger-secrets/LEDGER_QDRANT_API_KEY"
   perms = "0600"
   error_on_missing_key = true

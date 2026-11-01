@@ -1,5 +1,5 @@
 """OpenAI-compatible speech adapters (OpenAI, Groq STT, speaches, faster-whisper-server,
-Kokoro-FastAPI). Non-retrying, no redirects, sanitized errors, like ``providers``."""
+Kokoro-FastAPI). Non-retrying (speech is latency-bound), no redirects, sanitized errors."""
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
@@ -10,10 +11,16 @@ import httpx
 import pytest
 from pydantic import SecretStr
 from qdrant_client import AsyncQdrantClient, models
+from structlog.testing import capture_logs
 
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import Chunk, Principal, QueryRequest
-from ledger_rag.retrieval.qdrant import QdrantRetriever, RetrievalError, _sparse
+from ledger_rag.retrieval.qdrant import (
+    WRITE_LEASE_KEY,
+    QdrantRetriever,
+    RetrievalError,
+    _sparse,
+)
 
 
 def chunk(chunk_id: str = "tenant/doc/0", **updates: Any) -> Chunk:
@@ -213,17 +220,65 @@ async def test_duplicate_and_cross_tenant_ids_rejected() -> None:
     await retriever.close()
 
 
-async def test_collection_creation_and_readiness_reachability() -> None:
+async def test_readiness_is_read_only_and_bootstrap_provisions_explicitly() -> None:
     retriever, client, _ = await store()
     client.collection_exists.return_value = False
-    assert await retriever.ready()
+    client.get_collection.side_effect = RuntimeError("collection not found")
+    assert not await retriever.ready()
+    client.create_collection.assert_not_called()
+    client.create_payload_index.assert_not_called()
+    client.update_collection.assert_not_called()
+    client.get_collection.side_effect = None
+    await retriever.bootstrap()
     kwargs = client.create_collection.call_args.kwargs
     assert kwargs["vectors_config"]["dense"].size == 32
     assert kwargs["sparse_vectors_config"]["sparse"].modifier == models.Modifier.IDF
     assert kwargs["metadata"]["embedding_model"] == "test-embedding"
+    assert {call.kwargs["field_name"] for call in client.create_payload_index.await_args_list} == {
+        "tenant_id",
+        "document_id",
+        "allowed_groups",
+        "published_day",
+    }
+    assert await retriever.ready()
+    client.create_collection.reset_mock()
+    client.create_payload_index.reset_mock()
+    client.collection_exists.return_value = True
+    await retriever.bootstrap()
+    client.create_collection.assert_not_called()
+    client.create_payload_index.assert_not_called()
     client.get_collection.side_effect = RuntimeError("unreachable")
     assert not await retriever.ready()
     client.update_collection.assert_not_called()
+    await retriever.close()
+
+
+async def test_bootstrap_tolerates_concurrent_provisioning() -> None:
+    retriever, client, _ = await store()
+    client.collection_exists.side_effect = [False, True]
+    client.create_collection.side_effect = RuntimeError("already exists")
+    await retriever.bootstrap()
+    client.create_payload_index.assert_not_called()
+    client.collection_exists.side_effect = [False, False]
+    with pytest.raises(RuntimeError, match="already exists"):
+        await retriever.bootstrap()
+    await retriever.close()
+
+
+async def test_readiness_does_not_wait_for_writers() -> None:
+    retriever, client, _ = await store()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def blocked_upsert(*args: Any, **kwargs: Any) -> None:
+        entered.set()
+        await release.wait()
+
+    client.upsert.side_effect = blocked_upsert
+    writer = asyncio.create_task(retriever.upsert([chunk()]))
+    await entered.wait()
+    assert await asyncio.wait_for(retriever.ready(), timeout=1)
+    release.set()
+    await writer
     await retriever.close()
 
 
@@ -237,6 +292,7 @@ async def test_quantization_creation_and_dense_only_rescoring(mode: str) -> None
     expected = retriever._quantization()
     client.get_collection.return_value.config.quantization_config = expected
     try:
+        await retriever.bootstrap()
         assert await retriever.ready()
         kwargs = client.create_collection.call_args.kwargs
         assert kwargs["quantization_config"] == expected
@@ -337,6 +393,14 @@ async def test_incompatible_collection_is_rejected(mismatch: str) -> None:
     await retriever.close()
 
 
+def paged(points: list[models.ScoredPoint]) -> Any:
+    def query_points(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        offset = kwargs.get("offset") or 0
+        return SimpleNamespace(points=points[offset : offset + kwargs["limit"]])
+
+    return query_points
+
+
 async def test_hybrid_filters_before_retrieval_and_defense_in_depth() -> None:
     retriever, client, _ = await store()
     rows = [
@@ -346,8 +410,8 @@ async def test_hybrid_filters_before_retrieval_and_defense_in_depth() -> None:
         chunk("forbidden", allowed_groups=["admin"]),
         chunk("future", published_at=date(2025, 1, 1)),
     ]
-    client.query_points.return_value = SimpleNamespace(
-        points=[
+    client.query_points.side_effect = paged(
+        [
             models.ScoredPoint(id=i, version=1, score=1, payload=row.model_dump(mode="json"))
             for i, row in enumerate(rows)
         ]
@@ -410,8 +474,10 @@ async def test_invalid_embeddings_do_not_write(rows: Any) -> None:
     await retriever.close()
 
 
-@pytest.mark.parametrize("status", [401, 429, 500])
-async def test_embedding_http_errors_are_sanitized_not_retried(status: int) -> None:
+@pytest.mark.parametrize(("status", "attempts"), [(401, 1), (429, 3), (500, 3)])
+async def test_embedding_http_errors_are_sanitized_and_only_transient_ones_retried(
+    status: int, attempts: int
+) -> None:
     retriever, client, _ = await store()
     await retriever._embedding_client.aclose()
     requests: list[httpx.Request] = []
@@ -424,7 +490,7 @@ async def test_embedding_http_errors_are_sanitized_not_retried(status: int) -> N
     with pytest.raises(RetrievalError) as error:
         await retriever.upsert([chunk()])
     assert str(error.value) == f"Embedding endpoint returned HTTP {status}"
-    assert len(requests) == 1
+    assert len(requests) == attempts
     client.upsert.assert_not_called()
     client.delete.assert_not_called()
     await retriever.close()
@@ -468,6 +534,8 @@ async def test_local_sdk_executes_real_sparse_dense_fusion() -> None:
     retriever, mock, _ = await store()
     await mock.close()
     retriever._client = AsyncQdrantClient(":memory:")
+    assert not await retriever.ready()
+    await retriever.bootstrap()
     assert await retriever.ready()
     await retriever.upsert(
         [
@@ -567,6 +635,65 @@ async def test_concurrent_updates_and_search_are_serialized() -> None:
     await asyncio.gather(first, second, search)
     assert client.upsert.await_count == 2
     assert client.delete.await_count == 2
+    await retriever.close()
+
+
+async def test_concurrent_searches_run_in_parallel() -> None:
+    retriever, client, _ = await store()
+    started, release = 0, asyncio.Event()
+    all_started = asyncio.Event()
+
+    async def blocked_query(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        nonlocal started
+        started += 1
+        if started == 3:
+            all_started.set()
+        await release.wait()
+        return SimpleNamespace(points=[])
+
+    client.query_points.side_effect = blocked_query
+    principal = Principal(subject="public", tenant_id="tenant")
+    searches = [
+        asyncio.create_task(retriever.search(QueryRequest(question="revenue"), principal))
+        for _ in range(3)
+    ]
+    await asyncio.wait_for(all_started.wait(), timeout=2)
+    writer = asyncio.create_task(retriever.upsert([chunk()]))
+    await asyncio.sleep(0.01)
+    client.upsert.assert_not_called()
+    late = asyncio.create_task(retriever.search(QueryRequest(question="revenue"), principal))
+    await asyncio.sleep(0.01)
+    assert started == 3, "a waiting writer must block new readers"
+    release.set()
+    await asyncio.wait_for(asyncio.gather(*searches, writer, late), timeout=2)
+    client.upsert.assert_awaited_once()
+    assert started == 4
+    await retriever.close()
+
+
+async def test_cancelled_waiters_do_not_wedge_the_gate() -> None:
+    retriever, client, _ = await store()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def blocked_query(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        entered.set()
+        await release.wait()
+        return SimpleNamespace(points=[])
+
+    client.query_points.side_effect = blocked_query
+    principal = Principal(subject="public", tenant_id="tenant")
+    reader = asyncio.create_task(retriever.search(QueryRequest(question="revenue"), principal))
+    await entered.wait()
+    writer = asyncio.create_task(retriever.upsert([chunk()]))
+    await asyncio.sleep(0.01)
+    writer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await writer
+    client.query_points.side_effect = None
+    await asyncio.wait_for(retriever.search(QueryRequest(question="revenue"), principal), 2)
+    release.set()
+    await reader
+    await asyncio.wait_for(retriever.upsert([chunk()]), timeout=2)
     await retriever.close()
 
 
@@ -689,3 +816,158 @@ def test_summary_version_is_required_exactly_for_v3() -> None:
         Settings(**base, chunk_profile="v3")
     with pytest.raises(ValueError, match="applies only to chunk profile v3"):
         Settings(**base, chunk_profile="v2", chunk_summary_version="s1/model")
+
+
+async def test_write_lease_brackets_mutations_and_survives_failures() -> None:
+    retriever, client, _ = await store()
+    calls: list[str] = []
+    client.update_collection.side_effect = lambda *a, **k: calls.append(
+        "lease" if k["metadata"][WRITE_LEASE_KEY] else "release"
+    )
+    client.upsert.side_effect = lambda *a, **k: calls.append("upsert")
+    client.delete.side_effect = lambda *a, **k: calls.append("delete")
+    await retriever.upsert([chunk()])
+    assert calls == ["lease", "upsert", "delete", "release"]
+    lease = client.update_collection.await_args_list[0].kwargs["metadata"][WRITE_LEASE_KEY]
+    assert lease["writer"] == retriever._writer_id
+    assert lease["expires_at"] > time.time() + 100
+    calls.clear()
+
+    def fail_delete(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("delete failed")
+
+    client.delete.side_effect = fail_delete
+    with pytest.raises(RuntimeError, match="delete failed"):
+        await retriever.upsert([chunk()])
+    assert calls == ["lease", "upsert"], "a failed write must leave the durable lease in place"
+    await retriever.close()
+
+
+async def test_long_writes_refresh_their_lease() -> None:
+    retriever, client, _ = await store()
+    retriever._settings = retriever._settings.model_copy(
+        update={"qdrant_upsert_batch_size": 1, "qdrant_write_lease_seconds": 10}
+    )
+    clock = [1000.0]
+
+    def advance(*args: Any, **kwargs: Any) -> None:
+        clock[0] += 6
+
+    client.upsert.side_effect = advance
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("ledger_rag.retrieval.qdrant.time.time", lambda: clock[0])
+        await retriever.upsert([chunk(), chunk("tenant/doc/1"), chunk("tenant/doc/2")])
+    leases = [
+        call.kwargs["metadata"][WRITE_LEASE_KEY]
+        for call in client.update_collection.await_args_list
+    ]
+    assert [lease["expires_at"] for lease in leases[:-1]] == [1010.0, 1016.0, 1022.0]
+    assert leases[-1] is None
+    await retriever.close()
+
+
+@pytest.mark.parametrize("lease", ["corrupt", {"writer": "other"}, {"expires_at": "soon"}])
+async def test_malformed_write_lease_fails_closed(lease: Any) -> None:
+    retriever, client, _ = await store()
+    client.get_collection.return_value.config.metadata[WRITE_LEASE_KEY] = lease
+    assert not await retriever.ready()
+    with pytest.raises(RetrievalError, match="abandoned write lease"):
+        await retriever.search(
+            QueryRequest(question="revenue"), Principal(subject="user", tenant_id="tenant")
+        )
+    with pytest.raises(RetrievalError, match="abandoned write lease"):
+        await retriever.upsert([chunk()])
+    client.query_points.assert_not_called()
+    client.upsert.assert_not_called()
+    await retriever.close()
+
+
+async def test_abandoned_write_is_visible_to_other_and_restarted_instances() -> None:
+    writer, first_mock, _ = await store()
+    reader, second_mock, _ = await store()
+    await first_mock.close()
+    await second_mock.close()
+    shared = AsyncQdrantClient(":memory:")
+    writer._client = reader._client = shared
+    await writer.bootstrap()
+    await writer.upsert([chunk()])
+    query, principal = QueryRequest(question="revenue"), Principal(subject="u", tenant_id="tenant")
+    assert [hit.chunk.id for hit in await reader.search(query, principal)] == ["tenant/doc/0"]
+
+    original_delete = shared.delete
+
+    async def crash(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("process died mid-replacement")
+
+    shared.delete = crash  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="mid-replacement"):
+        await writer.upsert([chunk("replacement")])
+    shared.delete = original_delete  # type: ignore[method-assign]
+
+    # In flight from the reader's point of view: reads continue, other writers refuse.
+    assert await reader.ready()
+    assert await reader.search(query, principal)
+    with pytest.raises(RetrievalError, match="Another writer"):
+        await reader.upsert([chunk("third")])
+
+    # After expiry every instance, including a freshly started one, fails closed.
+    with pytest.MonkeyPatch.context() as patch:
+        later = time.time() + 10**6
+        patch.setattr("ledger_rag.retrieval.qdrant.time.time", lambda: later)
+        restarted, restarted_mock, _ = await store()
+        await restarted_mock.close()
+        restarted._client = shared
+        for instance in [reader, restarted]:
+            assert not await instance.ready()
+            with pytest.raises(RetrievalError, match="abandoned write lease"):
+                await instance.search(query, principal)
+        await restarted.release_write_lease()
+        assert await reader.ready()
+        assert await restarted.search(query, principal)
+        await restarted._embedding_client.aclose()
+    await writer._embedding_client.aclose()
+    await reader.close()
+
+
+async def test_corrupt_points_are_counted_logged_without_content_and_refilled() -> None:
+    retriever, client, _ = await store()
+    secret = "Confidential merger terms"
+    valid = [chunk(f"valid-{i}", text=secret) for i in range(4)]
+    points = [
+        models.ScoredPoint(id=0, version=1, score=1, payload={"text": secret}),
+        models.ScoredPoint(id=1, version=1, score=1, payload=None),
+        models.ScoredPoint(
+            id=2,
+            version=1,
+            score=1,
+            payload=chunk("leak", tenant_id="other", text=secret).model_dump(mode="json"),
+        ),
+        *[
+            models.ScoredPoint(id=3 + i, version=1, score=1, payload=c.model_dump(mode="json"))
+            for i, c in enumerate(valid)
+        ],
+    ]
+    client.query_points.side_effect = paged(points)
+    with capture_logs() as logs:
+        hits = await retriever.search(
+            QueryRequest(question="revenue", top_k=3), Principal(subject="u", tenant_id="tenant")
+        )
+    assert [hit.chunk.id for hit in hits] == ["valid-0", "valid-1", "valid-2"]
+    pages = [(c.kwargs["offset"], c.kwargs["limit"]) for c in client.query_points.call_args_list]
+    assert pages == [(0, 3), (3, 3)]
+    counter = retriever.collectors()[0]
+    assert counter.labels("invalid_payload")._value.get() == 2
+    assert counter.labels("filter_violation")._value.get() == 1
+    assert [log["event"] for log in logs] == ["qdrant_points_rejected"]
+    assert logs[0]["reasons"] == {"invalid_payload": 2, "filter_violation": 1}
+    assert secret not in str(logs) and "leak" not in str(logs)
+
+    client.query_points.side_effect = paged(points[:3])
+    assert (
+        await retriever.search(
+            QueryRequest(question="revenue", top_k=3), Principal(subject="u", tenant_id="tenant")
+        )
+        == []
+    )
+    assert client.query_points.call_count == 4, "an exhausted candidate pool stops refilling"
+    await retriever.close()

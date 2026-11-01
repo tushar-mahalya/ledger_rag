@@ -16,6 +16,7 @@ async def activity(
     *,
     tool: ActivityTool | None = None,
     span_name: str | None = None,
+    label_override: ActivityLabel | None = None,
 ) -> AsyncIterator[Span]:
     label: ActivityLabel
     if stage == "tool":
@@ -27,11 +28,14 @@ async def activity(
             label = "Checking tool request"
     else:
         labels: dict[ActivityStage, ActivityLabel] = {
+            "planning": "Planning query",
             "retrieval": "Retrieving evidence",
             "generation": "Generating answer",
             "validation": "Validating citations",
         }
         label = labels[stage]
+    if label_override is not None:
+        label = label_override
     with safe_span(span_name or f"rag.{stage}") as span:
         span.set_attribute("rag.stage", stage)
         if tool is not None:

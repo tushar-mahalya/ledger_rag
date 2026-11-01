@@ -40,7 +40,8 @@ database_secret = modal.Secret.from_name(
 
 def _snapshot_jsonl(input_path: str, target: Path) -> None:
     source = Path(input_path).resolve()
-    if not source.is_relative_to(DATA) or not source.is_file():
+    # Modal mounts Volumes through a symlink, so compare fully resolved paths.
+    if not source.is_relative_to(DATA.resolve()) or not source.is_file():
         raise ValueError("JSONL source must be a file inside the data volume")
     shutil.copyfile(source, target)
 
@@ -78,6 +79,7 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
 
     from ledger_rag.core.config import Settings
     from ledger_rag.evaluation.benchmarks.finqa import DATASET_COMMIT, load
+    from ledger_rag.evaluation.datasets.fetch import sha256_file
     from ledger_rag.ingestion.bulk import ingest_documents, jsonl_documents
     from ledger_rag.ingestion.context import SUMMARY_VERSION
     from ledger_rag.ingestion.tei import TEI_URL, embedding_server
@@ -115,6 +117,7 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
     log = structlog.get_logger(__name__).bind(run_id=run_id, collection=spec.collection)
     store = QdrantRetriever(settings)
     log.info("ingestion.started", embedding_space_id=spec.embedding_space_id)
+    input_sha256: str | None = None
     try:
         await data_volume.reload.aio()  # type: ignore[no-untyped-call]
         with tempfile.TemporaryDirectory(prefix="ledger-ingest-") as directory:
@@ -130,6 +133,7 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
             else:
                 target = snapshot / "documents.jsonl"
                 await asyncio.to_thread(_snapshot_jsonl, spec.input_path, target)
+                input_sha256 = await asyncio.to_thread(sha256_file, target)
                 documents = jsonl_documents(target)
             summaries = None
             if spec.chunk_profile == "v3":
@@ -160,6 +164,8 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
             "tei_image": TEI_IMAGE,
             "source": spec.source,
             "dataset_commit": DATASET_COMMIT if spec.source == "finqa" else None,
+            "input_path": spec.input_path or None,
+            "input_sha256": input_sha256,
             "quantization": spec.quantization,
             "chunk_profile": spec.chunk_profile,
             "chunk_summary_version": summary_version or None,

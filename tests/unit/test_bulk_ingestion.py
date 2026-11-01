@@ -234,6 +234,7 @@ async def test_modal_job_writes_database_directly_and_commits_only_verified_repo
             assert report["chunks"] == 1
             assert report["documents"] == 1
             assert report["git_sha"] == "git-test"
+            assert report["input_path"] is None and report["input_sha256"] is None
             assert "database-private-key" not in json.dumps(report)
             text = await asyncio.to_thread(Path(report["report_path"]).read_text)
             assert json.loads(text) == report
@@ -244,3 +245,24 @@ async def test_modal_job_writes_database_directly_and_commits_only_verified_repo
         store.close.assert_awaited_once()
     finally:
         await original_close()
+
+
+def test_jsonl_snapshot_accepts_symlinked_volume_mount_but_not_escapes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pytest.importorskip("modal", reason="Modal orchestration tests require the compute group")
+    from compute import ingestion
+
+    volume = tmp_path / "volume"
+    (volume / "datasets").mkdir(parents=True)
+    (volume / "datasets" / "documents.jsonl").write_text("{}\n")
+    (tmp_path / "outside.jsonl").write_text("{}\n")
+    (volume / "datasets" / "escape.jsonl").symlink_to(tmp_path / "outside.jsonl")
+    mount = tmp_path / "data"
+    mount.symlink_to(volume)
+    monkeypatch.setattr(ingestion, "DATA", mount)
+    target = tmp_path / "snapshot.jsonl"
+    ingestion._snapshot_jsonl(str(mount / "datasets" / "documents.jsonl"), target)
+    assert target.read_text() == "{}\n"
+    with pytest.raises(ValueError, match="inside the data volume"):
+        ingestion._snapshot_jsonl(str(mount / "datasets" / "escape.jsonl"), target)
