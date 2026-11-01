@@ -53,6 +53,73 @@ def test_ephemeral_benchmark_url_cannot_redirect_the_bearer_key() -> None:
             bench.validate_serve_url(url)
 
 
+def test_benchmark_checks_exact_revision_and_sdk_before_generation() -> None:
+    bench = _modal("compute/llm_bench.py", "local_identity_bench")
+    llm = _modal("compute/llm.py", "local_identity_serve")
+    assert (bench.EXPECTED_MODEL, bench.EXPECTED_REVISION, bench.EXPECTED_VLLM) == (
+        llm.MODEL,
+        llm.MODEL_REVISION,
+        llm.VLLM_VERSION,
+    )
+    served = [llm.MODEL, f"{llm.MODEL}@{llm.MODEL_REVISION}"]
+    bench.validate_model_identity(served, llm.VLLM_VERSION)
+    for models, version in (([llm.MODEL], llm.VLLM_VERSION), (served, "unknown")):
+        with pytest.raises(ValueError, match="pinned"):
+            bench.validate_model_identity(models, version)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("valid_identity", [True, False])
+async def test_first_cold_303_warms_and_checks_identity_before_chat(
+    monkeypatch: pytest.MonkeyPatch, valid_identity: bool
+) -> None:
+    import httpx
+
+    bench = _modal("compute/llm_bench.py", "local_cold_bench")
+    probes = chats = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal probes
+        if request.url.path == "/v1/models":
+            probes += 1
+            if probes == 1:
+                return httpx.Response(303)
+            served = [bench.EXPECTED_MODEL]
+            if valid_identity:
+                served.append(f"{bench.EXPECTED_MODEL}@{bench.EXPECTED_REVISION}")
+            return httpx.Response(200, json={"data": [{"id": name} for name in served]})
+        assert request.url.path == "/ledger/startup"
+        return httpx.Response(
+            200,
+            json={
+                "model": bench.EXPECTED_MODEL,
+                "revision": bench.EXPECTED_REVISION,
+                "vllm_version": bench.EXPECTED_VLLM,
+                "events": {},
+            },
+        )
+
+    async def no_sleep(seconds: float) -> None:
+        pass
+
+    async def first_chat(*args: Any) -> dict[str, int]:
+        nonlocal chats
+        chats += 1
+        return {"status": 200}
+
+    monkeypatch.setattr(bench.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(bench, "stream_chat", first_chat)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        if valid_identity:
+            result = await bench.cold(client, "https://test.modal.run", bench.EXPECTED_MODEL)
+            assert result["probe_attempts"] == 2 and result["probe_statuses"] == {"303": 1}
+            assert chats == 1
+        else:
+            with pytest.raises(ValueError, match="pinned"):
+                await bench.cold(client, "https://test.modal.run", bench.EXPECTED_MODEL)
+            assert chats == 0
+
+
 class Recorder:
     def __init__(self) -> None:
         self.calls: list[str] = []

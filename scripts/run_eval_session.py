@@ -33,6 +33,7 @@ ARMS = [
         "extra_body": {"chat_template_kwargs": {"reasoning_effort": "low"}},
     },
 ]
+PILOT_BENCHMARK_PHASES = ("cold", "single", "throughput", "long", "metrics")
 
 
 def admission(seconds: int, spent: float) -> dict[str, Any]:
@@ -179,6 +180,11 @@ def execute_session(plan: dict[str, Any], manifest: Path, pairs: list[dict[str, 
         # Never detach or deploy. Modal stops the whole App on exit/client disconnect.
         with modal.enable_output(), app.run(detach=False):
             plan["app_id"] = app.app_id
+            plan["function_ids"] = {
+                "serve": llm.serve.object_id,
+                "measure": llm_bench.measure.object_id,
+                "generate": evaluation.generate.object_id,
+            }
             manifest.write_text(json.dumps(plan, indent=2))
             url = llm.serve.get_web_url()
             if not url:
@@ -187,7 +193,7 @@ def execute_session(plan: dict[str, Any], manifest: Path, pairs: list[dict[str, 
                 plan["benchmark"] = bounded_call(
                     llm_bench.measure,
                     min(deadline, started + 1200),
-                    ["single", "throughput", "long", "metrics"],
+                    list(PILOT_BENCHMARK_PHASES),
                     url,
                     min(plan["deadline_unix"], plan["started_at_unix"] + 1200),
                 )
@@ -206,6 +212,7 @@ def execute_session(plan: dict[str, Any], manifest: Path, pairs: list[dict[str, 
                 "llm_model_revision": REVISION,
                 "arms": ARMS,
                 "llm_request_timeout": 120,
+                "llm_max_attempts": 1,
                 "llm_deadline": 180,
                 "llm_ready_timeout": 1200,
                 "git_sha": plan["git_sha"],
@@ -229,6 +236,7 @@ def execute_session(plan: dict[str, Any], manifest: Path, pairs: list[dict[str, 
         raise
     finally:
         plan["elapsed_seconds"] = round(time.monotonic() - started, 3)
+        plan["finished_at_unix"] = time.time()
         manifest.write_text(json.dumps(plan, indent=2))
 
 

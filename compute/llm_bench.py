@@ -46,6 +46,9 @@ import httpx
 import modal
 
 SERVE_APP, SERVE_FUNCTION = "ledger-llm-serve", "serve"
+EXPECTED_MODEL = "Qwen/Qwen3.8-27B-FP8"
+EXPECTED_REVISION = "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a"
+EXPECTED_VLLM = "0.32.0"
 KEY_ENV = "LEDGER_LLM_SERVE_API_KEY"
 PHASES = ("cold", "controls", "single", "throughput", "long", "metrics")
 NO_THINK: dict[str, Any] = {"chat_template_kwargs": {"enable_thinking": False}}
@@ -94,6 +97,13 @@ def validate_serve_url(url: str) -> None:
         or parsed.port not in (None, 443)
     ):
         raise ValueError("Benchmark endpoint must be a credential-free Modal HTTPS origin")
+
+
+def validate_model_identity(served: list[str], version: str | None) -> None:
+    if not {EXPECTED_MODEL, f"{EXPECTED_MODEL}@{EXPECTED_REVISION}"} <= set(served):
+        raise ValueError("Benchmark endpoint does not advertise the pinned model revision")
+    if version != EXPECTED_VLLM:
+        raise ValueError("Benchmark endpoint does not advertise the pinned vLLM version")
 
 
 def parse_counters(text: str) -> dict[str, Any]:
@@ -264,12 +274,20 @@ async def cold(client: httpx.AsyncClient, url: str, model: str) -> dict[str, Any
         await asyncio.sleep(2)
     ready = time.time()
     startup = (await client.get(f"{url}/ledger/startup")).json()
+    validate_model_identity(
+        [item["id"] for item in response.json().get("data", [])],
+        startup.get("vllm_version"),
+    )
+    if startup.get("model") != EXPECTED_MODEL or startup.get("revision") != EXPECTED_REVISION:
+        raise ValueError("Benchmark startup report does not match pinned weights")
     first = await stream_chat(
         client,
         url,
         {"model": model, "messages": messages("Say OK."), "max_tokens": 8, "temperature": 0}
         | NO_THINK,
     )
+    if first.get("status") != 200:
+        raise RuntimeError("Cold warmup completion failed; no further benchmark calls admitted")
     events = startup.get("events", {})
     container = startup.get("container_started", ready)
     process = startup.get("process_started", ready)
@@ -337,11 +355,15 @@ async def single(client: httpx.AsyncClient, url: str, model: str) -> dict[str, A
         prompt = analysis_prompt(7, 100)
         return {"model": model, "messages": messages(prompt), "max_tokens": 512, "temperature": 0}
 
-    await stream_chat(client, url, body() | NO_THINK)
+    warmup = await stream_chat(client, url, body() | NO_THINK)
+    if warmup.get("status") != 200:
+        raise RuntimeError("Single-stream warmup failed")
     before = await counters(client, url)
     runs = [await stream_chat(client, url, body() | NO_THINK) for _ in range(5)]
     after = await counters(client, url)
     ok = [run for run in runs if run["status"] == 200]
+    if len(ok) != len(runs):
+        raise RuntimeError("Single-stream benchmark failed; no further phases admitted")
     return {
         "requests": len(runs),
         "ok": len(ok),
@@ -388,6 +410,8 @@ async def throughput(client: httpx.AsyncClient, url: str, model: str) -> dict[st
         wall = time.perf_counter() - started
         after = await counters(client, url)
         ok = [run for run in results if run["status"] == 200]
+        if len(ok) != total:
+            raise RuntimeError("Throughput benchmark failed; no further levels admitted")
         output = sum(run["completion_tokens"] for run in ok)
         prompt = sum(run["prompt_tokens"] or 0 for run in ok)
         ttfts = [run["ttft_s"] for run in ok if run["ttft_s"] is not None]
@@ -444,12 +468,13 @@ async def run(url: str, key: str, phases: Sequence[str]) -> dict[str, Any]:
     ) as client:
         if "cold" in phases:
             # Uses the alias-free name; the alias is verified below once the server is up.
-            result["cold"] = await cold(client, url, "Qwen/Qwen3.8-27B-FP8")
+            result["cold"] = await cold(client, url, EXPECTED_MODEL)
         models = (await client.get(f"{url}/v1/models", timeout=1800)).json()
         served = sorted(item["id"] for item in models.get("data", []))
         model = next(name for name in served if "@" not in name)
         result["served_models"] = served
         result["server_version"] = (await client.get(f"{url}/version")).json().get("version")
+        validate_model_identity(served, result["server_version"])
         if "controls" in phases:
             result["controls"] = await controls(client, url, model)
         if "single" in phases:
@@ -459,6 +484,8 @@ async def run(url: str, key: str, phases: Sequence[str]) -> dict[str, Any]:
         if "long" in phases:
             decode = (result.get("single") or {}).get("decode_tokens_per_s_p50")
             result["long"] = await long_stream(client, url, model, decode)
+            if result["long"]["result"].get("status") != 200:
+                raise RuntimeError("Long-stream benchmark failed; no further phases admitted")
         if "metrics" in phases:
             snapshot = await counters(client, url)
             empty: dict[str, Any] = dict.fromkeys(SPEC_COUNTERS, 0.0) | {"per_position": {}}
@@ -478,6 +505,7 @@ async def run(url: str, key: str, phases: Sequence[str]) -> dict[str, Any]:
     retries=0,
 )
 async def measure(phases: list[str], url: str = "", deadline_unix: float = 0) -> dict[str, Any]:
+    started = time.perf_counter()
     remaining = deadline_unix - time.time() if deadline_unix else 3600
     if not math.isfinite(remaining) or not 0 < remaining <= 3600:
         raise ValueError("Benchmark session deadline is invalid or expired")
@@ -486,6 +514,7 @@ async def measure(phases: list[str], url: str = "", deadline_unix: float = 0) ->
         raise RuntimeError(f"{SERVE_APP} is not deployed")
     validate_serve_url(resolved)
     result = await asyncio.wait_for(run(resolved, os.environ[KEY_ENV], phases), timeout=remaining)
+    result["cpu_seconds"] = round(time.perf_counter() - started, 3)
     output = Path("/data/llm-serve") / f"bench-{result['run_id']}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2))

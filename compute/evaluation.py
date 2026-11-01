@@ -174,6 +174,8 @@ def benchmark_argv(
         argv += ["--llm-model-revision", str(options["llm_model_revision"])]
     if options.get("llm_rpm"):
         argv += ["--llm-rpm", str(float(options["llm_rpm"]))]
+    if options.get("llm_max_attempts") is not None:
+        argv += ["--llm-max-attempts", str(int(options["llm_max_attempts"]))]
     if contexts:
         argv += ["--contexts", contexts]
     if options.get("llm_seed") is not None:

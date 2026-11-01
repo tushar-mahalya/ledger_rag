@@ -116,11 +116,14 @@ Guardrails:
   or cleanup delay exceeds these assumptions, reject further admission.
 
 First approval scope: 4,500-second pilot. Benchmark phases
-`single,throughput,long,metrics` share at most 1,200 seconds including first cold
+`cold,single,throughput,long,metrics` share at most 1,200 seconds including first cold
 start; the remaining time covers 200 proportional-stratified dev cases, seed 13,
 thinking off/low × retrieved@3/@5/oracle = **1,200 completions**. Concurrency 32,
 temperature 0, max 2,048 completion tokens, request timeout 120 s, completion
 deadline 180 s. Benchmark or pilot timeout/failure ends the App, not another paid retry.
+The pilot caps generation at one HTTP attempt per completion; readiness GET probes
+are separately bounded by the cold-start budget. Endpoint aliases, startup revision
+and vLLM version are checked before synthetic benchmark generation.
 
 ```sh
 # Read-only admission; no remote calls.

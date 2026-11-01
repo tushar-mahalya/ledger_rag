@@ -29,6 +29,7 @@ def test_budget_is_total_not_credit_balance() -> None:
     assert len(session.ARMS) == 2
     assert session.ARMS[0]["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
     assert session.ARMS[1]["extra_body"]["chat_template_kwargs"]["reasoning_effort"] == "low"
+    assert session.PILOT_BENCHMARK_PHASES[0] == "cold"
 
 
 @pytest.mark.parametrize("failure", [None, TimeoutError(), KeyboardInterrupt(), RuntimeError()])

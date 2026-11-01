@@ -72,6 +72,7 @@ def test_evaluation_job_passes_self_hosted_arms_without_keys(
         "llm_concurrency": 64,
         "answer_sample_strategy": "stratified",
         "llm_deadline": 600.0,
+        "llm_max_attempts": 1,
     }
     parser = build_parser()
     argv = job.benchmark_argv("answers", options, "data", "k", "/data/evaluation/x.json")
@@ -82,6 +83,7 @@ def test_evaluation_job_passes_self_hosted_arms_without_keys(
     assert args.llm_url == options["llm_base_url"] and args.llm_key == "serve-key"
     assert json.loads(args.llm_arms) == arms and args.llm_deadline == 600
     assert args.answer_sample_strategy == "stratified" and args.llm_rpm is None
+    assert args.llm_max_attempts == 1
     with pytest.raises(ValueError, match="llm_endpoint_kind"):
         job.benchmark_argv("answers", {"llm_endpoint_kind": "cloud"}, "data", "k")
     assert job.LLM_SERVE_APP == "ledger-llm-serve"

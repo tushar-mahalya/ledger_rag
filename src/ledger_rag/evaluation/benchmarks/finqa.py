@@ -630,6 +630,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stream responses (SSE); default: on for self-hosted, off for hosted",
     )
     parser.add_argument("--llm-request-timeout", type=float, default=120)
+    parser.add_argument("--llm-max-attempts", type=int, default=6)
     parser.add_argument(
         "--llm-deadline", type=float, default=180, help="Per-completion budget incl. retries"
     )
@@ -691,6 +692,8 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         parser.error("--llm-rpm paces hosted APIs only; self-hosted endpoints are unpaced")
     if args.llm_request_timeout <= 0 or args.llm_deadline <= 0 or args.llm_ready_timeout <= 0:
         parser.error("LLM timeouts must be positive")
+    if not 1 <= args.llm_max_attempts <= 6:
+        parser.error("--llm-max-attempts must be between 1 and 6")
     if args.llm_model_revision and not re.fullmatch(r"[0-9a-f]{40}", args.llm_model_revision):
         parser.error("--llm-model-revision must be a full 40-character commit sha")
     try:
@@ -837,6 +840,7 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             endpoint_kind=args.llm_endpoint_kind,
             stream=stream,
             request_timeout=args.llm_request_timeout,
+            max_attempts=args.llm_max_attempts,
             deadline_seconds=args.llm_deadline,
             requests_per_minute=args.llm_rpm,
         )
@@ -863,6 +867,7 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                 "llm_concurrency": args.llm_concurrency,
                 "llm_request_timeout": args.llm_request_timeout,
                 "llm_deadline": args.llm_deadline,
+                "llm_max_attempts": args.llm_max_attempts,
                 "prompt_sha256": report["answers"]["prompt_sha256"],
                 "rerank_candidates": report["lineage"].get(
                     "rerank_candidates", args.rerank_candidates
