@@ -8,7 +8,7 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from ledger_rag.core.config import Settings
-from ledger_rag.core.models import Calculation, Citation, Principal
+from ledger_rag.core.models import Activity, Calculation, Citation, Principal
 from ledger_rag.core.provenance import Provenance, is_source_url
 from ledger_rag.external.errors import ExternalDataError
 from ledger_rag.external.service import ExternalData, ExternalSession
@@ -437,3 +437,14 @@ async def test_external_quotes_drive_programs_and_numeric_verification() -> None
     wrong = answer.replace("5.33%", "5.50%")
     assert check_numbers(wrong, citations, [calculation], NumericPolicy()).unsupported == ["5.50%"]
     await data.aclose()
+
+
+def test_external_activity_outcome_stays_off_the_wire_until_set() -> None:
+    started = Activity(
+        stage="tool", status="started", label="Looking up SEC filings", tool="lookup_company_facts"
+    )
+    assert "outcome" not in started.model_dump(exclude_none=True)
+    done = started.model_copy(update={"status": "completed", "outcome": "timeout"})
+    assert done.model_dump(exclude_none=True)["outcome"] == "timeout"
+    with pytest.raises(ValidationError):
+        Activity(stage="tool", status="completed", label="Looking up macro data", outcome="slow")

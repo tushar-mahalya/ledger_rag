@@ -118,13 +118,18 @@ class QueryRequest(BaseModel):
 
 
 ActivityStage = Literal["planning", "retrieval", "generation", "tool", "validation"]
-ActivityTool = Literal["calculator", "search_evidence"]
+ActivityTool = Literal[
+    "calculator", "search_evidence", "lookup_company_facts", "lookup_macro_series"
+]
+ActivityOutcome = Literal["ok", "error", "timeout", "unavailable"]
 ActivityLabel = Literal[
     "Planning query",
     "Retrieving evidence",
     "Generating answer",
     "Calculating",
     "Searching evidence",
+    "Looking up SEC filings",
+    "Looking up macro data",
     "Checking tool request",
     "Validating citations",
     "Verifying grounding",
@@ -138,6 +143,8 @@ class Activity(BaseModel):
     status: Literal["started", "completed"]
     label: ActivityLabel
     tool: ActivityTool | None = None
+    # Set on completed external lookups only; other activities keep their wire shape.
+    outcome: ActivityOutcome | None = None
 
 
 class CalculationOperand(BaseModel):
