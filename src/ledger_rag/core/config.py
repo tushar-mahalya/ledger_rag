@@ -1,11 +1,30 @@
+import json
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Request fields owned by the provider or by typed settings; extra_body may not override them.
+LLM_RESERVED_BODY_KEYS = frozenset(
+    {
+        "model",
+        "messages",
+        "tools",
+        "tool_choice",
+        "stream",
+        "stream_options",
+        "n",
+        "temperature",
+        "max_tokens",
+        "max_completion_tokens",
+        "seed",
+        "reasoning_effort",
+    }
+)
 
 
 class Settings(BaseSettings):
@@ -87,6 +106,9 @@ class Settings(BaseSettings):
     llm_max_tokens_parameter: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
     llm_seed: int | None = Field(default=None, ge=0, le=2**63 - 1)
     llm_reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] | None = None
+    # JSON merged into OpenAI-compatible chat requests for server-specific controls, e.g.
+    # vLLM: {"chat_template_kwargs": {"enable_thinking": false}, "top_k": 20}.
+    llm_extra_body: dict[str, Any] = Field(default_factory=dict)
     upstream_max_retries: int = Field(default=2, ge=0, le=5)
     upstream_retry_base_seconds: float = Field(default=0.2, gt=0, le=10)
     upstream_retry_max_delay_seconds: float = Field(default=5, gt=0, le=60)
@@ -142,6 +164,19 @@ class Settings(BaseSettings):
         if not self.groundedness_verifier_api_key:
             raise ValueError("Groundedness verifier requires an API key")
         return self
+
+    @field_validator("llm_extra_body")
+    @classmethod
+    def validate_llm_extra_body(cls, value: dict[str, Any]) -> dict[str, Any]:
+        reserved = sorted(LLM_RESERVED_BODY_KEYS & set(value))
+        if reserved:
+            raise ValueError(
+                f"LEDGER_LLM_EXTRA_BODY cannot set {', '.join(reserved)}; "
+                "use the typed LEDGER_LLM_* settings"
+            )
+        if len(json.dumps(value)) > 4096:
+            raise ValueError("LEDGER_LLM_EXTRA_BODY is limited to 4 KiB of JSON")
+        return value
 
     @field_validator("planner_gazetteer_path", mode="before")
     @classmethod

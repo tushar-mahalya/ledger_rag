@@ -13,6 +13,11 @@ import httpx
 from ledger_rag.core.config import Settings
 from ledger_rag.core.contracts import Provider
 from ledger_rag.core.retry import RetryPolicy, send_with_retries
+from ledger_rag.generation.reasoning import message_reasoning, split_reasoning
+
+
+class _ReasoningOnly(ValueError):
+    pass
 
 
 class ProviderError(RuntimeError):
@@ -203,6 +208,7 @@ class OpenAIProvider(_HTTPProvider):
             }.items()
             if value is not None
         }
+        self._extra_body = dict(settings.llm_extra_body)
 
     async def complete(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
@@ -227,6 +233,7 @@ class OpenAIProvider(_HTTPProvider):
         except (ValueError, TypeError, KeyError, AttributeError):
             raise ProviderError("Invalid tool-call history") from None
         body: dict[str, Any] = {
+            **self._extra_body,
             "model": self.model,
             "messages": wire_messages,
             **self._generation,
@@ -240,12 +247,26 @@ class OpenAIProvider(_HTTPProvider):
                 raise ValueError("Missing choices")
             message = choices[0]["message"]
             content = message.get("content")
-            calls = message.get("tool_calls", [])
+            calls = message.get("tool_calls") or []
+            # Reasoning servers return thinking separately; it is never surfaced, and
+            # thinking leaked into content (no server parser, truncation) is removed.
+            reasoning = message_reasoning(message)
+            if isinstance(content, str):
+                content, leaked = split_reasoning(content)
+                reasoning = reasoning or leaked
+                content = content.strip() if leaked else content
             if content is None and calls:
                 content = ""
+            if reasoning and not (content or "").strip() and not calls:
+                raise _ReasoningOnly
             if not isinstance(content, str) or not isinstance(calls, list):
                 raise ValueError("Invalid content")
             return {"content": content, "tool_calls": [_call(call) for call in calls]}
+        except _ReasoningOnly:
+            raise ProviderError(
+                "LLM returned reasoning without an answer; raise LEDGER_LLM_MAX_TOKENS "
+                "or disable thinking via LEDGER_LLM_EXTRA_BODY"
+            ) from None
         except (ValueError, TypeError, KeyError, AttributeError, IndexError):
             raise ProviderError("Invalid OpenAI completion response") from None
 
@@ -257,6 +278,8 @@ class AnthropicProvider(_HTTPProvider):
         # Fail at startup rather than silently ignoring controls Messages lacks.
         if settings.llm_seed is not None or settings.llm_reasoning_effort is not None:
             raise ProviderError("Anthropic does not support llm_seed or llm_reasoning_effort")
+        if settings.llm_extra_body:
+            raise ProviderError("llm_extra_body applies only to OpenAI-compatible providers")
         if settings.llm_temperature is not None and settings.llm_temperature > 1:
             raise ProviderError("Anthropic llm_temperature must be between 0 and 1")
         super().__init__(settings)
