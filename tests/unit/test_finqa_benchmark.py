@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 from argparse import Namespace
@@ -16,6 +17,7 @@ from ledger_rag.evaluation.benchmarks.finqa import (
     gold_label_audit,
     holdout_views,
     load,
+    load_saved_contexts,
     main,
     page_document,
     page_metrics,
@@ -24,6 +26,62 @@ from ledger_rag.evaluation.benchmarks.finqa import (
     table_markdown,
 )
 from ledger_rag.ingestion.chunking import chunk_document, contextual_text
+
+
+def test_answer_stratification_is_proportional_seeded_and_split_ordered() -> None:
+    from ledger_rag.evaluation.benchmarks.finqa_answers import strata_counts, stratified_sample
+
+    cases = [
+        Case(
+            str(index),
+            "?",
+            "d",
+            "ACME",
+            ["evidence"],
+            1.0,
+            "add(1,2)" if index < 7 else "add(1,2),multiply(#0,3)",
+            gold_keys=["table_1"] if index < 7 else ["text_0"],
+        )
+        for index in range(10)
+    ]
+    selected = stratified_sample(cases, 5, 13)
+    assert selected == stratified_sample(cases, 5, 13)
+    assert len(selected) == len({case.id for case in selected}) == 5
+    assert [int(case.id) for case in selected] == sorted(int(case.id) for case in selected)
+    counts = strata_counts(selected, cases)
+    assert counts["table/1"] == {"population": 7, "sampled": 4}
+    assert counts["text/2"] == {"population": 3, "sampled": 1}
+    assert stratified_sample(cases, 883, 13) == cases
+    assert stratified_sample([], 200, 13) == []
+
+
+def test_saved_contexts_preserve_wrapper_identity_and_reject_split_drift(tmp_path: Path) -> None:
+    path = tmp_path / "contexts.json"
+    source = {
+        "run_id": "source-run",
+        "contexts": {
+            "lineage": {
+                "collection": "baseline",
+                "corpus_sha256": "fingerprint",
+                "embedding_space_id": "pinned-space",
+                "git_sha": "source-git",
+            },
+            "dataset": {"question_split": "dev"},
+            "contexts": {"samples": 883},
+        },
+    }
+    path.write_text(json.dumps(source))
+    saved, digest = load_saved_contexts(path, "fingerprint", "baseline", "dev")
+    assert saved["run_id"] == "source-run"
+    assert saved["lineage"]["embedding_space_id"] == "pinned-space"
+    assert digest == hashlib.sha256(path.read_bytes()).hexdigest()
+    for fingerprint, collection, split in (
+        ("changed", "baseline", "dev"),
+        ("fingerprint", "changed", "dev"),
+        ("fingerprint", "baseline", "test"),
+    ):
+        with pytest.raises(ValueError, match="different"):
+            load_saved_contexts(path, fingerprint, collection, split)
 
 
 def _doc(text: str) -> Document:

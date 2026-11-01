@@ -1,7 +1,9 @@
 import ast
+import asyncio
 import importlib.util
 import json
 import re
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -113,3 +115,26 @@ def test_training_keeps_test_split_sealed_by_default() -> None:
         assert guarded and "test" in ast.unparse(guarded[0])
         outside = ast.unparse(functions[name]).replace(ast.unparse(guarded[0]), "")
         assert '"test")' not in outside
+
+
+@pytest.mark.asyncio
+async def test_cpu_generation_expiry_is_independent_of_supervisor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job = _load("compute/evaluation.py", "local_deadline_evaluation")
+    cancelled = asyncio.Event()
+
+    async def slow_generate(options: object, path: str) -> None:
+        try:
+            await asyncio.sleep(10)
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(job, "_generate", slow_generate)
+    for deadline in (time.time() - 1, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="deadline"):
+            await job.generate.local({"session_deadline_unix": deadline}, "unused")
+    assert not cancelled.is_set()
+    with pytest.raises(TimeoutError):
+        await job.generate.local({"session_deadline_unix": time.time() + 0.02}, "unused")
+    assert cancelled.is_set()

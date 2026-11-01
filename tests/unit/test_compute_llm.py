@@ -30,6 +30,29 @@ def _modal(path: str, name: str) -> ModuleType:
     return _load(path, name)
 
 
+def test_server_absolute_deadline_survives_restart() -> None:
+    llm = _modal("compute/llm.py", "local_bounded_llm")
+    assert llm.session_seconds_remaining("", 100) is None
+    assert llm.session_seconds_remaining("150", 100) == 50
+    for value in ("100", "99", "nan", "inf", "not-a-time"):
+        with pytest.raises(ValueError):
+            llm.session_seconds_remaining(value, 100)
+
+
+def test_ephemeral_benchmark_url_cannot_redirect_the_bearer_key() -> None:
+    bench = _modal("compute/llm_bench.py", "local_bounded_bench")
+    bench.validate_serve_url("https://session--serve-dev.modal.run")
+    for url in (
+        "http://session--serve-dev.modal.run",
+        "https://modal.run.attacker.test",
+        "https://user@session--serve-dev.modal.run",
+        "https://session--serve-dev.modal.run/v1",
+        "https://session--serve-dev.modal.run?key=example",
+    ):
+        with pytest.raises(ValueError):
+            bench.validate_serve_url(url)
+
+
 class Recorder:
     def __init__(self) -> None:
         self.calls: list[str] = []

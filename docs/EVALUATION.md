@@ -1,10 +1,157 @@
 # Evaluation: evidence, uncertainty, and operating envelopes
 
-This repository ships **synthetic regression data**, not a financial benchmark
-leaderboard or evidence of state-of-the-art performance. The local baseline is a
+This repository ships **synthetic regression data** and publishes separately labeled
+real-data measurements below, not evidence of state-of-the-art performance. The local baseline is a
 deterministic lexical retriever and extractive provider. It exists to exercise
 contracts without keys, network traffic, model downloads, or benchmark redistribution.
 Do not relabel its scores as FinanceBench, FinQA, or TAT-QA results.
+
+## Verified prior full-dev retrieval measurement
+
+Verified read-only from `ledger-data:/evaluation/c17d398f34f24efd874e29bb641d9738.json`
+on 2026-11-01; this is an existing measurement, not a new run. Report SHA-256:
+`fc43ba58a76e99e0b2fce113b46cf873f6b7a3f3d929afebd9983d1779f3a980`.
+Git `ed862324838213af255a7597748c93c4820b791b`, Python 3.12.1, L40S,
+2,949.8 recorded GPU-seconds; TEI startup 12.7 seconds. Collection
+`finqa_gte_modernbert_v1` had exactly 8,611 chunks from 2,789 report pages.
+FinQA commit `0f16e2867befa6840783e58be38c9efb9229d742`, corpus SHA-256
+`9b455b1b21167b4fee7592f9cc2a68e5d12a336473156137b5ef0692e442ae9d`.
+All 883 dev questions / 224 company-year report clusters were evaluated; test
+questions remain sealed. All 1,513 gold units mapped; zero unknown retrieved chunks.
+
+Embedding: `Alibaba-NLP/gte-modernbert-base` at
+`e7f32e3c00f91d699e8c43b53106206bcc72bb22`,
+space `tei-1.8-float16:Alibaba-NLP/gte-modernbert-base@e7f32e3c00f91d699e8c43b53106206bcc72bb22`.
+Reranker: `Alibaba-NLP/gte-reranker-modernbert-base` at
+`f7481e6055501a30fb19d090657df9ec1f79ab2c`; TEI `89-1.8`, top-k 10,
+20 rerank candidates. Seed 13, 2,000 report-cluster bootstrap replicates.
+
+Below, @k is **all-evidence recall**, and MRR is **evidence MRR**, not page MRR.
+
+| Arm | @1 | @3 | @5 | @10 | Evidence MRR@10 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| sparse/company | .494 | .749 | .841 | .900 | .688 |
+| sparse/global | .311 | .502 | .592 | .679 | .467 |
+| dense/company | .386 | .639 | .735 | .847 | .579 |
+| dense/global | .238 | .376 | .456 | .529 | .362 |
+| hybrid/company | .479 | .770 | .845 | .922 | .684 |
+| hybrid/global | .331 | .514 | .605 | .699 | .487 |
+| hybrid+rerank/company | .607 | .845 | .904 | .947 | .781 |
+| hybrid+rerank/global | .462 | .658 | .721 | .763 | .616 |
+
+Headline company hybrid+rerank 95% cluster-bootstrap intervals: @1
+[.5651, .6465], @3 [.8113, .8766], @5 [.8762, .9286], @10 [.9239, .9674],
+evidence MRR [.7509, .8097]. Against company hybrid, paired evidence-recall@5
+delta +.0566 [.0356, .0785], evidence-MRR delta +.0970 [.0742, .1197].
+Sparse and hybrid company scores are close; no superiority claim is made for that pair.
+
+**Limitations:** dev selection is optimistic and not held-out quality. Retrieval
+evidence matching is normalized text containment, not entailment, official program
+execution, or answer accuracy. Company p50 latency was 3.30–7.20 s versus global
+0.41–0.68 s; filtered-search/indexing and concurrency effects are unresolved
+hypotheses, not demonstrated causes. These batch timings are not voice latency.
+At current list rates, recorded L40S + requested 4 CPU / 16 GiB time is approximately
+$1.86; this is a retrospective estimate, not an invoice, and excludes unrecorded
+startup/idle and actual resource overages. It is not new-session spending.
+
+Reusable contexts: `b29513c36fbf477cbf83ea3981bc41fa` contains all 883 dev cases,
+company hybrid:rerank top-5, source Git
+`59470ea45c78cf67b5ebc3224699ea25952f40ef`, the same corpus/model identities,
+and approximately 865 recorded GPU-seconds. Report SHA-256:
+`be337ed346c960c2f1249cb4fdc725b868d8ea06f76875138a205bd48f492748`.
+Answer runs record that report's hash and original retrieval lineage; do not
+re-embed, rerank, or ingest again for the open-model arms.
+
+## Proposed bounded open-model session (not executed)
+
+Read-only auth/status on 2026-11-01 verified locked Modal **1.6.3** and a deployed
+`ledger-llm-serve` with zero tasks, one H100, and a 300-second idle tail.
+No endpoint request was made: even `/health` can start paid GPU compute.
+Pinned Qwen `Qwen/Qwen3.8-27B-FP8` revision
+`017b9c7af6b5689d5dd426a76e0bc077eb5ca20a` was previously served by vLLM 0.32.0.
+Prior report `6e847a9130e84fe7aef31ccc3ef972e2` verifies its model alias,
+459.7-second cold start, thinking-off and low support. `high` returned HTTP 400;
+use `chat_template_kwargs.reasoning_effort=low`. Its short synthetic 200–220
+decode-token/s measurements are not a full throughput benchmark.
+
+`scripts/run_eval_session.py` defaults to **dry-run**, never deploys or detaches,
+and composes server, CPU benchmark, and CPU answer worker into **one attached
+ephemeral App**. It does not invoke the existing persistent serving App.
+Only `serve`, `measure`, and `generate` are registered: GPU retrieval and weight
+download functions are excluded from the session App entirely.
+Explicit execution requires separate approval; the CLI flag is not authorization.
+
+Guardrails:
+
+- A locked, fsync'd `.scratch/modal-budget-session.json` reserves spending and
+  elapsed caps cumulatively across runs, with no automatic refund after early exit.
+  Do not delete/reset it during this session. Its lock spans App shutdown,
+  preventing concurrent supervisors.
+- Total new-session authorization is **$28**, not a credit balance. Maximum
+  cumulative reservation is **9,000 seconds** including builds, cold starts,
+  requests, idle and client time. One H100 server and at most one active 2-CPU /
+  8-GiB benchmark/evaluation worker; no data downloads beyond pinned FinQA,
+  no weight redownload, ingestion, or index changes.
+  Session-only CPU limits are explicitly 8/2 cores (Modal soft throttling), and
+  hard memory limits 64/8 GiB; worker timeouts are reduced to remaining session time.
+- An absolute server deadline is injected before App startup. A container-side
+  timer exits at it, including during cold start; restarts reject expired deadlines.
+  CPU generation and benchmark workers also check absolute deadlines before work
+  and cancel their asynchronous workload at expiration.
+  Local `.spawn().get(timeout=remaining)` always calls
+  `.cancel(terminate_containers=True)` on completion, failure or interruption.
+  The attached App context stops **all** remote functions on exit; Modal also
+  stops ephemeral Apps after detecting client disconnection. No detached jobs.
+- Modal 1.6.3 signatures for App inclusion/run, call cancellation and timed get
+  were inspected locally. Cancellation/expiry/admission tests are mocked/local,
+  **not live proof** of platform termination latency. Allow the contingency for
+  cleanup/heartbeat lag; verify stopped App and zero tasks after every paid phase.
+- Official current rates: H100 $0.001097/s, CPU $0.0000131/core/s, memory
+  $0.00000222/GiB/s. Server 8-core/64-GiB plus client 2-core/8-GiB totals
+  $0.00138784/s; reserve **2x** for actual-use billing and overhead.
+  4,500 seconds reserves **$12.49**; 9,000 reserves **$24.98**, leaving **$3.02**
+  contingency. A 1,200-second cold-start allowance costs about $1.67 at base
+  rate; a 300-second idle tail about $0.40 for the server. Rates/CPU/memory are
+  estimates, not a platform-enforced dollar cap. If observed actual-use billing
+  or cleanup delay exceeds these assumptions, reject further admission.
+
+First approval scope: 4,500-second pilot. Benchmark phases
+`single,throughput,long,metrics` share at most 1,200 seconds including first cold
+start; the remaining time covers 200 proportional-stratified dev cases, seed 13,
+thinking off/low × retrieved@3/@5/oracle = **1,200 completions**. Concurrency 32,
+temperature 0, max 2,048 completion tokens, request timeout 120 s, completion
+deadline 180 s. Benchmark or pilot timeout/failure ends the App, not another paid retry.
+
+```sh
+# Read-only admission; no remote calls.
+uv run --locked --group compute python scripts/run_eval_session.py \
+  --prior-session-spend-usd 0 --elapsed-cap-seconds 4500 \
+  --manifest .scratch/open-model-pilot.json
+# ONLY after approval of this exact scope, append --execute-approved-plan.
+```
+
+Second approval scope, only if pilot reports are complete, source/sample hashes
+match and remaining reservation admits it: **two selected label/mode pairs** on
+all 883 dev cases, exactly 1,766 completions (not a cross product of winners).
+Store a two-object JSON list, e.g. `{"label":"qwen:off","mode":"retrieved@5"}`,
+in an approved selection file. Use `--selected-pairs <file>` and a fresh manifest;
+the persistent ledger counts the first reservation too. Re-admit with measured
+conservative runtime `2 * 883 * pilot_p95_seconds / 32 + 1200 + 300` within the
+remaining elapsed/spend allowance; otherwise defer. No automatic pilot selection
+or test unsealing is implemented.
+
+**Remaining blockers:** exact paid-phase approval; live verification that the
+ephemeral composed endpoint hydrates and cancellation stops every container;
+remaining real serving benchmarks; pilot/full-dev answer results and invoice
+reconciliation. Existing secret projections are the execution prerequisite;
+Vault workload identity is not yet wired into these serving jobs.
+
+Sources (retrieved 2026-11-01):
+[Modal pricing](https://modal.com/pricing),
+[ephemeral App lifecycle](https://modal.com/docs/guide/apps),
+[idle billing](https://modal.com/docs/guide/cold-start),
+[actual-use resource billing](https://modal.com/docs/guide/resources),
+[FunctionCall cancellation](https://modal.com/docs/sdk/py/latest/FunctionCall).
 
 ## Decision and release workflow
 

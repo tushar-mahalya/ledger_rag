@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import re
 import subprocess
@@ -74,6 +75,7 @@ image = (
     .add_local_python_source("ledger_rag")
 )
 app = modal.App("ledger-evaluation", image=image)
+answer_app = modal.App("ledger-evaluation-answer-functions", image=image)
 data_volume = modal.Volume.from_name("ledger-data", create_if_missing=True)
 cache_volume = modal.Volume.from_name("ledger-hf-cache", create_if_missing=True)
 database_secret = modal.Secret.from_name(
@@ -352,7 +354,7 @@ async def evaluate(commands: list[str], options: dict[str, Any]) -> dict[str, An
         "read_only": True,
         "options": {k: v for k, v in options.items() if "key" not in k},
     }
-    with tempfile.TemporaryDirectory(prefix="ledger-eval-") as directory:
+    with tempfile.TemporaryDirectory(prefix="ledger-eval-", dir=".") as directory:
         fetch = await asyncio.create_subprocess_exec(
             "bash", "/opt/ledger/fetch_finqa.sh", directory
         )
@@ -394,7 +396,7 @@ async def evaluate(commands: list[str], options: dict[str, Any]) -> dict[str, An
     return summarize_report(report)
 
 
-@app.function(
+@answer_app.function(
     cpu=2,
     memory=8192,
     volumes={"/data": data_volume},
@@ -406,6 +408,18 @@ async def evaluate(commands: list[str], options: dict[str, Any]) -> dict[str, An
 )
 async def generate(options: dict[str, Any], contexts_path: str) -> dict[str, Any]:
     """CPU-only LLM stage: answers over contexts saved by the GPU stage (no Qdrant access)."""
+    import time
+
+    deadline = options.get("session_deadline_unix")
+    if deadline is None:
+        return await _generate(options, contexts_path)
+    remaining = float(deadline) - time.time()
+    if not math.isfinite(remaining) or not 0 < remaining <= 9000:
+        raise ValueError("Evaluation session deadline is invalid or expired")
+    return await asyncio.wait_for(_generate(options, contexts_path), timeout=remaining)
+
+
+async def _generate(options: dict[str, Any], contexts_path: str) -> dict[str, Any]:
     import tempfile
     import time
     from datetime import UTC, datetime
@@ -431,7 +445,7 @@ async def generate(options: dict[str, Any], contexts_path: str) -> dict[str, Any
         "gpu": None,
         "options": {k: v for k, v in options.items() if "key" not in k},
     }
-    with tempfile.TemporaryDirectory(prefix="ledger-eval-") as directory:
+    with tempfile.TemporaryDirectory(prefix="ledger-eval-", dir=".") as directory:
         fetch = await asyncio.create_subprocess_exec(
             "bash", "/opt/ledger/fetch_finqa.sh", directory
         )
@@ -548,3 +562,6 @@ def main(
         contexts_path = contexts_path or str(summary["report_path"])
     if command in {"answers", "all"}:
         print(json.dumps(generate.remote(options, contexts_path), indent=2))
+
+
+app.include(answer_app)

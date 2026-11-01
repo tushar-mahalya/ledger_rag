@@ -718,6 +718,21 @@ def check_served_models(args: argparse.Namespace, served: list[str]) -> None:
             raise ValueError(f"LLM endpoint does not advertise {model}@{args.llm_model_revision}")
 
 
+def load_saved_contexts(
+    path: Path, fingerprint: str, collection: str, split: str
+) -> tuple[dict[str, Any], str]:
+    raw = path.read_bytes()
+    saved = json.loads(raw)
+    if "lineage" not in saved:
+        saved = {**saved["contexts"], "run_id": saved.get("run_id")}
+    lineage = saved["lineage"]
+    if lineage["corpus_sha256"] != fingerprint or lineage["collection"] != collection:
+        raise ValueError("Saved contexts come from a different corpus or collection")
+    if saved["dataset"]["question_split"] != split:
+        raise ValueError("Saved contexts come from a different question split")
+    return saved, hashlib.sha256(raw).hexdigest()
+
+
 async def execute(args: argparse.Namespace) -> dict[str, Any]:
     """Build the report for one command; shared by the CLI and the Modal job."""
     if args.split == "test":
@@ -789,19 +804,29 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
 
         contexts = None
         if args.contexts:
-            saved = json.loads(args.contexts.read_text())
-            if "lineage" not in saved:  # Modal job wrapper: {run_id, contexts: report}
-                saved = {**saved["contexts"], "run_id": saved.get("run_id")}
+            saved, source_hash = load_saved_contexts(
+                args.contexts, fingerprint, args.collection, args.split
+            )
             lineage = saved["lineage"]
-            if lineage["corpus_sha256"] != fingerprint or lineage["collection"] != args.collection:
-                raise ValueError("Saved contexts come from a different corpus or collection")
             contexts = saved["contexts"]
+            # Answer-only execution must retain the source's actual retrieval identity.
+            for name in (
+                "embedding_model",
+                "embedding_revision",
+                "embedding_space_id",
+                "reranker_model",
+                "reranker_revision",
+                "rerank_candidates",
+            ):
+                if name in lineage:
+                    report["lineage"][name] = lineage[name]
             report["lineage"]["contexts_source"] = {
                 "path": str(args.contexts),
                 "run_id": saved.get("run_id"),
                 "git_sha": lineage["git_sha"],
                 "embedding_space_id": lineage["embedding_space_id"],
                 "reranker_revision": lineage["reranker_revision"],
+                "report_sha256": source_hash,
             }
         self_hosted = args.llm_endpoint_kind == "self-hosted"
         stream = self_hosted if args.llm_stream is None else args.llm_stream
@@ -839,7 +864,9 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                 "llm_request_timeout": args.llm_request_timeout,
                 "llm_deadline": args.llm_deadline,
                 "prompt_sha256": report["answers"]["prompt_sha256"],
-                "rerank_candidates": args.rerank_candidates,
+                "rerank_candidates": report["lineage"].get(
+                    "rerank_candidates", args.rerank_candidates
+                ),
             }
         )
     return report

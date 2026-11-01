@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import random
 import re
@@ -39,6 +40,7 @@ import uuid
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import modal
@@ -77,6 +79,21 @@ image = modal.Image.debian_slim(python_version="3.12").uv_pip_install("httpx==0.
 app = modal.App("ledger-llm-bench", image=image)
 data_volume = modal.Volume.from_name("ledger-data", create_if_missing=True)
 serve_secret = modal.Secret.from_name(SERVE_APP, required_keys=[KEY_ENV])
+
+
+def validate_serve_url(url: str) -> None:
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or not (parsed.hostname or "").endswith(".modal.run")
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in ("", "/")
+        or parsed.port not in (None, 443)
+    ):
+        raise ValueError("Benchmark endpoint must be a credential-free Modal HTTPS origin")
 
 
 def parse_counters(text: str) -> dict[str, Any]:
@@ -450,12 +467,25 @@ async def run(url: str, key: str, phases: Sequence[str]) -> dict[str, Any]:
     return result
 
 
-@app.function(secrets=[serve_secret], volumes={"/data": data_volume}, timeout=3600)
-async def measure(phases: list[str]) -> dict[str, Any]:
-    url = await modal.Function.from_name(SERVE_APP, SERVE_FUNCTION).get_web_url.aio()
-    if not url:
+@app.function(
+    secrets=[serve_secret],
+    volumes={"/data": data_volume},
+    cpu=2,
+    memory=8192,
+    timeout=3600,
+    max_containers=1,
+    single_use_containers=True,
+    retries=0,
+)
+async def measure(phases: list[str], url: str = "", deadline_unix: float = 0) -> dict[str, Any]:
+    remaining = deadline_unix - time.time() if deadline_unix else 3600
+    if not math.isfinite(remaining) or not 0 < remaining <= 3600:
+        raise ValueError("Benchmark session deadline is invalid or expired")
+    resolved = url or await modal.Function.from_name(SERVE_APP, SERVE_FUNCTION).get_web_url.aio()
+    if not resolved:
         raise RuntimeError(f"{SERVE_APP} is not deployed")
-    result = await run(url, os.environ[KEY_ENV], phases)
+    validate_serve_url(resolved)
+    result = await asyncio.wait_for(run(resolved, os.environ[KEY_ENV], phases), timeout=remaining)
     output = Path("/data/llm-serve") / f"bench-{result['run_id']}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2))

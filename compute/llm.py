@@ -30,6 +30,7 @@ zero), ``max_containers=1``. Requests wait through a cold start (several minutes
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import time
@@ -64,6 +65,17 @@ KEY_ENV = "LEDGER_LLM_SERVE_API_KEY"
 HF_CACHE = "/root/.cache/huggingface"
 VLLM_CACHE = "/root/.cache/vllm"
 STARTUP_REPORT = "/run/ledger/startup.json"
+SESSION_DEADLINE_ENV = "LEDGER_LLM_SESSION_DEADLINE_UNIX"
+
+
+def session_seconds_remaining(value: str, now: float) -> float | None:
+    """An absolute deadline survives container restarts; unset preserves serving mode."""
+    if not value:
+        return None
+    deadline = float(value)
+    if not math.isfinite(deadline) or deadline <= now:
+        raise ValueError("LLM session deadline is invalid or expired")
+    return deadline - now
 
 
 def vllm_argv(speculative_tokens: int = SPECULATIVE_TOKENS) -> list[str]:
@@ -128,6 +140,7 @@ serve_image = (
     .add_local_file(HERE / "llm_middleware.py", "/root/llm_middleware.py")
 )
 app = modal.App(APP_NAME)
+server_app = modal.App("ledger-llm-server-functions")
 hf_volume = modal.Volume.from_name("ledger-llm-hf-cache", create_if_missing=True)
 vllm_volume = modal.Volume.from_name("ledger-llm-vllm-cache", create_if_missing=True)
 serve_secret = modal.Secret.from_name(APP_NAME, required_keys=[KEY_ENV])
@@ -161,14 +174,18 @@ def _gpu_name() -> str:
         return "unknown"
 
 
-@app.function(
+@server_app.function(
     image=serve_image,
     gpu=GPU,
-    cpu=8,
-    memory=64 * 1024,
+    cpu=(8, 8) if os.environ.get(SESSION_DEADLINE_ENV) else 8,
+    memory=(64 * 1024, 64 * 1024) if os.environ.get(SESSION_DEADLINE_ENV) else 64 * 1024,
     volumes={HF_CACHE: hf_volume, VLLM_CACHE: vllm_volume},
     secrets=[serve_secret],
-    env={SPECULATIVE_ENV: str(SPECULATIVE_TOKENS), "HF_HUB_OFFLINE": "1"},
+    env={
+        SPECULATIVE_ENV: str(SPECULATIVE_TOKENS),
+        "HF_HUB_OFFLINE": "1",
+        SESSION_DEADLINE_ENV: os.environ.get(SESSION_DEADLINE_ENV, ""),
+    },
     min_containers=0,
     max_containers=1,
     scaledown_window=SCALEDOWN_SECONDS,
@@ -179,6 +196,11 @@ def _gpu_name() -> str:
 def serve() -> None:
     """Start vLLM; its stdout is re-emitted as JSON lines and mined for startup timings."""
     import threading
+
+    remaining = session_seconds_remaining(os.environ.get(SESSION_DEADLINE_ENV, ""), time.time())
+    if remaining is not None:
+        # Independent of the workstation and HTTP traffic, including during cold start.
+        threading.Timer(remaining, lambda: os._exit(0)).start()
 
     from llm_middleware import (
         KEY_DIGEST_ENV,
@@ -228,3 +250,6 @@ def serve() -> None:
         os._exit(returncode or 1)
 
     threading.Thread(target=pump, name="vllm-log-pump", daemon=True).start()
+
+
+app.include(server_app)
