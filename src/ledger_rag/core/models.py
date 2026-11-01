@@ -65,6 +65,9 @@ class Chunk(BaseModel):
     allowed_groups: list[str] = Field(default_factory=list)
     ordinal: int
     content_hash: str
+    # Profile-specific text for embedding, sparse indexing and reranking (chunk
+    # profiles v2+). ``None`` means the v1 ``"{title}\n{text}"`` representation.
+    index_text: str | None = None
 
 
 class Hit(BaseModel):

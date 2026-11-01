@@ -81,6 +81,7 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
     from ledger_rag.evaluation.benchmarks.finqa import DATASET_COMMIT, load
     from ledger_rag.evaluation.datasets.fetch import sha256_file
     from ledger_rag.ingestion.bulk import ingest_documents, jsonl_documents
+    from ledger_rag.ingestion.context import SUMMARY_VERSION
     from ledger_rag.ingestion.tei import TEI_URL, embedding_server
     from ledger_rag.observability.telemetry import configure_telemetry
     from ledger_rag.retrieval.qdrant import QdrantRetriever
@@ -91,6 +92,7 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
     if urlsplit(url).scheme != "https" or not key.strip():
         raise ValueError("Cloud ingestion requires an HTTPS Qdrant URL and a nonempty API key")
     local_key = secrets.token_urlsafe(32)
+    summary_version = SUMMARY_VERSION if spec.chunk_profile == "v3" else ""
     settings = Settings(
         demo_token=SecretStr("offline-ingestion-no-api"),
         retrieval_backend="qdrant",
@@ -105,6 +107,8 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
         embedding_space_id=spec.embedding_space_id,
         embedding_dimensions=spec.dimensions,
         embedding_batch_size=spec.batch_size,
+        chunk_profile=spec.chunk_profile,
+        chunk_summary_version=summary_version,
         llm_timeout_seconds=120,
         query_deadline_seconds=120,
     )
@@ -131,10 +135,22 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
                 await asyncio.to_thread(_snapshot_jsonl, spec.input_path, target)
                 input_sha256 = await asyncio.to_thread(sha256_file, target)
                 documents = jsonl_documents(target)
+            summaries = None
+            if spec.chunk_profile == "v3":
+                from ledger_rag.ingestion.context import load_summaries, summary_cache_dir
+
+                summaries = await asyncio.to_thread(
+                    load_summaries, summary_cache_dir(DATA / "summaries")
+                )
             await store.create_empty_collection()
             async with embedding_server(spec, local_key):
                 result = await ingest_documents(
-                    documents, store, tenant_id=spec.tenant_id, batch_size=spec.batch_size
+                    documents,
+                    store,
+                    tenant_id=spec.tenant_id,
+                    batch_size=spec.batch_size,
+                    chunk_profile=spec.chunk_profile,
+                    summaries=summaries,
                 )
         report: dict[str, object] = {
             **asdict(result),
@@ -151,6 +167,8 @@ async def ingest(request: dict[str, object], git_sha: str) -> dict[str, object]:
             "input_path": spec.input_path or None,
             "input_sha256": input_sha256,
             "quantization": spec.quantization,
+            "chunk_profile": spec.chunk_profile,
+            "chunk_summary_version": summary_version or None,
             "status": "verified",
         }
         output = DATA / "ingestion" / f"{run_id}.json"
@@ -187,6 +205,7 @@ def main(
     dimensions: int = 768,
     batch_size: int = 128,
     quantization: str = "none",
+    chunk_profile: str = "v1",
 ) -> None:
     spec = IngestSpec.model_validate(
         {
@@ -199,6 +218,7 @@ def main(
             "dimensions": dimensions,
             "batch_size": batch_size,
             "quantization": quantization,
+            "chunk_profile": chunk_profile,
         }
     )
     git_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
