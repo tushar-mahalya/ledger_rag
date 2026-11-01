@@ -76,6 +76,8 @@ class Case(BaseModel):
     should_abstain: bool = False
     slices: list[str] = Field(default_factory=list)
     split: str = "unspecified"
+    # Correlated-sampling unit (e.g. source report); enables a cluster bootstrap.
+    cluster: str | None = None
 
     @model_validator(mode="after")
     def valid_labels(self) -> "Case":
@@ -107,6 +109,7 @@ class Row(BaseModel):
     retrieved_chunk_ids: list[str]
     cited_document_ids: list[str]
     slices: list[str]
+    cluster: str | None = None
 
 
 def retrieval_metrics(
@@ -148,19 +151,44 @@ def latency_summary(values: list[float]) -> dict[str, Metric]:
 
 
 def bootstrap_interval(
-    values: list[float], *, seed: int = 42, samples: int = 1000
+    values: list[float],
+    *,
+    seed: int = 42,
+    samples: int = 1000,
+    clusters: list[str] | None = None,
 ) -> dict[str, Metric | int]:
-    """Percentile 95% CI of macro mean; callers first average repeats within case."""
+    """Percentile 95% CI of macro mean; callers first average repeats within case.
+
+    With ``clusters`` the resampling unit is the cluster (all its cases move together),
+    which is the honest interval when cases share a source (e.g. one 10-K report).
+    """
     if samples < 1 or any(not math.isfinite(value) for value in values):
         raise ValueError("Require positive bootstrap samples and finite values")
+    if clusters is not None and len(clusters) != len(values):
+        raise ValueError("clusters must align with values")
     if not values:
         return {"low": None, "high": None, "cases": 0}
     rng = random.Random(seed)
-    means = [statistics.mean(rng.choices(values, k=len(values))) for _ in range(samples)]
+    if clusters is None:
+        means = [statistics.mean(rng.choices(values, k=len(values))) for _ in range(samples)]
+        return {
+            "low": percentile(means, 0.025),
+            "high": percentile(means, 0.975),
+            "cases": len(values),
+        }
+    groups: dict[str, list[float]] = defaultdict(list)
+    for value, cluster in zip(values, clusters, strict=True):
+        groups[cluster].append(value)
+    members = [(sum(group), len(group)) for _, group in sorted(groups.items())]
+    means = []
+    for _ in range(samples):
+        drawn = rng.choices(members, k=len(members))
+        means.append(sum(total for total, _ in drawn) / sum(count for _, count in drawn))
     return {
         "low": percentile(means, 0.025),
         "high": percentile(means, 0.975),
         "cases": len(values),
+        "clusters": len(members),
     }
 
 
@@ -240,6 +268,8 @@ def _row_metrics(row: Row) -> dict[str, Metric]:
 
 def summarize(rows: list[Row], *, seed: int, bootstrap_samples: int) -> dict[str, Any]:
     grouped: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    case_cluster = {row.case_id: row.cluster for row in rows}
+    clustered = any(cluster is not None for cluster in case_cluster.values())
     for row in rows:
         for name, value in _row_metrics(row).items():
             if value is not None:
@@ -250,7 +280,12 @@ def summarize(rows: list[Row], *, seed: int, bootstrap_samples: int) -> dict[str
     for name in metric_names:
         values = [statistics.mean(values) for values in grouped[name].values()]
         aggregate[name] = statistics.mean(values) if values else None
-        intervals[name] = bootstrap_interval(values, seed=seed, samples=bootstrap_samples)
+        clusters = (
+            [case_cluster[case_id] or case_id for case_id in grouped[name]] if clustered else None
+        )
+        intervals[name] = bootstrap_interval(
+            values, seed=seed, samples=bootstrap_samples, clusters=clusters
+        )
     # Kept for consumers of the original smoke report.
     for old in ("recall", "precision", "mrr", "ndcg"):
         aggregate[old] = aggregate.get(f"document_{old}_at_k")
@@ -424,6 +459,7 @@ async def evaluate(
                         retrieved_chunk_ids=chunk_ids,
                         cited_document_ids=cited,
                         slices=case.slices,
+                        cluster=case.cluster,
                     )
                 )
     finally:

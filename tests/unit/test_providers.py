@@ -635,6 +635,67 @@ async def test_openai_sends_configured_generation_controls(parameter: str) -> No
     await provider.close()
 
 
+async def test_openai_merges_extra_body_for_self_hosted_servers() -> None:
+    extra = {"chat_template_kwargs": {"enable_thinking": False}, "top_k": 20}
+    configured = settings().model_copy(update={"llm_extra_body": extra, "llm_temperature": 0.0})
+    provider = OpenAIProvider(configured)
+    requests = await transport(provider, OK_RESPONSES[OpenAIProvider])
+    await provider.complete([{"role": "user", "content": "q"}])
+    body = json.loads(requests[0].content)
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
+    assert body["top_k"] == 20 and body["temperature"] == 0.0
+    assert body["model"] == "test-model" and body["messages"][0]["content"] == "q"
+    await provider.close()
+
+
+def test_extra_body_is_parsed_from_env_and_validated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LEDGER_DEMO_TOKEN", "demo-test-token")
+    monkeypatch.setenv(
+        "LEDGER_LLM_EXTRA_BODY", '{"chat_template_kwargs": {"enable_thinking": false}}'
+    )
+    assert Settings().llm_extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+    for reserved in ("model", "messages", "stream", "temperature", "max_tokens", "tools"):
+        with pytest.raises(ValueError, match=reserved):
+            Settings.model_validate({**settings().model_dump(), "llm_extra_body": {reserved: 1}})
+    with pytest.raises(ValueError, match="4 KiB"):
+        Settings.model_validate({**settings().model_dump(), "llm_extra_body": {"x": "y" * 5000}})
+    with pytest.raises(ProviderError, match="OpenAI-compatible"):
+        AnthropicProvider(settings("anthropic").model_copy(update={"llm_extra_body": {"a": 1}}))
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ({"content": "42.5", "reasoning_content": "step by step"}, "42.5"),
+        ({"content": "42.5", "reasoning": "step by step"}, "42.5"),
+        ({"content": "<think>add rows</think>\n\n42.5"}, "42.5"),
+        ({"content": "add rows\n</think>\n\n42.5"}, "42.5"),
+        ({"content": "plain answer", "tool_calls": None}, "plain answer"),
+    ],
+)
+async def test_openai_never_surfaces_reasoning(message: dict[str, Any], expected: str) -> None:
+    provider = OpenAIProvider(settings())
+    await transport(provider, {"choices": [{"message": message}]})
+    result = await provider.complete([{"role": "user", "content": "q"}])
+    assert result == {"content": expected, "tool_calls": []}
+    await provider.close()
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"content": None, "reasoning_content": "thinking until the token cap"},
+        {"content": "<think>thinking until the token cap"},
+    ],
+)
+async def test_openai_reasoning_without_answer_is_a_clear_error(message: dict[str, Any]) -> None:
+    provider = OpenAIProvider(settings())
+    await transport(provider, {"choices": [{"message": message}]})
+    with pytest.raises(ProviderError, match="reasoning without an answer"):
+        await provider.complete([{"role": "user", "content": "q"}])
+    await provider.close()
+
+
 async def test_anthropic_sends_configured_generation_controls() -> None:
     configured = settings("anthropic").model_copy(
         update={"llm_temperature": 0.2, "llm_max_tokens": 512}

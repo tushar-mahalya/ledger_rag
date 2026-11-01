@@ -200,6 +200,7 @@ def finetune_embedder(
     matryoshka_dims: list[int] | None = None,
     seed: int = 13,
     policy: dict[str, Any] | None = None,
+    unseal_test: bool = False,
 ) -> dict[str, Any]:
     import torch
     from datasets import Dataset
@@ -278,10 +279,14 @@ def finetune_embedder(
     decision = decide(candidate, baseline, PromotionPolicy(**(policy or {})))
     _log("embedder.decision", promote=decision.promote, reasons=decision.reasons)
 
-    # Held-out test is evaluated once, after the decision, for reporting only.
-    test = _ir_evaluator(root / "test_ir.json", "test")
-    candidate_test = strip_prefix(test(model), "test")
-    baseline_test = strip_prefix(test(SentenceTransformer(base_model)), "test")
+    # Test stays sealed unless explicitly unsealed; then it is scored once, after the
+    # decision, for reporting only.
+    candidate_test = baseline_test = None
+    _log("embedder.test_split", unsealed=unseal_test)
+    if unseal_test:
+        test = _ir_evaluator(root / "test_ir.json", "test")
+        candidate_test = strip_prefix(test(model), "test")
+        baseline_test = strip_prefix(test(SentenceTransformer(base_model)), "test")
 
     model.save_pretrained(str(out))
     subprocess.run(["rm", "-rf", str(out / "checkpoints")], check=True)
@@ -326,6 +331,7 @@ def finetune_reranker(
     learning_rate: float = 2e-5,
     seed: int = 13,
     policy: dict[str, Any] | None = None,
+    unseal_test: bool = False,
 ) -> dict[str, Any]:
     import torch
     from datasets import Dataset
@@ -408,9 +414,12 @@ def finetune_reranker(
     reranker_policy = {"metric": "ndcg@10", "guard_metrics": ["mrr@10", "map"], **(policy or {})}
     decision = decide(candidate, baseline, PromotionPolicy(**reranker_policy))
     _log("reranker.decision", promote=decision.promote, reasons=decision.reasons)
-    test = evaluator("test")
-    candidate_test = strip_prefix(test(model), "test")
-    baseline_test = strip_prefix(test(CrossEncoder(base_model)), "test")
+    candidate_test = baseline_test = None
+    _log("reranker.test_split", unsealed=unseal_test)
+    if unseal_test:
+        test = evaluator("test")
+        candidate_test = strip_prefix(test(model), "test")
+        baseline_test = strip_prefix(test(CrossEncoder(base_model)), "test")
     model.save_pretrained(str(out))
     subprocess.run(["rm", "-rf", str(out / "checkpoints")], check=True)
     onnx = _export_onnx(CrossEncoder, out)
@@ -495,7 +504,9 @@ def main(
     learning_rate: float = 2e-5,
     seed: int = 13,
     skip_int8_eval: bool = False,
+    unseal_test: bool = False,
 ) -> None:
+    """Train and promote on dev; ``--unseal-test`` additionally reports held-out test."""
     if kind not in {"embedder", "reranker"}:
         raise SystemExit("--kind must be embedder or reranker")
     git_sha = _git_sha()
@@ -508,7 +519,10 @@ def main(
         "epochs": epochs,
         "learning_rate": learning_rate,
         "seed": seed,
+        "unseal_test": unseal_test,
     }
+    if unseal_test:
+        print("WARNING: test split unsealed; report it once and do not tune on it")
     if kind == "embedder":
         manifest = finetune_embedder.remote(batch_size=batch_size or 256, **common)
     else:

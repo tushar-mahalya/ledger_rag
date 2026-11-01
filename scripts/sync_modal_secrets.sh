@@ -8,6 +8,8 @@
 # are projected into ledger-ingestion for direct database writes.
 # With argument "llm": LEDGER_LLM_BASE_URL (default: Gemini's OpenAI-compatible endpoint)
 # plus secret/ledger/llm#api_key are projected into ledger-llm for evaluation jobs.
+# With argument "llm-serve": secret/ledger/llm-serve#api_key (the bearer key of the
+# self-hosted vLLM endpoint, compute/llm.py) is projected into ledger-llm-serve.
 # Prefer workload identity (scripts/vault_configure_modal_jwt.sh): jobs then read Vault
 # directly with short-lived tokens and no provider credential is copied into Modal.
 # Values never appear in argv or shell history: they are written to a 0600 temp file that
@@ -22,7 +24,8 @@ case "${1:-tei}" in
   llm)
     export LEDGER_LLM_BASE_URL="${LEDGER_LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}"
     path=llm; secret=ledger-llm ;;
-  *) echo "usage: $0 [tei|ingestion|llm]" >&2; exit 1 ;;
+  llm-serve) path=llm-serve; secret=ledger-llm-serve ;;
+  *) echo "usage: $0 [tei|ingestion|llm|llm-serve]" >&2; exit 1 ;;
 esac
 command -v vault >/dev/null || { echo "vault CLI not found" >&2; exit 1; }
 : "${VAULT_ADDR:?VAULT_ADDR must be set}"
@@ -44,6 +47,10 @@ if sys.argv[2] == "ledger-tei":
     if len(key) < 32:
         raise SystemExit("embedding_api_key must be at least 32 characters")
     payload = {"TEI_API_KEY": key}
+elif sys.argv[2] == "ledger-llm-serve":
+    if len(key) < 32:
+        raise SystemExit("llm-serve api_key must be at least 32 characters")
+    payload = {"LEDGER_LLM_SERVE_API_KEY": key}
 else:
     llm = sys.argv[2] == "ledger-llm"
     url = os.environ["LEDGER_LLM_BASE_URL" if llm else "LEDGER_QDRANT_URL"]

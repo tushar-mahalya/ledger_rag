@@ -104,6 +104,17 @@ def test_bootstrap_seed_degenerate_and_missing_samples() -> None:
     assert latency_summary([]) == dict.fromkeys(["p50", "p95", "p99"])
 
 
+def test_cluster_bootstrap_resamples_whole_clusters() -> None:
+    values = [1.0] * 20 + [0.0] * 20
+    iid = bootstrap_interval(values, seed=3, samples=400)
+    clustered = bootstrap_interval(values, seed=3, samples=400, clusters=["a"] * 20 + ["b"] * 20)
+    assert clustered["clusters"] == 2 and clustered["cases"] == 40
+    assert {clustered["low"], clustered["high"]} == {0.0, 1.0}
+    assert iid["low"] > 0.0 and iid["high"] < 1.0  # type: ignore[operator]
+    with pytest.raises(ValueError):
+        bootstrap_interval(values, clusters=["a"])
+
+
 def make_row(
     case_id: str,
     *,
