@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventParser, streamAnswer } from "./api";
 import { demoTurn, exampleQuestions } from "./demo";
 import { boundedHistory } from "./contracts";
+import { evidenceSchema, MAX_RESPONSE_JSON_BYTES } from "./schemas";
 
 afterEach(() => vi.unstubAllGlobals());
 const answer = demoTurn(exampleQuestions[0]).answer!;
@@ -113,6 +114,44 @@ describe("SSE contract", () => {
       new EventParser().push("data: " + "x".repeat(1_000_001) + "\n"),
     ).toThrow("size limit");
   });
+  it.each(["x", '"', "\u0001", "€"])(
+    "accepts maximum-budget evidence through the complete transport (%j)",
+    async (character) => {
+      const evidence = {
+        request_id: "r",
+        retrieval_ms: 1,
+        sources: [],
+        citations: Array.from({ length: 12 }, (_, index) => ({
+          id: `C${index + 1}`,
+          document_id: "d",
+          source: "urn:test",
+          title: "Synthetic",
+          published_at: "2025-01-01",
+          quote: "",
+        })),
+      };
+      const bytes = (value: unknown) =>
+        new TextEncoder().encode(JSON.stringify(value)).byteLength;
+      let room = MAX_RESPONSE_JSON_BYTES - bytes(evidence);
+      const cost = bytes(character) - 2;
+      for (const citation of evidence.citations.slice(0, -1)) {
+        const length = Math.min(100_000, Math.floor(room / cost));
+        citation.quote = character.repeat(length);
+        room -= cost * length;
+      }
+      evidence.citations.at(-1)!.quote = "x".repeat(room);
+      expect(bytes(evidence)).toBe(MAX_RESPONSE_JSON_BYTES);
+      expect(evidenceSchema.safeParse(evidence).success).toBe(true);
+      mockStream(
+        sse("evidence", evidence) + sse("answer", answer) + sse("done", {}),
+      );
+      const callbacks = options();
+      await expect(streamAnswer(callbacks)).resolves.toEqual(answer);
+      expect(callbacks.onEvidence).toHaveBeenCalledExactlyOnceWith(evidence);
+      evidence.citations.at(-1)!.quote += "x";
+      expect(evidenceSchema.safeParse(evidence).success).toBe(false);
+    },
+  );
   it("rejects duplicate answers", async () => {
     mockStream(sse("answer", answer) + sse("answer", answer) + sse("done", {}));
     await expect(streamAnswer(options())).rejects.toThrow(

@@ -422,6 +422,38 @@ def amount(kind: str, currency: str | None = None, scale: str | None = None) -> 
     return {"kind": kind, "currency": currency, "scale": scale, "display": "amount"}
 
 
+@pytest.mark.parametrize("amounts", ["EUR 5 and USD 5", "USD 5 and EUR 5"])
+def test_identical_quote_in_different_currencies_is_ambiguous(amounts: str) -> None:
+    text = f"{amounts}; baseline USD 2."
+    with pytest.raises(ProgramError, match="ambiguous"):
+        run_program(program(("subtract", [ev("5"), ev("USD 2")])), [citation(text)])
+    result = run_program(program(("subtract", [ev("USD 5"), ev("USD 2")])), [citation(text)])
+    assert result.result == "3"
+    assert result.unit is not None and result.unit.currency == "USD"
+
+
+def test_identical_quote_with_different_dimensions_is_ambiguous() -> None:
+    text = "USD 5 per share and USD 5 in cash; baseline USD 2."
+    with pytest.raises(ProgramError, match="ambiguous"):
+        run_program(program(("subtract", [ev("5"), ev("USD 2")])), [citation(text)])
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_per_share_times_evidence_scalar_preserves_unit(reverse: bool) -> None:
+    text = "Diluted EPS was $2.50 per share, and a split factor of 2 was reported."
+    args = [ev("$2.50"), ev("2 was")]
+    result = run_program(program(("multiply", args[::-1] if reverse else args)), [citation(text)])
+    assert result.result == "5"
+    assert result.unit is not None
+    assert result.unit.model_dump() == amount("per_share", "USD")
+
+
+def test_per_share_times_non_share_count_is_rejected() -> None:
+    text = "Diluted EPS was $2.50 per share and headcount was 2 employees."
+    with pytest.raises(ProgramError, match="share count"):
+        run_program(program(("multiply", [ev("$2.50"), ev("2 employees")])), [citation(text)])
+
+
 @pytest.mark.parametrize(
     "steps,expected",
     [

@@ -349,7 +349,8 @@
         "model"
       ],
       "title": "Answer",
-      "type": "object"
+      "type": "object",
+      "x-max-json-bytes": 900000
     },
     "Calculation": {
       "description": "A deterministic evidence-bound program trace; ``result`` is in base units.",
@@ -746,7 +747,8 @@
         "sources"
       ],
       "title": "Evidence",
-      "type": "object"
+      "type": "object",
+      "x-max-json-bytes": 900000
     },
     "PlanSummary": {
       "additionalProperties": false,

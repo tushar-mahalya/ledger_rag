@@ -126,6 +126,35 @@ def test_invalid_answer_is_abstention_only_after_validation(
     assert events[-2][1]["citations"] == []
 
 
+def test_oversized_evidence_fails_explicitly_before_generation(
+    settings: Settings, document: Document
+) -> None:
+    class LargeStore(MemoryRetriever):
+        async def search(self, query: QueryRequest, principal: Principal) -> list[Hit]:
+            chunk = chunk_document(document)[0]
+            return [
+                Hit(
+                    chunk=chunk.model_copy(
+                        update={"id": f"large-{index}", "text": "PRIVATE" + "x" * 99_993}
+                    ),
+                    score=1,
+                )
+                for index in range(10)
+            ]
+
+    provider = FakeProvider([])
+    with TestClient(create_app(settings, LargeStore(), provider)) as client:
+        response = client.post(
+            "/v1/query/stream", json={"question": "Revenue", "top_k": 10}, headers=AUTH
+        )
+        events = parse_events(response.text)
+        assert events[-1][0] == "error"
+        assert not any(name in {"evidence", "answer", "done"} for name, _ in events)
+        assert "PRIVATE" not in response.text
+        assert not provider.messages
+        assert client.app.state.runtime.slots._value == settings.max_concurrent_queries
+
+
 @pytest.mark.parametrize("path", ["/v1/query", "/v1/query/stream"])
 @pytest.mark.parametrize(
     "changes",
