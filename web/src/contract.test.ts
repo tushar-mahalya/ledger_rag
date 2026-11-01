@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { demoTurn, exampleQuestions } from "./demo";
 import { REASONS } from "./grounding";
-import { activitySchema, answerSchema, evidenceSchema } from "./schemas";
+import {
+  activitySchema,
+  answerSchema,
+  evidenceSchema,
+  MAX_RESPONSE_JSON_BYTES,
+} from "./schemas";
 
 type Node = Record<string, unknown>;
 type Facts = Record<string, unknown>;
@@ -133,10 +138,16 @@ describe("bound parity with the Pydantic response models", () => {
   });
 
   it("detects a drifted bound", () => {
-    const loose = answerSchema.extend({ answer: z.string().max(100_001) });
+    const loose = answerSchema.safeExtend({ answer: z.string().max(100_001) });
     expect(() => compare("Answer", loose)).toThrow(/\$\.answer/);
-    const missing = answerSchema.omit({ tool_calls: true });
+    const missing = z.object(answerSchema.shape).omit({ tool_calls: true });
     expect(() => compare("Answer", missing)).toThrow();
+  });
+
+  it("matches the aggregate serialized response budget", () => {
+    for (const model of ["Answer", "Evidence"]) {
+      expect(defs[model]["x-max-json-bytes"]).toBe(MAX_RESPONSE_JSON_BYTES);
+    }
   });
 
   it("describes every server reason code", () => {

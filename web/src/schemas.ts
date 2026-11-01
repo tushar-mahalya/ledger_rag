@@ -1,5 +1,19 @@
 import { z } from "zod";
 
+export const MAX_RESPONSE_JSON_BYTES = 900_000;
+
+function boundedResponse(value: unknown, context: z.RefinementCtx) {
+  if (
+    new TextEncoder().encode(JSON.stringify(value)).byteLength >
+    MAX_RESPONSE_JSON_BYTES
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "The response JSON exceeded the size limit.",
+    });
+  }
+}
+
 export const citationSchema = z.object({
   id: z
     .string()
@@ -134,21 +148,23 @@ export const abstentionDecisionSchema = z.object({
   calibrated: z.boolean().default(false),
 });
 
-export const answerSchema = z.object({
-  answer: z.string().max(100_000),
-  citations: z.array(citationSchema).max(12),
-  abstained: z.boolean(),
-  profile: z.enum(["chat", "voice"]),
-  retrieval_ms: z.number().nonnegative().finite(),
-  generation_ms: z.number().nonnegative().finite(),
-  request_id: z.string().min(1).max(200),
-  model: z.string().max(500),
-  tool_calls: count.default(0),
-  calculation: calculationSchema.nullable().default(null),
-  calculations: z.array(calculationSchema).max(16).default([]),
-  verification: verificationSchema.nullable().default(null),
-  abstention: abstentionDecisionSchema.nullable().default(null),
-});
+export const answerSchema = z
+  .object({
+    answer: z.string().max(100_000),
+    citations: z.array(citationSchema).max(12),
+    abstained: z.boolean(),
+    profile: z.enum(["chat", "voice"]),
+    retrieval_ms: z.number().nonnegative().finite(),
+    generation_ms: z.number().nonnegative().finite(),
+    request_id: z.string().min(1).max(200),
+    model: z.string().max(500),
+    tool_calls: count.default(0),
+    calculation: calculationSchema.nullable().default(null),
+    calculations: z.array(calculationSchema).max(16).default([]),
+    verification: verificationSchema.nullable().default(null),
+    abstention: abstentionDecisionSchema.nullable().default(null),
+  })
+  .superRefine(boundedResponse);
 
 export const activityKindSchema = z.enum([
   "planning",
@@ -194,9 +210,11 @@ export const activitySchema = z.object({
   plan: planSummarySchema.nullable().optional(),
 });
 
-export const evidenceSchema = z.object({
-  request_id: z.string().max(200),
-  retrieval_ms: z.number().nonnegative().finite(),
-  sources: z.array(z.string().max(2048)).max(12),
-  citations: z.array(citationSchema).max(12).optional(),
-});
+export const evidenceSchema = z
+  .object({
+    request_id: z.string().max(200),
+    retrieval_ms: z.number().nonnegative().finite(),
+    sources: z.array(z.string().max(2048)).max(12),
+    citations: z.array(citationSchema).max(12).optional(),
+  })
+  .superRefine(boundedResponse);

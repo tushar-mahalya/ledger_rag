@@ -95,6 +95,14 @@ MAX_PLAN_SUBQUESTIONS = 4
 MAX_PLAN_SUBQUESTION_CHARS = 200
 MAX_PLAN_ENTITIES = 8
 MAX_PLAN_ENTITY_CHARS = 64
+# Leave room for SSE framing under the client's 1M-character event and 4MB stream limits.
+MAX_RESPONSE_JSON_BYTES = 900_000
+
+
+def _check_response_size(response: BaseModel) -> None:
+    if len(response.model_dump_json().encode("utf-8")) > MAX_RESPONSE_JSON_BYTES:
+        raise ValueError(f"Response JSON exceeds {MAX_RESPONSE_JSON_BYTES} UTF-8 bytes")
+
 
 CitationId = Annotated[str, StringConstraints(max_length=MAX_CITATION_ID_CHARS, pattern=r"^C\d+$")]
 Identifier = Annotated[str, StringConstraints(max_length=MAX_IDENTIFIER_CHARS)]
@@ -334,6 +342,8 @@ class AbstentionDecision(BaseModel):
 
 
 class Answer(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"x-max-json-bytes": MAX_RESPONSE_JSON_BYTES})
+
     answer: str = Field(max_length=MAX_ANSWER_CHARS)
     citations: list[Citation] = Field(max_length=MAX_CITATIONS)
     abstained: bool
@@ -362,11 +372,14 @@ class Answer(BaseModel):
         programs = [*self.calculations, *([self.calculation] if self.calculation else [])]
         if any(not program.referenced_citations() <= cited for program in programs):
             raise ValueError("Calculations reference citations missing from the answer")
+        _check_response_size(self)
         return self
 
 
 class Evidence(BaseModel):
     """The streaming ``evidence`` event: authorized sources retrieved before generation."""
+
+    model_config = ConfigDict(json_schema_extra={"x-max-json-bytes": MAX_RESPONSE_JSON_BYTES})
 
     request_id: Identifier
     retrieval_ms: Milliseconds
@@ -374,6 +387,11 @@ class Evidence(BaseModel):
         max_length=MAX_CITATIONS
     )
     citations: list[Citation] = Field(default_factory=list, max_length=MAX_CITATIONS)
+
+    @model_validator(mode="after")
+    def bounded_json(self) -> Self:
+        _check_response_size(self)
+        return self
 
 
 class IngestRequest(BaseModel):

@@ -191,8 +191,12 @@ def cited_calculations(
     result never references a citation missing from the returned list.
     """
     ids = {citation.id for citation in cited}
-    kept = [calculation for calculation in calculations if calculation.citation_ids]
-    kept = [c for c in kept if ids & set(c.citation_ids)][-MAX_CALCULATIONS:]
+    kept = [
+        calculation
+        for calculation in calculations
+        if ids & set(calculation.citation_ids)
+        or any(step.evidence_backed and ids & set(step.citation_ids) for step in calculation.steps)
+    ][-MAX_CALCULATIONS:]
     lineage = ids.union(*(calculation.referenced_citations() for calculation in kept))
     linked = [citation for citation in pool if citation.id in lineage]
     if {citation.id for citation in linked} != lineage:  # a lineage id outside the pool

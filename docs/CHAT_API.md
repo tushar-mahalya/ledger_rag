@@ -280,6 +280,13 @@ The server validates every `answer` before sending it:
 | decimal strings | 64 chars |
 | `verification.unsupported_numbers` | 64 entries, 200 chars each |
 | reason lists | 32 |
+| Serialized `answer` or `evidence` JSON | 900,000 UTF-8 bytes in total, including escaping, metadata and calculation traces |
+
+The aggregate JSON bound applies in addition to individual field limits; those
+limits cannot all be filled at once. Both Pydantic and zod reject larger payloads.
+This leaves framing headroom below the workspace's 1,000,000-character event
+limit and 4,000,000-byte stream limit. Oversized server responses produce an
+explicit request/stream failure, never a truncated final answer.
 
 Scores are finite (never `NaN` or `Infinity`), and counts and timings are
 non-negative. `scripts/dump_contract_fixtures.py` regenerates

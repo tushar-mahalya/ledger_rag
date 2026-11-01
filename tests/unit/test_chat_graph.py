@@ -97,6 +97,52 @@ async def test_history_is_separate_untrusted_context(
     assert len(query.history) == 1
 
 
+async def test_answer_can_use_an_independent_intermediate_calculation(
+    settings: Settings, principal: Principal
+) -> None:
+    from tests.unit.test_program import ev, program
+
+    texts = [
+        "Revenue increased from USD 120 million to USD 150 million.",
+        "Operating income was USD 25 million on revenue of USD 100 million.",
+    ]
+    documents = [
+        Document(
+            id=f"intermediate-{index}",
+            tenant_id=principal.tenant_id,
+            title="Fictional disclosure",
+            text=text,
+            source="urn:test",
+            published_at=date(2025, 2, 1),
+        )
+        for index, text in enumerate(texts)
+    ]
+    hits = [Hit(chunk=chunk_document(document)[0], score=1) for document in documents]
+    provider = FakeProvider(
+        [
+            {
+                "tool_calls": [
+                    tool_call(
+                        **program(
+                            ("subtract", [ev("USD 150 million"), ev("USD 120 million")]),
+                            ("divide", [ev("USD 25 million", "C2"), ev("USD 100 million", "C2")]),
+                        )
+                    )
+                ]
+            },
+            {"content": "Revenue increased by USD 30 million. [C1]"},
+        ]
+    )
+    answer = await RagService(settings, MemoryRetriever(), provider).generate(
+        QueryRequest(question="How much did revenue increase?"), hits, 1, "intermediate", principal
+    )
+    assert not answer.abstained
+    assert answer.verification is not None and answer.verification.status == "verified"
+    assert len(answer.calculations) == 1
+    assert answer.calculations[0].steps[0].result == "30000000"
+    assert {citation.id for citation in answer.citations} == {"C1", "C2"}
+
+
 async def test_graph_nodes_are_executed_and_measured(
     settings: Settings,
     evidence: list[Hit],

@@ -422,7 +422,7 @@ def _bind_evidence(raw: Mapping[str, Any], step: int, citations: Mapping[str, Ci
         )
     text = citations[citation_id].quote
     mentions = extract_numbers(text)
-    candidates: dict[tuple[Decimal, Decimal, str | None], NumberMention] = {}
+    candidates: dict[tuple[Decimal, Decimal, str | None, _Unit], NumberMention] = {}
     position = text.find(quote)
     while position >= 0:
         inside = [
@@ -436,7 +436,9 @@ def _bind_evidence(raw: Mapping[str, Any], step: int, citations: Mapping[str, Ci
             )
         if inside:
             mention = inside[0]
-            candidates[(mention.value, mention.scale, mention.unit)] = mention
+            candidates[
+                (mention.value, mention.scale, mention.unit, _evidence_unit(text, mention))
+            ] = mention
         position = text.find(quote, position + 1)
     if not candidates:
         raise ProgramError(
@@ -602,8 +604,10 @@ def _product(left: _Unit, right: _Unit, step: int) -> _Unit:
         raise ProgramError(f"Step #{step}: multiply cannot multiply two currency amounts")
     money, other = (left, right) if left.dim in _MONEY else (right, left)
     if money.dim in _MONEY:
-        # A per-share amount times a share count (or table quantity) is a total.
-        return _Unit("currency", currency=money.currency, scale=_single_scale(money, other))
+        if money.dim == "per_share" and other.dim == "count" and not other.shares:
+            raise ProgramError(f"Step #{step}: multiply needs a share count for a per-share amount")
+        kind = "currency" if other.dim == "count" and other.shares else money.dim
+        return _Unit(kind, currency=money.currency, scale=_single_scale(money, other))
     if {left.dim, right.dim} == {"count", "unitless"}:
         count = left if left.dim == "count" else right
         return _Unit("count", scale=_single_scale(left, right), shares=count.shares)
