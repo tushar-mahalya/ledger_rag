@@ -1,11 +1,78 @@
 # Validation record
 
-Date: 2026-10-31. This record distinguishes measured local behavior from untested
-production targets. The latest refresh covers source/packaging, the chat graph,
-browser contracts, accessibility, static deployment and documentation syntax.
-Earlier local FinQA statistics and the read-only database preflight are retained.
-Earlier experiments are recorded separately, not claimed as reruns against the
-current workspace. Re-run the commands before relying on these results.
+Latest refresh: **2026-11-01**. This record distinguishes measured behavior from
+untested production targets. The current integrated checks and cloud experiments
+are below; the older 2026-10-31 records are retained as history, not current counts.
+Re-run the commands before relying on these results.
+
+## Integrated source checks (2026-11-01)
+
+Retrieval profiles, the reviewed bounded answer contract, open-model evaluation,
+and external evidence/MCP features are merged.
+
+- **1,096 Python tests passed, two opt-in live tests skipped**, independently on
+  Python 3.11, 3.12 and 3.13. Service/helper and compute type checks passed on
+  each interpreter. Remote-only compute imports use the existing
+  `--ignore-missing-imports` compute check, including the session supervisor.
+- Ruff lint and formatting passed; contract fixture parity and Agent Skills
+  checks passed. The three-repeat synthetic smoke gate passed.
+- **78 Vitest tests and 26 desktop/mobile Playwright cases passed**, including
+  accessibility, grounding and external provenance. The real local API/browser
+  flow passed with fictional data, no external model and no paid compute.
+- Web lint, formatting, strict TypeScript, production build and budget checks
+  passed: **175,576 JavaScript/CSS gzip bytes** against 204,800; largest
+  minified JavaScript chunk **412,324 bytes** against 460,800.
+- Wheel/source distribution builds and both Compose configurations passed.
+  **18 Mermaid diagrams** parsed with the retained local validator; this is a
+  syntax check, not visual or accessibility certification of diagrams.
+- Seven independently reviewed correctness defects were corrected with
+  regressions: intermediate calculation retention, ambiguous numeric units,
+  per-share scaling, aggregate response size, FRED calendar-period selection,
+  shared-fetch cancellation/shutdown, and unit-qualified SEC citation identity.
+  Exact 900,000-byte UTF-8 response boundaries, escaping and explicit oversized
+  SSE failure are tested rather than inferred from field-level schema parity.
+
+## Bounded live checks (2026-11-01)
+
+- Both rebuilt FinQA v2 collections had **8,647** payloads, chunk IDs and sparse
+  vectors matching the regenerated checksum-pinned corpus and recorded builds.
+  Legacy rendering metadata was corrected after that comparison; unrelated
+  metadata was preserved. Readback and production v2 readiness passed; v1 was
+  rejected. Dense vectors were not recomputed. This is compatibility evidence,
+  not evidence that v2 improves answer quality.
+- A bounded FRED metadata/observation check returned HTTP 200 with cutoff
+  `2023-10-15`, observation date `2023-09-01`, and selected vintage `2023-10-02`.
+  Citation identity, provenance and cutoff checks passed without retaining raw
+  responses or keys. Broader live SEC/FRED coverage and production MCP clients
+  remain release checks.
+
+## Measured compute and remaining gates (2026-11-01)
+
+[The evaluation record](EVALUATION.md) publishes pinned identities, report hashes,
+sample counts, failures, confidence intervals, runtime and accounting:
+
+- Prior full-dev retrieval run `c17d398f34f24efd874e29bb641d9738`.
+- Serving benchmark `c0c06effb57e4581b86518d6c7e9803b` and 200-case pilot
+  `4810c0ba57554f509f6301f388a80f35`.
+- Selected full-dev runs `84cf8232546e457397d40f48e04b75ce` and
+  `dcdfd41f28794c1182bc92be1ea77819`: **883 cases each**, tolerant numeric
+  matching **61.27% retrieved@5 / 74.63% oracle**. Neither is official FinQA
+  program-execution accuracy or a held-out/SOTA result.
+- Both attached Apps stopped with zero tasks, runners and running inputs.
+  Total elapsed time was **1,304.513 seconds**. Full-dev runs had zero provider
+  failures/retries; the pilot retained one transport failure in its denominator.
+- Combined per-App accrued usage **$1.74530226** differs from workspace metered
+  usage **$2.07154255**. Conservative observed accounting is **$2.08**, not a
+  settled invoice. The admission ledger remains reserved, with no additional
+  elapsed admission; early finishes did not reset or refund it.
+
+Still unverified: settled billing reconciliation, official comparable answer
+scoring, held-out quality, trained-model quantization/serving parity, live carrier
+interoperability, production warm serving and real voice latency. Workload-identity
+wiring, abstention calibration and the company-scope retrieval latency anomaly
+remain open. No production deployment or trained-model promotion occurred.
+
+## Historical checks (2026-10-31)
 
 ## Verified source and packaging
 

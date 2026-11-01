@@ -14,10 +14,13 @@ compare alternatives and define when to revisit them.
 ```mermaid
 flowchart TB
     Chat["React research workspace: HTTP / SSE"] --> Auth
+    MCPClient["MCP client: Streamable HTTP"] --> Auth
     Caller["PCM / Twilio media: WebSocket"] --> Auth
     subgraph API["Single API deployment: modular monolith"]
         Auth["Identity, roles and admission limits"] --> Voice["Voice gateway"]
         Auth --> RAG["RAG service"]
+        Auth --> MCP["Opt-in read-only MCP adapter"]
+        MCP --> RAG
         Voice --> RAG
         RAG --> Retrieve["Authorized retrieval"]
         RAG --> Validate["Citation validation / abstention"]
@@ -25,6 +28,8 @@ flowchart TB
     end
     Voice --> Speech["External STT / TTS"]
     RAG --> LLM["OpenAI / Anthropic-compatible provider"]
+    RAG --> External["Opt-in SEC / FRED evidence: chat only"]
+    MCP --> External
     Retrieve --> Embed["Query embedding endpoint"]
     Retrieve --> Qdrant[("Persistent Qdrant")]
     Retrieve --> Rerank["Optional TEI reranker: chat only"]
@@ -44,6 +49,12 @@ independently scheduled batch workload; speech/model endpoints and Qdrant are
 external dependencies, not a requirement to split every domain into microservices.
 Postgres, Valkey, a durable job orchestrator and GraphQL are **not deployed parts
 of this topology**.
+
+Pinned Qwen serving and FinQA dev answer-harness measurements now exist on
+attached ephemeral Modal H100 Apps, with observed shutdown and bounded admission.
+They do not validate a production warm tier, the authenticated chat pipeline,
+quantized trained-model parity or real IVR latency. See
+[measured evaluation and operating limits](EVALUATION.md#measured-selected-full-dev-arms-2026-11-01).
 
 The [browser workspace](CHAT_WORKSPACE.md) is a static React/TypeScript client,
 not another application-server tier. Chat generation now uses a request-scoped
@@ -299,6 +310,13 @@ Sources: [gateway](../src/ledger_rag/voice/gateway.py),
 OIDC signature/issuer/audience/expiry validation and tenant/group claims are
 implemented. Demo credentials are local-only. Postgres RLS is **not** the
 authorization system currently running; it is a future control-plane option.
+
+The optional [MCP adapter](MCP.md) exposes read-only query and evidence tools
+over Streamable HTTP with protected-resource metadata. Identity and permissions
+are server-derived. [External evidence](EXTERNAL_DATA.md) is opt-in, bounded and
+tracked separately from retrieved filings; these tools never run on the voice
+path or contaminate benchmark runs. Provenance and valid citation markers still
+do not establish semantic entailment.
 
 Service secrets are loaded from Vault-rendered files at startup. Explicit
 environment values can override those files; the application does not source

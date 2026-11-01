@@ -27,10 +27,12 @@ not the number of frameworks in the diagram.
 | Identity and permissions | OIDC signature/issuer/audience/expiry validation; server-derived tenant and group ACLs, admin/reader roles |
 | Evidence contract | Source, disclosure date and exact retrieved quote; unknown or missing paragraph citations trigger abstention |
 | Tool harness | Typed request-scoped LangGraph chat; allowlisted retrieval and Decimal arithmetic, bounded untrusted history, cumulative tool budget and deadlines |
+| External evidence | Opt-in chat-only SEC EDGAR and FRED/ALFRED lookups with bounded calls, typed provenance and explicit failure outcomes |
+| MCP adapter | Opt-in authenticated Streamable HTTP tools with principal-derived permissions and protected-resource metadata |
 | Operations | Structured redacted logs, request/trace IDs, OTLP traces, Prometheus metrics, Docker, Vault Agent templates, CI |
 | Evaluation | Retrieval/answer smoke tests, authorization/failure-path suites, reproducible evaluation and HTTP benchmarking |
 | Voice gateway | Generic PCM and Twilio Media Streams adapters, VAD and barge-in; synthetic lifecycle tests, not verified carrier calls |
-| Compute plane | Colocated Modal GPU ingestion with direct Qdrant writes, training/inference, mining and model manifests; remote execution still needs validation |
+| Compute plane | Colocated Modal GPU ingestion, training/inference and model manifests; bounded open-model serving and FinQA dev evaluation measured, training/quantization release gates remain |
 | Agent workflows | Portable Agent Skills, shared working agreement, official Modal reference and CI validation |
 
 **Important boundaries:** valid citation markers do not establish semantic
@@ -39,9 +41,27 @@ validated complete answer, **not** raw token streaming; safe execution activity 
 streamed separately. This is deliberate to avoid
 speaking an answer before the citation gate. Real telephony calls, signed webhook
 token minting and end-to-end voice latency remain unverified.
-GraphRAG, ColPali, late interaction, validated GPU serving, durable workflow orchestration,
+GraphRAG, ColPali, late interaction, quantized trained-model serving, durable workflow orchestration,
 Postgres outbox, distributed quotas, and semantic faithfulness judges are
 architecture/experiment tracks, not pretend implementations.
+
+### Measured retrieval evidence
+
+Prior FinQA **dev** run `c17d398f34f24efd874e29bb641d9738` evaluated 883
+questions. Hybrid plus reranking achieved **90.4% all-evidence recall@5**
+(95% report-cluster bootstrap interval: 87.6–92.9%) with known-company scope,
+versus **72.1%** with global scope. This is retrieval evidence matching, not
+answer accuracy, semantic entailment or held-out quality. It was not rerun
+against the current source. Models, corpus identity, costs and limitations are
+in [the evaluation record](docs/EVALUATION.md#verified-prior-full-dev-retrieval-measurement).
+
+Full-dev answer-harness runs `84cf8232546e457397d40f48e04b75ce` and
+`dcdfd41f28794c1182bc92be1ea77819` measured **61.3% retrieved@5** and
+**74.6% oracle-context** tolerant numeric matching on the same 883 cases with
+Qwen3.8-27B-FP8. These reuse saved v1 contexts and are not official FinQA
+program-execution scores, full chat-pipeline validation or SOTA evidence.
+[Measured quality, paired intervals and provisional cost](docs/EVALUATION.md#measured-selected-full-dev-arms-2026-11-01)
+are published with lineage; the test split remains sealed.
 
 ## Start locally
 
@@ -116,6 +136,9 @@ See [evaluation methodology](docs/EVALUATION.md) for benchmark protocols,
 confidence intervals, leakage controls, real dataset licensing, and load tests.
 Real accuracy and voice latency must be measured with your endpoint, corpus,
 hardware and concurrency. A model call can dominate the entire voice budget.
+Measured FinQA dev retrieval results are recorded separately in
+[the evaluation runbook](docs/EVALUATION.md); retrieval recall is not answer
+accuracy or held-out model quality.
 
 Tests cover cross-tenant and group isolation, publication cutoffs, stale chunk
 replacement, malformed citations, unsafe arithmetic, OIDC claims, request-size
