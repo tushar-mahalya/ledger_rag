@@ -24,7 +24,7 @@ from ledger_rag.core.models import (
     QueryRequest,
 )
 from ledger_rag.core.retry import request_deadline
-from ledger_rag.generation.evidence import citations_from_hits
+from ledger_rag.generation.evidence import evidence_event
 from ledger_rag.ingestion.chunking import chunk_document
 from ledger_rag.observability.telemetry import (
     BodyTooLarge,
@@ -270,18 +270,8 @@ def create_app(
                         hits, retrieval_ms = await state.service.retrieve(
                             payload, principal, on_activity=on_activity
                         )
-                        evidence_event = json.dumps(
-                            {
-                                "request_id": request.state.request_id,
-                                "retrieval_ms": retrieval_ms,
-                                "sources": [hit.chunk.source for hit in hits],
-                                "citations": [
-                                    citation.model_dump(mode="json")
-                                    for citation in citations_from_hits(hits)
-                                ],
-                            }
-                        )
-                        await send(f"event: evidence\ndata: {evidence_event}\n\n")
+                        evidence = evidence_event(request.state.request_id, retrieval_ms, hits)
+                        await send(f"event: evidence\ndata: {evidence.model_dump_json()}\n\n")
                         answer = await state.service.generate(
                             payload,
                             hits,
