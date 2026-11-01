@@ -5,6 +5,12 @@ step result (``#0`` is the first step, as in FinQA) or a small whitelisted const
 Free numeric literals are rejected so the model cannot introduce unsupported inputs.
 Arithmetic uses ``Decimal`` with 28 significant digits and ROUND_HALF_EVEN; results are
 displayed with at most 10 decimal places.
+
+Every step result also carries a deterministic unit derived from its operands: the
+currency, per-share, count or unitless dimension, an ISO currency, a display scale and a
+display hint. Units are never converted: amounts in different currencies fail closed.
+A bare ``$`` is read as USD (the corpus is SEC filings); ``C$``, ``HK$`` or ``\u00a5``
+stay ambiguous and never match an ISO currency.
 """
 
 import re
@@ -26,7 +32,11 @@ from ledger_rag.core.models import (
     CalculationKind,
     CalculationOperand,
     CalculationStep,
+    CalculationUnit,
     Citation,
+    UnitDisplay,
+    UnitKind,
+    UnitScale,
 )
 
 MAX_STEPS = 8
@@ -106,6 +116,8 @@ _GLUED = re.compile(
     r"(?<![\w.,])(?P<core>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(?P<suffix>[A-Za-z]+)"
 )
 _GLUED_SCALES = {"k": "k", "m": "m", "mm": "m", "mn": "mn", "b": "b", "bn": "bn"}
+_SYMBOLS = {"US$": "USD", "\u20ac": "EUR", "\u00a3": "GBP"}
+_LETTERS_BEFORE = re.compile(r"[A-Za-z]+$")
 
 
 class ProgramError(ValueError):
@@ -125,6 +137,8 @@ class NumberMention:
     unit: Unit | None
     decimals: int
     year_like: bool
+    # Raw currency token: an ISO code, "$" for a bare dollar, or an ambiguous "C$"/"\u00a5".
+    currency: str | None = None
 
     @property
     def absolute(self) -> Decimal:
@@ -165,7 +179,9 @@ def extract_numbers(
         inner_scale = (match.group("scale") or "").strip().lower()
         outer_scale = (match.group("scale2") or "").strip().lower() if bracketed else ""
         scale_key = inner_scale or outer_scale
-        currency = bool(match.group("currency") or match.group("lead"))
+        symbol_group = "lead" if match.group("lead") else "currency"
+        symbol = (match.group(symbol_group) or "").strip().upper()
+        currency = bool(symbol)
         if scale_key in {"k", "m", "b"} and not currency and not loose:
             continue  # "10b-5" or "3m" without a currency is an identifier, not an amount.
         signed = bool(match.group("sign") or match.group("sign2"))
@@ -208,12 +224,23 @@ def extract_numbers(
                 unit=unit,
                 decimals=len(core.split(".", 1)[1]) if "." in core else 0,
                 year_like=year_like,
+                currency=_currency_token(masked, match.start(symbol_group), symbol)
+                if symbol
+                else None,
             )
         )
     if loose:
         mentions.extend(_glued_numbers(text, masked, mentions, include_years))
         mentions.sort(key=lambda mention: mention.start)
     return mentions
+
+
+def _currency_token(masked: str, start: int, symbol: str) -> str:
+    """Letters glued to a dollar or yen sign (C$, HK$, A$) make it ambiguous, never USD."""
+    prefix = _LETTERS_BEFORE.search(masked[max(0, start - 8) : start])
+    if prefix and symbol in {"$", "\u00a5"}:
+        return prefix.group(0)[-3:].upper() + symbol
+    return _SYMBOLS.get(symbol, symbol)
 
 
 def _glued_numbers(
@@ -249,6 +276,67 @@ def _glued_numbers(
 
 
 _Kind = Literal["currency", "amount", "ratio", "percent", "boolean", "constant"]
+_Dim = Literal[
+    "currency", "per_share", "count", "unitless", "ratio", "percent", "boolean", "constant"
+]
+_KINDS: dict[_Dim, _Kind] = {
+    "currency": "currency",
+    "per_share": "currency",
+    "count": "amount",
+    "unitless": "amount",
+    "ratio": "ratio",
+    "percent": "percent",
+    "boolean": "boolean",
+    "constant": "constant",
+}
+_MONEY = frozenset({"currency", "per_share"})
+_UNIT_SCALES: dict[str, UnitScale] = {
+    "thousand": "thousand",
+    "million": "million",
+    "billion": "billion",
+    "trillion": "trillion",
+}
+_ISO_CURRENCY = re.compile(r"[A-Z]{3}")
+_CURRENCY_CODES = frozenset(
+    "USD EUR GBP JPY CHF CAD AUD NZD CNY HKD SGD INR KRW SEK NOK DKK BRL MXN ZAR".split()
+)
+_CODE_BEFORE = re.compile(r"(?<![A-Za-z])([A-Z]{3})[ \t]?$")
+_CURRENCY_AFTER = re.compile(
+    r"[ \t]*(?:(?P<code>[A-Z]{3})\b|(?:(?P<qualifier>[A-Za-z.]+)[ \t]+)?"
+    r"(?P<word>(?i:dollars|euros?|yen))\b)",
+)
+_US = frozenset({"U.S.", "US", "UNITED"})
+_PER_SHARE = re.compile(
+    r"[ \t]*(?:(?:per|a)[ \t]+|/[ \t]*)(?:(?:basic|diluted|common|ordinary|and)[ \t]+)*share\b",
+    re.IGNORECASE,
+)
+_COUNT = re.compile(
+    r"[ \t]*(?:(?:basic|diluted|weighted[- ]average|common|ordinary|outstanding|full[- ]time|"
+    r"net|new|active|total)[ \t]+)*(?P<noun>shares|employees|customers|subscribers|users|"
+    r"members|stores|locations|units|vehicles|accounts|restaurants|branches|clients)\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class _Unit:
+    dim: _Dim
+    # Raw token: an ISO code or an ambiguous symbol such as "C$"; never converted.
+    currency: str | None = None
+    scale: UnitScale | None = None
+    shares: bool = False
+    display: UnitDisplay = "amount"
+
+    @property
+    def kind(self) -> _Kind:
+        if self.dim in _MONEY and self.currency is None:
+            return "amount"
+        return _KINDS[self.dim]
+
+
+_CONSTANT = _Unit("constant")
+_BOOLEAN = _Unit("boolean", display="boolean")
+_PERCENT = _Unit("percent", display="percent")
 
 
 @dataclass(frozen=True)
@@ -256,8 +344,50 @@ class _Value:
     value: Decimal
     operand: CalculationOperand
     citation_ids: frozenset[str]
-    kind: _Kind
+    unit: _Unit
     evidence_backed: bool
+
+    @property
+    def kind(self) -> _Kind:
+        return self.unit.kind
+
+
+def _nearby_currency(text: str, mention: NumberMention) -> str | None:
+    """An ISO code or currency word written beside a number ("CAD 5", "5 million euros")."""
+    before = _CODE_BEFORE.search(text[max(0, mention.start - 5) : mention.start])
+    if before and before.group(1) in _CURRENCY_CODES:
+        return before.group(1)
+    after = _CURRENCY_AFTER.match(text, mention.end)
+    if after is None:
+        return None
+    if after.group("code"):
+        return after.group("code") if after.group("code") in _CURRENCY_CODES else None
+    word = after.group("word").lower()
+    qualifier = (after.group("qualifier") or "").upper()
+    if word == "dollars" and qualifier and qualifier not in _US:
+        return f"{qualifier[:8]} $"  # Canadian dollars and the like stay ambiguous.
+    return {"dollars": "USD", "yen": "JPY"}.get(word, "EUR")
+
+
+def _evidence_unit(text: str, mention: NumberMention) -> _Unit:
+    if mention.unit is not None and mention.unit != "currency":
+        return _Unit("ratio", display="percent")  # Percent-family evidence is a fraction.
+    scale = _UNIT_SCALES.get(mention.scale_word or "")
+    nearby = _nearby_currency(text, mention)
+    currency = mention.currency
+    if currency is None or (currency == "$" and nearby is not None):
+        currency = nearby
+    elif currency == "$":
+        currency = "USD"
+    tail = text[mention.end : mention.end + 80]
+    if _PER_SHARE.match(tail):
+        return _Unit("per_share", currency=currency, scale=scale)
+    if currency is not None:
+        return _Unit("currency", currency=currency, scale=scale)
+    count = _COUNT.match(tail)
+    if count:
+        return _Unit("count", scale=scale, shares=count.group("noun").lower() == "shares")
+    return _Unit("unitless", scale=scale)
 
 
 def _context() -> Context:
@@ -292,7 +422,7 @@ def _bind_evidence(raw: Mapping[str, Any], step: int, citations: Mapping[str, Ci
         )
     text = citations[citation_id].quote
     mentions = extract_numbers(text)
-    candidates: dict[tuple[Decimal, Decimal, str | None], NumberMention] = {}
+    candidates: dict[tuple[Decimal, Decimal, str | None, _Unit], NumberMention] = {}
     position = text.find(quote)
     while position >= 0:
         inside = [
@@ -306,7 +436,9 @@ def _bind_evidence(raw: Mapping[str, Any], step: int, citations: Mapping[str, Ci
             )
         if inside:
             mention = inside[0]
-            candidates[(mention.value, mention.scale, mention.unit)] = mention
+            candidates[
+                (mention.value, mention.scale, mention.unit, _evidence_unit(text, mention))
+            ] = mention
         position = text.find(quote, position + 1)
     if not candidates:
         raise ProgramError(
@@ -325,13 +457,12 @@ def _bind_evidence(raw: Mapping[str, Any], step: int, citations: Mapping[str, Ci
             value=format_decimal(mention.operand_value),
             citation_id=citation_id,
             quote=quote,
-            source_value=mention.text,
+            source_value=mention.text[:500],
             scale=mention.scale_word,
             unit=mention.unit,
         ),
         citation_ids=frozenset({citation_id}),
-        # Percent-family evidence is converted to a fraction, i.e. a ratio.
-        kind="currency" if mention.unit == "currency" else "ratio" if mention.unit else "amount",
+        unit=_evidence_unit(text, mention),
         evidence_backed=True,
     )
 
@@ -356,7 +487,7 @@ def _operand(
             value=prior.value,
             operand=CalculationOperand(kind="step", value=format_decimal(prior.value), step=index),
             citation_ids=prior.citation_ids,
-            kind=prior.kind,
+            unit=prior.unit,
             evidence_backed=prior.evidence_backed,
         )
     if keys == {"constant"}:
@@ -378,7 +509,7 @@ def _operand(
             value=value,
             operand=CalculationOperand(kind="constant", value=format_decimal(value)),
             citation_ids=frozenset(),
-            kind="constant",
+            unit=_CONSTANT,
             evidence_backed=False,
         )
     raise ProgramError(
@@ -388,77 +519,166 @@ def _operand(
 
 
 _SCALING_OPS = frozenset({"add", "subtract", "multiply", "divide", "exp"})
-_AMOUNTS = frozenset({"currency", "amount"})
 
 
-def _same_kind(kinds: Sequence[_Kind], op: str, step: int) -> _Kind:
-    unique = set(kinds)
-    if unique <= _AMOUNTS:
-        return "currency" if "currency" in unique else "amount"
-    if len(unique) == 1:
-        return kinds[0]
-    raise ProgramError(
+def _mix_error(op: str, step: int) -> ProgramError:
+    return ProgramError(
         f"Step #{step}: {op} cannot mix percentages or ratios with amounts; convert first"
     )
 
 
-def _result_kind(op: str, operands: Sequence[_Value], step: int) -> _Kind:
-    """Unit kind of a step result; also enforces evidence lineage and constant roles."""
-    constants = [operand for operand in operands if operand.kind == "constant"]
-    bound = [operand for operand in operands if operand.kind != "constant"]
+def _currency(units: Sequence[_Unit], op: str, step: int) -> str | None:
+    tokens = {unit.currency for unit in units if unit.currency is not None}
+    if len(tokens) > 1:
+        raise ProgramError(
+            f"Step #{step}: {op} cannot mix amounts in different currencies; currencies are "
+            "never converted"
+        )
+    return next(iter(tokens), None)
+
+
+def _finest_scale(units: Sequence[_Unit]) -> UnitScale | None:
+    scales = [scale for scale in (unit.scale for unit in units) if scale is not None]
+    if len(scales) < len(units):
+        return None
+    finest: UnitScale = min(scales, key=lambda scale: _SCALES[scale])
+    return finest
+
+
+def _single_scale(*units: _Unit) -> UnitScale | None:
+    scales = [scale for scale in (unit.scale for unit in units) if scale is not None]
+    return scales[0] if len(scales) == 1 else None
+
+
+def _combine(units: Sequence[_Unit], op: str, step: int) -> _Unit:
+    """Unit of an additive combination (sum, difference, comparison or table op)."""
+    dims = {unit.dim for unit in units}
+    if dims <= {"ratio"}:
+        percent = all(unit.display == "percent" for unit in units)
+        return _Unit("ratio", display="percent" if percent else "ratio")
+    if dims == {"percent"}:
+        return _PERCENT
+    if not dims <= {"currency", "per_share", "count", "unitless"}:
+        raise _mix_error(op, step)
+    currency = _currency(units, op, step)
+    if "count" in dims and dims & _MONEY:
+        raise ProgramError(
+            f"Step #{step}: {op} cannot mix counts such as shares with currency amounts"
+        )
+    if "per_share" in dims:
+        if any(unit.scale for unit in units):
+            raise ProgramError(
+                f"Step #{step}: {op} cannot mix per-share amounts with scaled totals"
+            )
+        return _Unit("per_share", currency=currency)
+    if "currency" in dims:
+        return _Unit("currency", currency=currency, scale=_finest_scale(units))
+    if "count" in dims:
+        shares = all(unit.shares for unit in units if unit.dim == "count")
+        return _Unit("count", scale=_finest_scale(units), shares=shares)
+    return _Unit("unitless", scale=_finest_scale(units))
+
+
+def _power(base: _Unit, exponent: _Unit | None, step: int) -> _Unit:
+    if base.dim in _MONEY or (exponent is not None and exponent.dim in _MONEY):
+        raise ProgramError(
+            f"Step #{step}: exp needs a ratio or unitless base and exponent; currency "
+            "amounts cannot be raised to a power"
+        )
+    if base.dim == "ratio":
+        return _Unit("ratio", display="ratio")
+    if base.dim == "percent":
+        return _PERCENT
+    return _Unit("unitless")
+
+
+def _product(left: _Unit, right: _Unit, step: int) -> _Unit:
+    if left.dim == "ratio" and right.dim == "ratio":
+        percent = left.display == right.display == "percent"
+        return _Unit("ratio", display="percent" if percent else "ratio")
+    if right.dim == "ratio":
+        return left
+    if left.dim == "ratio":
+        return right
+    if left.dim in _MONEY and right.dim in _MONEY:
+        raise ProgramError(f"Step #{step}: multiply cannot multiply two currency amounts")
+    money, other = (left, right) if left.dim in _MONEY else (right, left)
+    if money.dim in _MONEY:
+        if money.dim == "per_share" and other.dim == "count" and not other.shares:
+            raise ProgramError(f"Step #{step}: multiply needs a share count for a per-share amount")
+        kind = "currency" if other.dim == "count" and other.shares else money.dim
+        return _Unit(kind, currency=money.currency, scale=_single_scale(money, other))
+    if {left.dim, right.dim} == {"count", "unitless"}:
+        count = left if left.dim == "count" else right
+        return _Unit("count", scale=_single_scale(left, right), shares=count.shares)
+    return _Unit("unitless", scale=_single_scale(left, right))
+
+
+def _quotient(left: _Unit, right: _Unit, step: int) -> _Unit:
+    if right.dim == "ratio":
+        return _Unit("ratio", display="ratio") if left.dim == "ratio" else left  # amount / rate
+    if left.dim == "ratio":
+        raise _mix_error("divide", step)
+    currency = _currency([left, right], "divide", step)
+    if left.dim == "currency" and right.dim == "count":
+        return _Unit("per_share" if right.shares else "currency", currency=currency)
+    if left.dim == "currency" and right.dim == "per_share":
+        return _Unit("count", shares=True)
+    return _Unit("ratio", display="ratio")
+
+
+def _result_unit(op: str, operands: Sequence[_Value], step: int) -> _Unit:
+    """Unit of a step result; also enforces evidence lineage, constant roles and units."""
+    constants = [operand for operand in operands if operand.unit.dim == "constant"]
+    bound = [operand for operand in operands if operand.unit.dim != "constant"]
     if not any(operand.evidence_backed for operand in bound):
         raise ProgramError(
             f"Step #{step}: every step needs an evidence-bound argument (a cited quote or a "
             "ref to an evidence-based step); constants cannot create values on their own"
         )
-    if any(operand.kind == "boolean" for operand in operands):
+    if any(operand.unit.dim == "boolean" for operand in operands):
         raise ProgramError(f"Step #{step}: a 'greater' result is a yes/no flag, not a number")
     if constants and (len(constants) > 1 or op not in _SCALING_OPS):
         raise ProgramError(
             f"Step #{step}: a constant may only be the single scaling or offset argument "
             "of add, subtract, multiply, divide or exp"
         )
+    units = [operand.unit for operand in bound]
     if op == "greater":
-        _same_kind([operand.kind for operand in bound], op, step)
-        return "boolean"
+        _combine(units, op, step)
+        return _BOOLEAN
     if op == "percent_change":
-        _same_kind([operand.kind for operand in bound], op, step)
-        return "percent"
+        _combine(units, op, step)
+        return _PERCENT
     if constants:
-        constant, other = constants[0].value, bound[0].kind
-        if op in {"divide", "exp"} and operands[1].kind != "constant":
+        constant, other = constants[0].value, units[0]
+        if op in {"divide", "exp"} and operands[1].unit.dim != "constant":
             raise ProgramError(f"Step #{step}: in {op} a constant may only be the second argument")
-        if op in {"add", "subtract"} and (constant != 1 or other != "ratio"):
-            raise ProgramError(
-                f"Step #{step}: add/subtract only accept the constant 1 next to a percentage "
-                "or ratio (for example 1 + growth rate)"
-            )
-        if op == "multiply" and constant == 100 and other == "ratio":
-            return "percent"
-        if op == "divide" and constant == 100 and other == "percent":
-            return "ratio"
+        if op in {"add", "subtract"}:
+            if constant != 1 or other.dim != "ratio":
+                raise ProgramError(
+                    f"Step #{step}: add/subtract only accept the constant 1 next to a "
+                    "percentage or ratio (for example 1 + growth rate)"
+                )
+            return _Unit("ratio", display="ratio")
+        if op == "multiply" and constant == 100 and other.dim == "ratio":
+            return _PERCENT
+        if op == "divide" and constant == 100 and other.dim == "percent":
+            return _Unit("ratio", display="percent")
+        if op == "exp":
+            return _power(other, None, step)
         return other
-    kinds = [operand.kind for operand in bound]
     if op in {"add", "subtract"} or op in TABLE_OPS:
-        return _same_kind(kinds, op, step)
+        return _combine(units, op, step)
     if op == "exp":
-        return kinds[0]
-    if "percent" in kinds:
+        return _power(units[0], units[1], step)
+    if any(unit.dim == "percent" for unit in units):
         raise ProgramError(
             f"Step #{step}: percent_change results are in percent; divide by 100 before "
             f"using them in {op}"
         )
-    left, right = kinds
-    if op == "multiply":
-        if right == "ratio":
-            return left
-        if left == "ratio":
-            return right
-        return "currency" if "currency" in kinds else "amount"
-    if right == "ratio" and left != "ratio":
-        return left  # amount / rate
-    _same_kind(kinds, op, step)
-    return "ratio"
+    left, right = units
+    return _product(left, right, step) if op == "multiply" else _quotient(left, right, step)
 
 
 def _apply(op: str, values: list[Decimal], step: int) -> Decimal:
@@ -547,7 +767,7 @@ def run_program(arguments: Any, citations: Sequence[Citation]) -> Calculation:
                 raise ProgramError(f"Step #{index}: an argument could not be parsed") from None
             if op in BINARY_OPS and len(operands) != 2:
                 raise ProgramError(f"Step #{index}: {op} takes exactly two arguments")
-            kind = _result_kind(op, operands, index)
+            unit = _result_unit(op, operands, index)
             value = _bounded(_apply(op, [operand.value for operand in operands], index), index)
             citation_ids = frozenset().union(*(operand.citation_ids for operand in operands))
             results.append(
@@ -557,7 +777,7 @@ def run_program(arguments: Any, citations: Sequence[Citation]) -> Calculation:
                         kind="step", value=format_decimal(value), step=index
                     ),
                     citation_ids=citation_ids,
-                    kind=kind,
+                    unit=unit,
                     evidence_backed=True,
                 )
             )
@@ -567,9 +787,10 @@ def run_program(arguments: Any, citations: Sequence[Citation]) -> Calculation:
                     op=op,
                     operands=[operand.operand for operand in operands],
                     result=format_decimal(value),
-                    kind=_public_kind(kind),
+                    kind=_public_kind(unit.kind),
                     citation_ids=sorted(citation_ids, key=lambda value: int(value[1:])),
                     evidence_backed=True,
+                    unit=_public_unit(unit),
                 )
             )
     if not results[-1].citation_ids:
@@ -578,13 +799,38 @@ def run_program(arguments: Any, citations: Sequence[Citation]) -> Calculation:
         steps=trace,
         result=trace[-1].result,
         citation_ids=sorted(results[-1].citation_ids, key=lambda value: int(value[1:])),
+        unit=trace[-1].unit,
     )
 
 
 def _public_kind(kind: _Kind) -> CalculationKind:
-    if kind == "constant":  # unreachable: _result_kind never returns a bare constant
+    if kind == "constant":  # unreachable: _result_unit never returns a bare constant
         raise ProgramError("constants cannot be step results")
     return kind
+
+
+_UNIT_KINDS: dict[_Dim, UnitKind] = {
+    "currency": "currency",
+    "per_share": "per_share",
+    "count": "count",
+    "unitless": "unitless",
+    "ratio": "ratio",
+    "percent": "percent",
+    "boolean": "unitless",
+}
+
+
+def _public_unit(unit: _Unit) -> CalculationUnit:
+    if unit.dim == "constant":  # unreachable, as above
+        raise ProgramError("constants cannot be step results")
+    money = unit.dim in _MONEY
+    iso = unit.currency if unit.currency and _ISO_CURRENCY.fullmatch(unit.currency) else None
+    return CalculationUnit(
+        kind=_UNIT_KINDS[unit.dim],
+        currency=iso if money else None,
+        scale=unit.scale if unit.dim in {"currency", "count", "unitless"} else None,
+        display=unit.display,
+    )
 
 
 def program_tool_result(calculation: Calculation) -> dict[str, Any]:
@@ -598,11 +844,13 @@ def program_tool_result(calculation: Calculation) -> dict[str, Any]:
                 "inputs": [operand.value for operand in step.operands],
                 "result": step.result,
                 "kind": step.kind,
+                "unit": step.unit.model_dump(exclude_none=True) if step.unit else None,
             }
             for step in calculation.steps
         ],
         "note": (
             "Amounts are in base units (scale words applied); percentages are fractions. "
+            "Units are derived from the evidence; state the currency they show. "
             "Cite the evidence ids used by the program."
         ),
     }

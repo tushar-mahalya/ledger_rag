@@ -410,9 +410,12 @@ async def test_enforce_abstains_on_unsupported_numbers(profile: Profile) -> None
     answer = await answer_for("Revenue was USD 125 million. [C1]", profile)
     assert answer.abstained and answer.citations == []
     assert answer.verification is not None and answer.verification.status == "failed"
-    assert answer.verification.unsupported_numbers == ["USD 125 million"]
+    # The rejected draft never leaks: only reason codes and the count explain the abstention.
+    assert answer.verification.unsupported_numbers == []
+    assert answer.verification.reasons == ["unsupported_numbers"]
     assert answer.abstention is not None and "verification_failed" in answer.abstention.reasons
-    assert answer.abstention.features.unsupported_numbers == 1
+    assert answer.abstention.features.unsupported_number_count == 1
+    assert "125" not in answer.model_dump_json()
 
 
 async def test_flag_mode_keeps_answer_but_marks_unverified() -> None:

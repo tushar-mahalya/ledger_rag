@@ -57,7 +57,7 @@ These are lifecycle events, **not token streaming or private reasoning**.
 
 ```text
 event: activity
-data: {"stage":"generation","status":"started","label":"Generating answer"}
+data: {"stage":"generation","status":"started","label":"Generating answer","kind":"generation"}
 
 ```
 
@@ -68,20 +68,44 @@ The public schema is:
   stage: "retrieval" | "planning" | "generation" | "tool" | "validation",
   status: "started" | "completed",
   label: <fixed label below>,
-  tool?: "calculator" | "search_evidence"
+  kind: <operation below>,
+  tool?: "calculator" | "search_evidence",
+  plan?: PlanSummary              // completed planning activity only
 }
 ```
 
-| Stage / operation | Fixed label | Optional `tool` |
-| --- | --- | --- |
-| retrieval | `Retrieving evidence` | absent |
-| planning | `Planning query` | absent |
-| generation | `Generating answer` | absent |
-| calculator | `Calculating` | `calculator` |
-| corrective search | `Searching evidence` | `search_evidence` |
-| rejected tool request | `Checking tool request` | absent |
-| validation | `Validating citations` | absent |
-| optional model verifier (chat only) | `Verifying grounding` | absent |
+| Operation | `kind` | `stage` | Fixed label | Optional `tool` |
+| --- | --- | --- | --- | --- |
+| retrieval | `retrieval` | `retrieval` | `Retrieving evidence` | absent |
+| planning | `planning` | `planning` | `Planning query` | absent |
+| generation | `generation` | `generation` | `Generating answer` | absent |
+| calculator | `calculator` | `tool` | `Calculating` | `calculator` |
+| corrective search | `evidence_search` | `tool` | `Searching evidence` | `search_evidence` |
+| rejected tool request | `tool_check` | `tool` | `Checking tool request` | absent |
+| citation validation | `citation_validation` | `validation` | `Validating citations` | absent |
+| optional model verifier (chat only) | `grounding_verification` | `validation` | `Verifying grounding` | absent |
+
+`kind` identifies the operation. Clients should switch on it, not on `label`, which
+is display text. `stage` stays coarse so older clients that only know the five
+stages still parse every event. The server rejects any activity whose `kind`
+disagrees with its `stage` and `label`.
+
+The completed planning activity carries a client-safe `plan` digest. Its fields are
+an explicit allowlist with bounded sizes:
+
+```text
+PlanSummary = {
+  intent: "lookup" | "compare" | "ratio" | "change" | "percent_change" | "aggregate",
+  route: "retrieve" | "direct_answer" | "clarify" | "refuse_out_of_scope",
+  subquestion_count: integer,     // full count, 0..64
+  subquestions: string[],         // first 4, each at most 200 chars
+  companies: string[],            // at most 8, each at most 64 chars
+  periods: string[]               // at most 8, each at most 64 chars
+}
+```
+
+The digest never carries prompts, history, decision or analysis confidences, or
+timings.
 
 `started` is emitted on entering the actual operation; `completed` only on
 normal exit. There are no simulated steps or artificial delays. An exception,
@@ -90,8 +114,9 @@ Handled calculator errors and rejected tool requests can complete normally:
 **completed means the operation finished, not that an answer is correct**.
 Likewise, completed citation validation can produce an abstention.
 `Verifying grounding` uses stage `validation` so existing stage enums still
-parse. It only appears when the optional model verifier is enabled and the
-deterministic checks already passed.
+parse, and is told apart by `kind: "grounding_verification"`. It only appears
+when the optional model verifier is enabled and the deterministic checks already
+passed.
 
 Typical ordering is retrieval started/completed, `evidence`, planning
 started/completed (chat graph entry; absent when the planner is disabled), generation
@@ -102,6 +127,27 @@ are not executed and do not create tool activity. With no evidence and no search
 authority, direct service callers skip generation and only validate abstention.
 A confident out-of-scope plan (for example prompt-injection or investment-advice
 requests) skips both retrieval and generation and abstains after validation.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as POST /v1/query/stream
+    C->>A: question, history, profile chat
+    A-->>C: activity retrieval started, completed
+    A-->>C: evidence with authorized citation preview
+    A-->>C: activity planning started, completed with plan digest
+    A-->>C: activity generation started, completed
+    loop each executed tool call
+        A-->>C: activity calculator or evidence_search started, completed
+        A-->>C: activity generation started, completed
+    end
+    A-->>C: activity citation_validation started, completed
+    opt model verifier enabled
+        A-->>C: activity grounding_verification started, completed
+    end
+    A-->>C: answer, validated and bounded
+    A-->>C: done
+```
 
 Activities contain no questions, history, prompts, tool arguments, tool call IDs,
 raw tool results, provider hidden-reasoning fields, or exception messages.
@@ -119,7 +165,8 @@ Do not label these records as the model's thoughts or expose LangGraph state.
 ```
 
 The first three fields are unchanged; `citations` is additive and contains the
-initial authorized retrieval evidence. Citation IDs use the same deduplicated
+initial authorized retrieval evidence. `sources` and `citations` each hold at most
+12 entries. Citation IDs use the same deduplicated
 assignment as generation:
 
 ```text
@@ -150,12 +197,22 @@ four are additive, nullable or empty by default, and safe for clients to ignore:
   abstention: AbstentionDecision | null
 }
 
-Calculation = { steps: Step[], result: string, citation_ids: string[] }
+Calculation = {
+  steps: Step[], result: string, citation_ids: string[],
+  unit: Unit | null                // unit of result: the last step's unit
+}
 Step = {
   index: integer, op: string, operands: Operand[], result: string,
   kind: "currency" | "amount" | "ratio" | "percent" | "boolean" | null,
   citation_ids: string[],          // this step's own evidence lineage
-  evidence_backed: boolean
+  evidence_backed: boolean,
+  unit: Unit | null
+}
+Unit = {
+  kind: "currency" | "percent" | "ratio" | "count" | "per_share" | "unitless",
+  currency: string | null,         // ISO 4217; null when the symbol is ambiguous (C$)
+  scale: "thousand" | "million" | "billion" | "trillion" | null,
+  display: "amount" | "percent" | "ratio" | "boolean"
 }
 Operand = {
   kind: "evidence" | "step" | "constant", value: string,
@@ -166,24 +223,78 @@ Operand = {
 Verification = {
   status: "verified" | "unverified" | "failed" | "skipped",
   mode: "off" | "flag" | "enforce",
-  checked_numbers: integer, unsupported_numbers: string[], reasons: string[],
+  checked_numbers: integer,
+  unsupported_numbers: string[],   // answer-text mentions, empty when abstained
+  reasons: ("unsupported_numbers" | "verifier_unavailable"
+            | "verifier_below_threshold")[],
   verifier: string | null, verifier_score: number | null
 }
 AbstentionDecision = {
-  abstained: boolean, reasons: string[], calibrated: false,
+  abstained: boolean, calibrated: false,
+  reasons: ("out_of_scope" | "no_validated_answer" | "verification_failed"
+            | "retrieval_score_below_threshold"
+            | "citation_coverage_below_threshold"
+            | "tool_errors_above_threshold")[],
   features: {
     hit_count, top_score, mean_score, citation_coverage, checked_numbers,
-    unsupported_numbers, verification_status, verifier_score, tool_calls, tool_errors
+    unsupported_number_count, verification_status, verifier_score, tool_calls,
+    tool_errors
   }
 }
 ```
+
+Units are derived deterministically by the calculator from the evidence operands,
+not guessed by the client. A `percent` value is already multiplied by 100, while a
+`ratio` is a fraction. `display` is a rendering hint: a `ratio` shown as `percent`
+is multiplied by 100 for display. Reason lists are closed codes and never carry
+draft text, prompts or scores.
+
+`abstention.features.unsupported_number_count` replaced the earlier
+`abstention.features.unsupported_numbers`, which was a count that shared its name
+with the `verification.unsupported_numbers` list. Clients that read the old name
+must switch.
 
 Decimal values are strings so they round-trip exactly. No answer is emitted
 before citation and numeric verification. Missing, unknown, or paragraph-level
 missing citation markers produce the existing explicit abstention and empty
 citations. An abstention also clears `answer` and `citations`; `verification`
-and `abstention` stay populated so clients and evaluators can see why. `done` carries `{}` after success, including
-successful abstention.
+and `abstention` stay populated so clients and evaluators can see why. `done`
+carries `{}` after success, including successful abstention.
+
+The server validates every `answer` before sending it:
+
+- An abstained answer carries no citations, calculations or unsupported-number
+  mentions, so no draft text or evidence leaks through an abstention.
+- Every citation a calculation references (step lineage and operand provenance)
+  is present in `citations`.
+- Sizes are bounded. These are the limits:
+
+| Field | Limit |
+| --- | --- |
+| `answer`, citation `quote` | 100,000 chars |
+| `citations` | 12 |
+| citation `source` / `title` | 2,048 / 500 chars |
+| `calculations` | 16 |
+| `steps` per calculation | 16 |
+| `operands` per step | 64 |
+| decimal strings | 64 chars |
+| `verification.unsupported_numbers` | 64 entries, 200 chars each |
+| reason lists | 32 |
+| Serialized `answer` or `evidence` JSON | 900,000 UTF-8 bytes in total, including escaping, metadata and calculation traces |
+
+The aggregate JSON bound applies in addition to individual field limits; those
+limits cannot all be filled at once. Both Pydantic and zod reject larger payloads.
+This leaves framing headroom below the workspace's 1,000,000-character event
+limit and 4,000,000-byte stream limit. Oversized server responses produce an
+explicit request/stream failure, never a truncated final answer.
+
+Scores are finite (never `NaN` or `Infinity`), and counts and timings are
+non-negative. `scripts/dump_contract_fixtures.py` regenerates
+`web/src/fixtures/answers.json` by running the real chat pipeline offline. It also
+writes `web/src/fixtures/contract.schema.json`, the Pydantic JSON Schema that
+`web/src/contract.test.ts` compares with the zod schemas bound for bound (types,
+lengths, item counts, ranges and patterns). Check for stale fixtures with
+`uv run --frozen python scripts/dump_contract_fixtures.py --check`.
 
 After a stream has begun, failures produce `error` with exactly:
 

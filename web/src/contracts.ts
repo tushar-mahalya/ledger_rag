@@ -2,14 +2,17 @@ import type { z } from "zod";
 import type {
   abstentionDecisionSchema,
   abstentionFeaturesSchema,
+  activityKindSchema,
   activitySchema,
   answerSchema,
   calculationKindSchema,
   calculationOperandSchema,
   calculationSchema,
   calculationStepSchema,
+  calculationUnitSchema,
   citationSchema,
   evidenceSchema,
+  planSummarySchema,
   verificationSchema,
   verificationStatusSchema,
 } from "./schemas";
@@ -17,10 +20,13 @@ import type {
 export type Citation = z.infer<typeof citationSchema>;
 export type Answer = z.infer<typeof answerSchema>;
 export type Activity = z.infer<typeof activitySchema>;
+export type ActivityKind = z.infer<typeof activityKindSchema>;
+export type PlanSummary = z.infer<typeof planSummarySchema>;
 export type Evidence = z.infer<typeof evidenceSchema>;
 export type CalculationOperand = z.infer<typeof calculationOperandSchema>;
 export type CalculationKind = z.infer<typeof calculationKindSchema>;
 export type CalculationStep = z.infer<typeof calculationStepSchema>;
+export type CalculationUnit = z.infer<typeof calculationUnitSchema>;
 export type Calculation = z.infer<typeof calculationSchema>;
 export type VerificationStatus = z.infer<typeof verificationStatusSchema>;
 export type Verification = z.infer<typeof verificationSchema>;
