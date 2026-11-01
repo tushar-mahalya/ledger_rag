@@ -123,12 +123,26 @@ listed below; ADR 0002 has their run lineage.
 | `finqa_gte_modernbert_v2ctx_1` | gte-modernbert-base, 768-d | `3ad18a9d04494ee0b087b4916960634b` | 8,647 |
 | `finqa_qwen3emb_v2ctx_1` | Qwen3-Embedding-0.6B, 1024-d | `75b8926c58d8462f985e4b2183ebcf9f` | 8,647 |
 
-Both collections were built before profile identity existed, so their metadata still
-reads `chunk_text: title-header-v1` with no `chunk_profile` key. Before serving them
-with `LEDGER_CHUNK_PROFILE=v2`, set `chunk_text: contextual-v2` and
-`chunk_profile: v2` in place with Qdrant's update-collection `metadata` field.
-Serving and the FinQA benchmark both go through this check, so until the metadata
-is updated only the default `v1` setting opens these collections.
+The last authenticated check (2026-10-31) found legacy metadata on both collections:
+`chunk_text: title-header-v1` with no `chunk_profile` key. Do not serve these v2
+collections under `v1` merely to bypass the identity check.
+
+Before a metadata-only repair, retrieve the recorded ingestion reports and verify
+their dataset checksum, code revision, embedding identity and chunk profile.
+Compare live points against the deterministic v2 corpus, including chunk IDs,
+`index_text`, units/captions and sparse vectors; a collection name or point count
+alone is not lineage evidence. Preserve unrelated metadata, including write leases.
+Only if the actual indexed corpus matches the current v2 rendering may an operator
+set `chunk_text: contextual-v2` and `chunk_profile: v2` using Qdrant's
+update-collection `metadata` field. Otherwise explicitly re-ingest a compatible
+corpus; never relabel incompatible vectors. Re-read metadata, then verify v2
+readiness succeeds and v1 readiness fails. Readiness itself never repairs metadata.
+
+**2026-11-01 verification blocker:** the local Vault was initialized but sealed
+(health HTTP 503); neither documented credential path could read the Qdrant key.
+No authenticated live corpus/metadata verification or correction was performed,
+and no re-ingestion or paid compute was started. Treat the repair as pending,
+not as a verified metadata migration.
 
 `finqa_gte_modernbert_v2ctx` and `finqa_qwen3emb_v2ctx` (8,644 points each) indexed
 v2 text from before the review fixes. That text had no top-left table cells and missed

@@ -296,6 +296,11 @@ the builds, Qdrant reported exactly 8,647 points in each, status green. A spot c
 below presents the operating results of our investing & lending segment.` in
 `index_text`.
 
+The recorded builds are not proof of current live corpus identity. The 2026-11-01
+repair attempt was blocked by sealed Vault authentication; no live metadata was
+changed. Before serving these collections, follow the lineage checks and explicit
+metadata-repair procedure in [ingestion](../INGESTION.md#chunk-profiles).
+
 **Superseded and deleted.** `finqa_gte_modernbert_v2ctx` (run
 `701b26b2f7b842f18877e3f2cc2a0aec`, 762 s) and `finqa_qwen3emb_v2ctx` (run
 `a38277a6839d47f292dd28c751362d58`, 281 s) each held 8,644 points built from the
