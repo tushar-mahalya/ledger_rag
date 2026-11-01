@@ -11,7 +11,7 @@ from pydantic import (
     model_validator,
 )
 
-from ledger_rag.core.provenance import Provenance, SourceKind
+from ledger_rag.core.provenance import MAX_EXTERNAL_EVIDENCE_ID_CHARS, Provenance, SourceKind
 
 
 class Profile(StrEnum):
@@ -121,7 +121,7 @@ Count = Annotated[int, Field(ge=0)]
 
 class Citation(BaseModel):
     id: CitationId
-    document_id: Identifier
+    document_id: str = Field(max_length=MAX_EXTERNAL_EVIDENCE_ID_CHARS)
     source: str = Field(max_length=MAX_SOURCE_CHARS)
     title: str = Field(max_length=MAX_TITLE_CHARS)
     published_at: date
@@ -132,6 +132,8 @@ class Citation(BaseModel):
 
     @model_validator(mode="after")
     def provenance_matches_kind(self) -> Self:
+        if self.source_kind == "corpus" and len(self.document_id) > 200:
+            raise ValueError("Corpus document identity exceeds 200 characters")
         if (self.source_kind == "corpus") != (self.provenance is None) or (
             self.provenance is not None and self.provenance.source_kind != self.source_kind
         ):

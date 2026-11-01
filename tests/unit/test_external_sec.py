@@ -297,7 +297,7 @@ def test_sec_evidence_ids_and_provenance() -> None:
     )
     provenance = fact.provenance
     assert provenance.evidence_id == (
-        "sec:0000320193:us-gaap:SalesRevenueNet:0001193125-09-214859:2008-09-28_2009-09-26"
+        "sec:0000320193:us-gaap:SalesRevenueNet:0001193125-09-214859:2008-09-28_2009-09-26:USD"
     )
     assert provenance.freshness == "superseded"
     assert provenance.superseded_by == "0001193125-10-012091"
@@ -309,7 +309,7 @@ def test_sec_evidence_ids_and_provenance() -> None:
     )
     assert "42,905" not in fact.quote  # the later value is never mixed into old evidence
     instant = sec_fact(pick(ASSETS, "2009-09-26", date(2010, 1, 25)), as_of=AS_OF, retrieved_at=NOW)
-    assert instant.provenance.evidence_id.endswith(":0001193125-10-012091:2009-09-26")
+    assert instant.provenance.evidence_id.endswith(":0001193125-10-012091:2009-09-26:USD")
     assert instant.provenance.amended and instant.provenance.revised_before_as_of
 
 

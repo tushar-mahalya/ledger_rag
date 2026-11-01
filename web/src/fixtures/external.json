@@ -4,7 +4,7 @@
     "citations": [
       {
         "id": "C1",
-        "document_id": "sec:0000320193:us-gaap:InterestExpense:0000320193-23-000106:2022-09-25_2023-09-30",
+        "document_id": "sec:0000320193:us-gaap:InterestExpense:0000320193-23-000106:2022-09-25_2023-09-30:USD",
         "source": "https://www.sec.gov/Archives/edgar/data/320193/000032019323000106/0000320193-23-000106-index.htm",
         "title": "Apple Inc. 10-K filed 2023-11-03: us-gaap:InterestExpense",
         "published_at": "2023-11-03",
@@ -13,7 +13,7 @@
         "provenance": {
           "source_kind": "sec_xbrl",
           "provider": "SEC EDGAR",
-          "evidence_id": "sec:0000320193:us-gaap:InterestExpense:0000320193-23-000106:2022-09-25_2023-09-30",
+          "evidence_id": "sec:0000320193:us-gaap:InterestExpense:0000320193-23-000106:2022-09-25_2023-09-30:USD",
           "identifier": "0000320193-23-000106",
           "entity": "Apple Inc.",
           "concept": "us-gaap:InterestExpense",

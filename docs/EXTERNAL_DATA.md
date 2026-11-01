@@ -32,11 +32,24 @@ values remain explicit misses; a current FRED response cannot substitute for
 unavailable vintage history. Amendment, restatement, staleness and later
 revision indicators stay attached to the original value.
 
+Explicit monthly, quarterly, semiannual and annual dates require a published
+observation whose calendar-period bounds contain the requested date. An
+unpublished current period is not replaced with the previous period. Daily
+series alone allow a bounded prior observation for weekends/holidays (less
+than seven days); other submonthly series require an exact observation date.
+
 Facts join the existing twelve-citation pool as `C<n>`. Calculator bindings,
 numeric verification and final citation validation apply to them exactly as to
 corpus evidence. `source_kind` is `corpus`, `sec_xbrl` or `fred`; external
 citations require matching typed provenance. Source links use only HTTPS SEC
 and FRED human-facing hosts. Tool results and documents remain untrusted data.
+SEC evidence IDs include the reported unit as their final component, so
+different currencies or per-share units cannot collapse into one citation.
+Readback pins the unit as well as accession and period; legacy unitless IDs
+are accepted only when the filing's pinned value/unit is unambiguous.
+External evidence identities permit at most 261 characters to accommodate the
+existing 132-character concept and 60-character unit limits. Corpus document
+identities retain their 200-character limit; this does not change index identity.
 
 ## Failure and resource limits
 
@@ -44,6 +57,10 @@ and FRED human-facing hosts. Tool results and documents remain untrusted data.
   budget; exhausted budgets return explicit tool errors.
 - Eight seconds per lookup by default, also bounded by the query deadline.
   Cancellation propagates and releases half-open breaker probes.
+- Coalesced HTTP fetches have their own total deadline. Cancelling one waiter
+  preserves a fetch needed by another; the last departing waiter cancels and
+  drains it. Shutdown cancels and awaits all fetches, including streams already
+  draining outside the coalescing map, before closing provider clients.
 - Independent provider breakers: five health failures, thirty-second reset by
   default. Input errors do not count as provider failures.
 - SEC defaults to five requests/second; FRED to sixty/minute. These limits,

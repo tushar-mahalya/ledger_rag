@@ -105,4 +105,25 @@ describe("point-in-time external evidence", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("allows bounded unit-qualified external IDs but preserves corpus ID bounds", () => {
+    const valid = fixtures.external.citations[0];
+    const id = `sec:0000320193:ifrs-full:${"A".repeat(132)}:0000320193-23-000106:2022-09-25_2023-09-30:${"U".repeat(60)}`;
+    expect(id).toHaveLength(261);
+    expect(
+      citationSchema.safeParse({
+        ...valid,
+        document_id: id,
+        provenance: { ...valid.provenance, evidence_id: id },
+      }).success,
+    ).toBe(true);
+    expect(
+      citationSchema.safeParse({
+        ...valid,
+        source_kind: "corpus",
+        provenance: null,
+        document_id: "x".repeat(201),
+      }).success,
+    ).toBe(false);
+  });
 });

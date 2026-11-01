@@ -91,7 +91,8 @@ def sec_fact(selection: Selection, *, as_of: date, retrieved_at: datetime) -> Ex
         source_kind="sec_xbrl",
         provider="SEC EDGAR",
         evidence_id=(
-            f"sec:{concept.cik:010d}:{concept.taxonomy}:{concept.concept}:{fact.accn}:{period_key}"
+            f"sec:{concept.cik:010d}:{concept.taxonomy}:{concept.concept}:{fact.accn}:"
+            f"{period_key}:{fact.unit}"
         ),
         identifier=fact.accn,
         entity=concept.entity,

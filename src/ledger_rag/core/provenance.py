@@ -20,8 +20,9 @@ Freshness = Literal["current", "stale", "superseded"]
 
 # Human-facing links only; API hosts (data.sec.gov, api.stlouisfed.org) are never linked.
 SOURCE_HOSTS = frozenset({"www.sec.gov", "fred.stlouisfed.org"})
-# At most 200 characters, the client's document_id bound.
-EVIDENCE_ID_PATTERN = r"^(?:sec|fred):[A-Za-z0-9._:/-]{1,195}$"
+# The previous SEC identity ceiling plus a separator and its 60-character unit.
+MAX_EXTERNAL_EVIDENCE_ID_CHARS = 261
+EVIDENCE_ID_PATTERN = r"^(?:sec|fred):[A-Za-z0-9._:/-]{1,257}$"
 
 
 MAX_MAGNITUDE = Decimal("1e30")
@@ -56,7 +57,9 @@ class Provenance(BaseModel):
 
     source_kind: ExternalSourceKind
     provider: Literal["SEC EDGAR", "FRED"]
-    evidence_id: str = Field(min_length=5, max_length=200, pattern=EVIDENCE_ID_PATTERN)
+    evidence_id: str = Field(
+        min_length=5, max_length=MAX_EXTERNAL_EVIDENCE_ID_CHARS, pattern=EVIDENCE_ID_PATTERN
+    )
     # Accession number (SEC) or series ID (FRED).
     identifier: str = Field(min_length=1, max_length=64)
     entity: str = Field(min_length=1, max_length=300)

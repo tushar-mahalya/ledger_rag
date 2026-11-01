@@ -62,6 +62,15 @@ class SeriesMeta:
         year, month = divmod(day.month - 1 + months, 12)
         return day, date(day.year + year, month + 1, 1) - timedelta(days=1)
 
+    def covers(self, observed: date, requested: date) -> bool:
+        start, end = self.period_bounds(observed)
+        if start is not None:
+            return start <= requested <= end
+        if self.frequency_short == "D":
+            # Daily observations can cover a weekend/holiday, not an earlier macro period.
+            return requested - timedelta(days=self.gap_days) < observed <= requested
+        return observed == requested
+
 
 @dataclass(frozen=True)
 class Vintage:
@@ -262,9 +271,7 @@ class FredClient:
         chosen: list[date] = []
         if dates:
             for wanted in dates:
-                covering = [
-                    day for day, row in known.items() if wanted - gap < day <= wanted and row
-                ]
+                covering = [day for day, row in known.items() if row and meta.covers(day, wanted)]
                 if covering:
                     chosen.append(max(covering))
                 else:

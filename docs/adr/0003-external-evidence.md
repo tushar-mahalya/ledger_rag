@@ -16,6 +16,10 @@ entitlements, fixed publication cutoffs, per-turn budgets, deadlines, provider
 breakers and bounded read-only requests. Normalize facts into ordinary
 citations with typed provenance. Preserve calculator and citation-verification
 gates. Never offer these tools to voice or closed-corpus benchmarks.
+Calendar-period membership is required for explicit macro dates; only daily
+series permit bounded holiday fallback. SEC evidence identity includes the
+reported unit. Shared fetches have independent total deadlines and are drained
+when their last waiter leaves or the service shuts down.
 
 Current-only FRED fallback, arbitrary browsing, silent provider fallback and
 external corpus ingestion are rejected. A missing or unavailable historical

@@ -22,8 +22,8 @@ export const provenanceSchema = z
     evidence_id: z
       .string()
       .min(5)
-      .max(200)
-      .regex(/^(?:sec|fred):[A-Za-z0-9._:/-]{1,195}$/),
+      .max(261)
+      .regex(/^(?:sec|fred):[A-Za-z0-9._:/-]{1,257}$/),
     identifier: z.string().min(1).max(64),
     entity: z.string().min(1).max(300),
     concept: z.string().min(1).max(300),
@@ -103,7 +103,7 @@ export const citationSchema = z
       .string()
       .max(16)
       .regex(/^C\d+$/),
-    document_id: z.string().max(200),
+    document_id: z.string().max(261),
     title: z.string().max(500),
     source: z.string().max(2048),
     published_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -112,6 +112,14 @@ export const citationSchema = z
     provenance: provenanceSchema.nullable().optional(),
   })
   .superRefine((value, ctx) => {
+    if (
+      (value.source_kind ?? "corpus") === "corpus" &&
+      value.document_id.length > 200
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Corpus document identity exceeds 200 characters",
+      });
     if (
       ((value.source_kind ?? "corpus") === "corpus") !==
         (value.provenance == null) ||

@@ -48,7 +48,8 @@ Provider = Literal["sec", "fred"]
 PROVIDER_NAMES: dict[Provider, str] = {"sec": "SEC EDGAR", "fred": "FRED"}
 _SEC_EVIDENCE = re.compile(
     r"^sec:([0-9]{10}):(us-gaap|ifrs-full|dei|srt):([A-Za-z][A-Za-z0-9_]{0,131}):"
-    r"([0-9]{10}-[0-9]{2}-[0-9]{6}):([0-9]{4}-[0-9]{2}-[0-9]{2})(?:_([0-9]{4}-[0-9]{2}-[0-9]{2}))?$"
+    r"([0-9]{10}-[0-9]{2}-[0-9]{6}):([0-9]{4}-[0-9]{2}-[0-9]{2})"
+    r"(?:_([0-9]{4}-[0-9]{2}-[0-9]{2}))?(?::([A-Za-z0-9._:/-]{1,60}))?$"
 )
 _FRED_EVIDENCE = re.compile(
     r"^fred:([A-Z0-9_]{1,40}):([0-9]{4}-[0-9]{2}-[0-9]{2}):([0-9]{4}-[0-9]{2}-[0-9]{2})$"
@@ -157,6 +158,7 @@ class ExternalData:
                     cache=self._cache,
                     policy=policy,
                     max_bytes=settings.external_max_response_bytes,
+                    timeout_seconds=self._timeout,
                 )
             )
         self.fred: FredClient | None = None
@@ -174,6 +176,7 @@ class ExternalData:
                     cache=self._cache,
                     policy=policy,
                     max_bytes=settings.external_max_response_bytes,
+                    timeout_seconds=self._timeout,
                 ),
                 key,
             )
@@ -369,7 +372,7 @@ class ExternalData:
             if error.kind == "not_found":
                 raise ExternalDataError("not_found", "Evidence not found") from None
             raise
-        selection = _pinned_selection(found, accession, (start, end), as_of)
+        selection = _pinned_selection(found, accession, (start, end), as_of, match.group(7))
         return sec_fact(selection, as_of=as_of, retrieved_at=self._now())
 
     async def _read_fred(self, match: re.Match[str], as_of: date) -> ExternalFact:
@@ -387,7 +390,16 @@ class ExternalData:
         )
 
     async def aclose(self) -> None:
-        await asyncio.gather(*(client.aclose() for client in self._clients))
+        try:
+            await asyncio.gather(
+                *(
+                    provider.http.aclose()
+                    for provider in (self.sec, self.fred)
+                    if provider is not None
+                )
+            )
+        finally:
+            await asyncio.gather(*(client.aclose() for client in self._clients))
 
 
 def _subject(company: Company) -> str:
@@ -396,12 +408,19 @@ def _subject(company: Company) -> str:
 
 
 def _pinned_selection(
-    found: ConceptFacts, accession: str, period: tuple[date | None, date], as_of: date
+    found: ConceptFacts,
+    accession: str,
+    period: tuple[date | None, date],
+    as_of: date,
+    unit: str | None = None,
 ) -> Selection:
     facts = [
         fact
         for fact in found.facts
-        if fact.accn == accession and fact.period == period and fact.filed <= as_of
+        if fact.accn == accession
+        and fact.period == period
+        and fact.filed <= as_of
+        and (unit is None or fact.unit == unit)
     ]
     if len({(fact.unit, fact.value) for fact in facts}) != 1:
         raise ExternalDataError("not_found", "Evidence not found")

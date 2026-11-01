@@ -22,7 +22,7 @@ from typing import Any, Generic, TypeVar
 import httpx
 import structlog
 
-from ledger_rag.core.retry import RetryPolicy, send_with_retries
+from ledger_rag.core.retry import RetryPolicy, request_deadline, send_with_retries
 from ledger_rag.external.errors import ExternalDataError
 
 logger = structlog.get_logger(__name__)
@@ -136,6 +136,25 @@ def parse_json(raw: bytes) -> Any:
 ErrorHook = Callable[[int, bytes], ExternalDataError | None]
 
 
+@dataclass
+class _Flight:
+    task: asyncio.Task[Any]
+    waiters: int = 0
+
+
+async def _drain(tasks: list[asyncio.Task[Any]]) -> None:
+    finished = asyncio.gather(*tasks, return_exceptions=True)
+    interrupted = False
+    while not finished.done():
+        try:
+            # A second caller cancellation must not interrupt stream cleanup.
+            await asyncio.shield(finished)
+        except asyncio.CancelledError:
+            interrupted = True
+    if interrupted:
+        raise asyncio.CancelledError
+
+
 class ExternalHttp:
     """One provider's transport: limiter, cache, retries, caps and sanitized errors."""
 
@@ -148,6 +167,7 @@ class ExternalHttp:
         cache: ResponseCache,
         policy: RetryPolicy,
         max_bytes: int,
+        timeout_seconds: float = 8.0,
     ) -> None:
         self.provider = provider
         self.client = client
@@ -155,7 +175,10 @@ class ExternalHttp:
         self.cache = cache
         self.policy = policy
         self.max_bytes = max_bytes
-        self._inflight: dict[str, asyncio.Task[Any]] = {}
+        self.timeout_seconds = timeout_seconds
+        self._inflight: dict[str, _Flight] = {}
+        self._tasks: set[asyncio.Task[Any]] = set()
+        self._closed = False
 
     async def get(
         self,
@@ -168,26 +191,69 @@ class ExternalHttp:
         on_error: ErrorHook | None = None,
     ) -> T:
         """Fetch and parse ``url``; ``key`` must identify the request without secrets."""
+        if self._closed:
+            raise ExternalDataError("disabled", f"{self.provider} transport is closed")
         entry = self.cache.get(key)
         if entry is not None and self.cache.fresh(entry):
             cached: T = self._cached(entry, endpoint)
             return cached
-        task = self._inflight.get(key)
-        if task is None:
+        flight = self._inflight.get(key)
+        if flight is None:
             task = asyncio.create_task(
-                self._fetch(url, key, endpoint, params, parse, on_error, entry)
+                self._bounded_fetch(url, key, endpoint, params, parse, on_error, entry),
+                name=f"external.fetch:{self.provider}:{endpoint}",
             )
-            self._inflight[key] = task
+            flight = _Flight(task)
+            self._inflight[key] = flight
+            self._tasks.add(task)
             task.add_done_callback(lambda done: self._finish(key, done))
-        # Shielded so one caller's cancellation never aborts a fetch others wait on.
-        result: T = await asyncio.shield(task)
-        return result
+        flight.waiters += 1
+        try:
+            # A cancelled waiter must not cancel a request another waiter still needs.
+            result: T = await asyncio.shield(flight.task)
+            return result
+        finally:
+            flight.waiters -= 1
+            if flight.waiters == 0 and not flight.task.done():
+                if self._inflight.get(key) is flight:
+                    del self._inflight[key]
+                if not flight.task.cancelling():
+                    flight.task.cancel()
+                await _drain([flight.task])
 
     def _finish(self, key: str, task: asyncio.Task[Any]) -> None:
-        if self._inflight.get(key) is task:
+        self._tasks.discard(task)
+        flight = self._inflight.get(key)
+        if flight is not None and flight.task is task:
             del self._inflight[key]
         if not task.cancelled():
             task.exception()
+
+    async def aclose(self) -> None:
+        self._closed = True
+        tasks = list(self._tasks)
+        self._inflight.clear()
+        for task in tasks:
+            if not task.cancelling():
+                task.cancel()
+        await _drain(tasks)
+
+    async def _bounded_fetch(
+        self,
+        url: str,
+        key: str,
+        endpoint: str,
+        params: Mapping[str, str] | None,
+        parse: Callable[[bytes], T],
+        on_error: ErrorHook | None,
+        entry: _Entry[Any] | None,
+    ) -> T:
+        try:
+            # A fresh budget belongs to the shared fetch, not to its first waiter.
+            async with request_deadline(self.timeout_seconds):
+                return await self._fetch(url, key, endpoint, params, parse, on_error, entry)
+        except TimeoutError:
+            raise ExternalDataError("timeout", f"{self.provider} did not respond in time") from None
 
     def _cached(self, entry: _Entry[Any], endpoint: str) -> Any:
         if entry.value is None:

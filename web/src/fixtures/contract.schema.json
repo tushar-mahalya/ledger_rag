@@ -653,7 +653,7 @@
           "type": "string"
         },
         "document_id": {
-          "maxLength": 200,
+          "maxLength": 261,
           "title": "Document Id",
           "type": "string"
         },
@@ -847,9 +847,9 @@
           "type": "string"
         },
         "evidence_id": {
-          "maxLength": 200,
+          "maxLength": 261,
           "minLength": 5,
-          "pattern": "^(?:sec|fred):[A-Za-z0-9._:/-]{1,195}$",
+          "pattern": "^(?:sec|fred):[A-Za-z0-9._:/-]{1,257}$",
           "title": "Evidence Id",
           "type": "string"
         },
