@@ -1,0 +1,146 @@
+{
+ "cik": 320193,
+ "taxonomy": "us-gaap",
+ "tag": "EarningsPerShareDiluted",
+ "label": "Earnings Per Share, Diluted",
+ "description": "The amount of net income (loss) for the period available to each share of common stock or common unit outstanding during the reporting period and to each share or unit that would have been outstanding assuming the issuance of common shares or units for all dilutive potential common shares or units outstanding during the reporting period.",
+ "entityName": "Apple Inc.",
+ "units": {
+  "USD/shares": [
+   {
+    "start": "2020-09-27",
+    "end": "2021-09-25",
+    "val": 5.61,
+    "accn": "0000320193-23-000106",
+    "fy": 2023,
+    "fp": "FY",
+    "form": "10-K",
+    "filed": "2023-11-03",
+    "frame": "CY2021"
+   },
+   {
+    "start": "2021-09-26",
+    "end": "2021-12-25",
+    "val": 2.1,
+    "accn": "0000320193-23-000006",
+    "fy": 2023,
+    "fp": "Q1",
+    "form": "10-Q",
+    "filed": "2023-02-03",
+    "frame": "CY2021Q4"
+   },
+   {
+    "start": "2021-09-26",
+    "end": "2022-03-26",
+    "val": 3.62,
+    "accn": "0000320193-23-000064",
+    "fy": 2023,
+    "fp": "Q2",
+    "form": "10-Q",
+    "filed": "2023-05-05"
+   },
+   {
+    "start": "2021-12-26",
+    "end": "2022-03-26",
+    "val": 1.52,
+    "accn": "0000320193-23-000064",
+    "fy": 2023,
+    "fp": "Q2",
+    "form": "10-Q",
+    "filed": "2023-05-05",
+    "frame": "CY2022Q1"
+   },
+   {
+    "start": "2021-09-26",
+    "end": "2022-06-25",
+    "val": 4.82,
+    "accn": "0000320193-23-000077",
+    "fy": 2023,
+    "fp": "Q3",
+    "form": "10-Q",
+    "filed": "2023-08-04"
+   },
+   {
+    "start": "2022-03-27",
+    "end": "2022-06-25",
+    "val": 1.2,
+    "accn": "0000320193-23-000077",
+    "fy": 2023,
+    "fp": "Q3",
+    "form": "10-Q",
+    "filed": "2023-08-04",
+    "frame": "CY2022Q2"
+   },
+   {
+    "start": "2021-09-26",
+    "end": "2022-09-24",
+    "val": 6.11,
+    "accn": "0000320193-23-000106",
+    "fy": 2023,
+    "fp": "FY",
+    "form": "10-K",
+    "filed": "2023-11-03"
+   },
+   {
+    "start": "2022-09-25",
+    "end": "2022-12-31",
+    "val": 1.88,
+    "accn": "0000320193-23-000006",
+    "fy": 2023,
+    "fp": "Q1",
+    "form": "10-Q",
+    "filed": "2023-02-03"
+   },
+   {
+    "start": "2022-09-25",
+    "end": "2023-04-01",
+    "val": 3.41,
+    "accn": "0000320193-23-000064",
+    "fy": 2023,
+    "fp": "Q2",
+    "form": "10-Q",
+    "filed": "2023-05-05"
+   },
+   {
+    "start": "2023-01-01",
+    "end": "2023-04-01",
+    "val": 1.52,
+    "accn": "0000320193-23-000064",
+    "fy": 2023,
+    "fp": "Q2",
+    "form": "10-Q",
+    "filed": "2023-05-05"
+   },
+   {
+    "start": "2022-09-25",
+    "end": "2023-07-01",
+    "val": 4.67,
+    "accn": "0000320193-23-000077",
+    "fy": 2023,
+    "fp": "Q3",
+    "form": "10-Q",
+    "filed": "2023-08-04"
+   },
+   {
+    "start": "2023-04-02",
+    "end": "2023-07-01",
+    "val": 1.26,
+    "accn": "0000320193-23-000077",
+    "fy": 2023,
+    "fp": "Q3",
+    "form": "10-Q",
+    "filed": "2023-08-04"
+   },
+   {
+    "start": "2022-09-25",
+    "end": "2023-09-30",
+    "val": 6.13,
+    "accn": "0000320193-23-000106",
+    "fy": 2023,
+    "fp": "FY",
+    "form": "10-K",
+    "filed": "2023-11-03"
+   }
+  ]
+ }
+}

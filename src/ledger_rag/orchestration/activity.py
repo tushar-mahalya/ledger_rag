@@ -30,6 +30,10 @@ def activity_kind(stage: ActivityStage, tool: ActivityTool | None = None) -> Act
         return "calculator"
     if tool == "search_evidence":
         return "evidence_search"
+    if tool == "lookup_company_facts":
+        return "company_facts_lookup"
+    if tool == "lookup_macro_series":
+        return "macro_series_lookup"
     return "tool_check"
 
 

@@ -65,6 +65,74 @@ async function live(page: Page, name: string) {
   await page.getByRole("button", { name: "Send question" }).click();
 }
 
+test("external evidence shows provenance and bounded lookup activities", async ({
+  page,
+  isMobile,
+}) => {
+  await live(page, "external");
+  const turn = page.locator(".turn").last();
+  await expect(turn).toContainText("5.33%");
+  await turn.locator("details.activity-trace > summary").click();
+  await expect(turn.locator(".company_facts_lookup")).toContainText(
+    "Looking up SEC filings",
+  );
+  await expect(turn.locator(".macro_series_lookup")).toContainText(
+    "Looking up macro data",
+  );
+  await turn
+    .getByRole("button", { name: /View citation C2:/ })
+    .first()
+    .click();
+  const context = isMobile
+    ? page.getByRole("dialog", { name: "Research context" })
+    : page.getByRole("complementary", { name: "Research context" });
+  await expect(
+    context.getByText("FRED / ALFRED", { exact: true }),
+  ).toBeVisible();
+  const provenance = context.getByLabel("Evidence provenance");
+  await expect(provenance).toContainText("2024-01-01");
+  await expect(provenance).toContainText("FEDFUNDS");
+  await expect(provenance).toContainText("5.33");
+  await expect(
+    context.getByText("OFFICIAL EXTERNAL EVIDENCE", { exact: true }),
+  ).toBeVisible();
+  await expect(context.locator("a.source-link").last()).toHaveAttribute(
+    "href",
+    /https:\/\/fred\.stlouisfed\.org\//,
+  );
+});
+
+test("recorded external demo is not mislabeled as a fictional disclosure", async ({
+  page,
+  isMobile,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", {
+      name: "Show recorded SEC and FRED point-in-time evidence.",
+      exact: true,
+    })
+    .click();
+  const turn = page.locator(".turn").last();
+  await expect(turn).toContainText("CURATED EXAMPLE");
+  await turn
+    .getByRole("button", { name: /View citation C1:/ })
+    .first()
+    .click();
+  const context = isMobile
+    ? page.getByRole("dialog", { name: "Research context" })
+    : page.getByRole("complementary", { name: "Research context" });
+  await expect(
+    context.getByText("RECORDED EXTERNAL EVIDENCE", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    context.getByText("FICTIONAL DISCLOSURE", { exact: true }),
+  ).toHaveCount(0);
+  await expect(context.getByLabel("Evidence provenance")).toContainText(
+    "SEC EDGAR",
+  );
+});
+
 test("demo shows a traced calculation, verification and an abstention", async ({
   page,
   isMobile,

@@ -379,7 +379,11 @@ export function activityKind(activity: Activity): ActivityKind {
       ? "calculator"
       : activity.tool === "search_evidence"
         ? "evidence_search"
-        : "tool_check";
+        : activity.tool === "lookup_company_facts"
+          ? "company_facts_lookup"
+          : activity.tool === "lookup_macro_series"
+            ? "macro_series_lookup"
+            : "tool_check";
   // Before `kind`, the two validation operations differed only by label.
   if (
     activity.stage === "validation" &&
@@ -414,6 +418,7 @@ export function timeline(activities: Activity[]): TimelineEntry[] {
             status: "completed",
             done: true,
             plan: activity.plan ?? row.plan,
+            outcome: activity.outcome ?? row.outcome,
           };
           return;
         }

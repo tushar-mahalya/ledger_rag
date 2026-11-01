@@ -1,3 +1,4 @@
+import os
 from datetime import date
 
 import pytest
@@ -6,6 +7,16 @@ from pydantic import SecretStr
 from ledger_rag.core import retry
 from ledger_rag.core.config import Settings
 from ledger_rag.core.models import Document, Principal
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Network tests are opt-in so CI and local runs never depend on live upstreams."""
+    if os.environ.get("LEDGER_LIVE_TESTS") == "1":
+        return
+    skip = pytest.mark.skip(reason="live upstream test; set LEDGER_LIVE_TESTS=1 to run")
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)

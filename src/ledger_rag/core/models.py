@@ -11,6 +11,8 @@ from pydantic import (
     model_validator,
 )
 
+from ledger_rag.core.provenance import MAX_EXTERNAL_EVIDENCE_ID_CHARS, Provenance, SourceKind
+
 
 class Profile(StrEnum):
     VOICE = "voice"
@@ -119,11 +121,31 @@ Count = Annotated[int, Field(ge=0)]
 
 class Citation(BaseModel):
     id: CitationId
-    document_id: Identifier
+    document_id: str = Field(max_length=MAX_EXTERNAL_EVIDENCE_ID_CHARS)
     source: str = Field(max_length=MAX_SOURCE_CHARS)
     title: str = Field(max_length=MAX_TITLE_CHARS)
     published_at: date
     quote: str = Field(max_length=MAX_QUOTE_CHARS)
+    # External evidence (SEC XBRL, FRED) carries typed provenance; corpus evidence does not.
+    source_kind: SourceKind = "corpus"
+    provenance: Provenance | None = None
+
+    @model_validator(mode="after")
+    def provenance_matches_kind(self) -> Self:
+        if self.source_kind == "corpus" and len(self.document_id) > 200:
+            raise ValueError("Corpus document identity exceeds 200 characters")
+        if (self.source_kind == "corpus") != (self.provenance is None) or (
+            self.provenance is not None and self.provenance.source_kind != self.source_kind
+        ):
+            raise ValueError("External citations need provenance of the same source kind")
+        if self.provenance is not None and (
+            self.document_id != self.provenance.evidence_id
+            or self.source != self.provenance.source_url
+            or self.published_at != self.provenance.published_at
+            or self.published_at > self.provenance.as_of
+        ):
+            raise ValueError("Citation identity and publication cutoff must match provenance")
+        return self
 
 
 class HistoryMessage(BaseModel):
@@ -150,13 +172,18 @@ class QueryRequest(BaseModel):
 
 
 ActivityStage = Literal["planning", "retrieval", "generation", "tool", "validation"]
-ActivityTool = Literal["calculator", "search_evidence"]
+ActivityTool = Literal[
+    "calculator", "search_evidence", "lookup_company_facts", "lookup_macro_series"
+]
+ActivityOutcome = Literal["ok", "error", "timeout", "unavailable"]
 ActivityLabel = Literal[
     "Planning query",
     "Retrieving evidence",
     "Generating answer",
     "Calculating",
     "Searching evidence",
+    "Looking up SEC filings",
+    "Looking up macro data",
     "Checking tool request",
     "Validating citations",
     "Verifying grounding",
@@ -168,6 +195,8 @@ ActivityKind = Literal[
     "generation",
     "calculator",
     "evidence_search",
+    "company_facts_lookup",
+    "macro_series_lookup",
     "tool_check",
     "citation_validation",
     "grounding_verification",
@@ -178,6 +207,8 @@ ACTIVITY_KINDS: dict[ActivityKind, tuple[ActivityStage, ActivityLabel]] = {
     "generation": ("generation", "Generating answer"),
     "calculator": ("tool", "Calculating"),
     "evidence_search": ("tool", "Searching evidence"),
+    "company_facts_lookup": ("tool", "Looking up SEC filings"),
+    "macro_series_lookup": ("tool", "Looking up macro data"),
     "tool_check": ("tool", "Checking tool request"),
     "citation_validation": ("validation", "Validating citations"),
     "grounding_verification": ("validation", "Verifying grounding"),
@@ -214,6 +245,8 @@ class Activity(BaseModel):
     status: Literal["started", "completed"]
     label: ActivityLabel
     tool: ActivityTool | None = None
+    # Set on completed external lookups only; other activities keep their wire shape.
+    outcome: ActivityOutcome | None = None
     kind: ActivityKind
     # Only on the completed planning activity.
     plan: PlanSummary | None = None
@@ -224,6 +257,17 @@ class Activity(BaseModel):
             raise ValueError("Activity kind does not match its stage and label")
         if self.plan is not None and (self.kind != "planning" or self.status != "completed"):
             raise ValueError("Only a completed planning activity carries a plan")
+        if self.outcome is not None and (
+            self.status != "completed"
+            or self.kind not in {"company_facts_lookup", "macro_series_lookup"}
+        ):
+            raise ValueError("Only completed external lookups carry an outcome")
+        expected_tool = {
+            "company_facts_lookup": "lookup_company_facts",
+            "macro_series_lookup": "lookup_macro_series",
+        }.get(self.kind)
+        if expected_tool is not None and self.tool != expected_tool:
+            raise ValueError("External activity kind must match its tool")
         return self
 
 

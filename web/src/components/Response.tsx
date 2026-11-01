@@ -126,7 +126,12 @@ export function Response({
                       <span className="activity-status">
                         {row.done ? (
                           <>
-                            <Check size={11} /> done
+                            {(!row.outcome || row.outcome === "ok") && (
+                              <Check size={11} />
+                            )}
+                            {row.outcome && row.outcome !== "ok"
+                              ? row.outcome
+                              : "done"}
                           </>
                         ) : running ? (
                           "in progress"
@@ -300,6 +305,8 @@ const KIND_ICONS: Record<ActivityKind, LucideIcon> = {
   generation: PenLine,
   calculator: Calculator,
   evidence_search: FileSearch,
+  company_facts_lookup: FileText,
+  macro_series_lookup: Table2,
   tool_check: Wrench,
   citation_validation: Quote,
   grounding_verification: ShieldCheck,

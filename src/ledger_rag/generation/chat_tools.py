@@ -13,6 +13,9 @@ from ledger_rag.core.models import (
     Principal,
     QueryRequest,
 )
+from ledger_rag.external.errors import ExternalDataError
+from ledger_rag.external.service import ExternalSession
+from ledger_rag.external.tools import TOOL_PROVIDERS, ExternalToolName, run_external_tool
 from ledger_rag.generation.evidence import citation_from_hit, evidence_payload
 from ledger_rag.generation.program import ProgramError, program_tool_result, run_program
 from ledger_rag.orchestration.activity import ActivityCallback, activity
@@ -31,6 +34,7 @@ async def execute_tool(
     evidence_ids: set[str],
     on_activity: ActivityCallback | None,
     calculations: list[Calculation] | None = None,
+    external: ExternalSession | None = None,
 ) -> dict[str, Any]:
     name, arguments = call.get("name"), call.get("arguments")
     if not isinstance(arguments, dict):
@@ -44,6 +48,13 @@ async def execute_tool(
     )
     # Program arguments are validated by run_program, which returns correctable errors.
     allowed_calculator = name == "calculator" and isinstance(call.get("arguments"), dict)
+    external_name: ExternalToolName | None = next(
+        (item for item in TOOL_PROVIDERS if item == name), None
+    )
+    if external_name is not None and external is not None:
+        return await execute_external(
+            call, external_name, external, citations, evidence_ids, on_activity
+        )
     tool: ActivityTool | None = (
         "search_evidence" if allowed_search else "calculator" if allowed_calculator else None
     )
@@ -85,3 +96,43 @@ async def execute_tool(
         "name": name,
         "content": json.dumps(result),
     }
+
+
+async def execute_external(
+    call: dict[str, Any],
+    name: ExternalToolName,
+    session: ExternalSession,
+    citations: list[Citation],
+    evidence_ids: set[str],
+    callback: ActivityCallback | None,
+) -> dict[str, Any]:
+    from ledger_rag.core.models import ACTIVITY_KINDS, Activity, ActivityOutcome
+    from ledger_rag.orchestration.activity import activity_kind
+
+    kind = activity_kind("tool", name)
+    label = ACTIVITY_KINDS[kind][1]
+    if callback is not None:
+        await callback(Activity(stage="tool", status="started", label=label, tool=name, kind=kind))
+    outcome: ActivityOutcome = "ok"
+    try:
+        arguments = call.get("arguments")
+        if not isinstance(arguments, dict):
+            raise ExternalDataError("invalid_request", "Lookup arguments must be an object")
+        result = await run_external_tool(name, arguments, session, citations, evidence_ids)
+    except ExternalDataError as error:
+        outcome = (
+            "timeout"
+            if error.kind == "timeout"
+            else "unavailable"
+            if error.kind in {"disabled", "circuit_open", "forbidden"}
+            else "error"
+        )
+        result = {"error": error.message}
+        logger.warning("external_tool_failed", error_kind=error.kind)
+    if callback is not None:
+        await callback(
+            Activity(
+                stage="tool", status="completed", label=label, tool=name, kind=kind, outcome=outcome
+            )
+        )
+    return {"role": "tool", "tool_call_id": call["id"], "name": name, "content": json.dumps(result)}

@@ -174,6 +174,7 @@ async def build() -> dict[str, Any]:
         "unverified": await scenario(QUESTION, UNSUPPORTED, "flag", "req-unverified"),
         "abstained": await scenario(QUESTION, UNSUPPORTED, "enforce", "req-abstained"),
         "refused": await scenario(FORECAST, SUPPORTED, "enforce", "req-refused"),
+        "external": await external_scenario(),
     }
     fixtures: dict[str, Any] = {
         "_generated_by": (
@@ -202,6 +203,108 @@ async def build() -> dict[str, Any]:
     return fixtures
 
 
+async def external_scenario() -> tuple[Answer, list[Activity], Evidence]:
+    """Recorded provider payloads, never a network or model request."""
+    from datetime import UTC, datetime
+
+    import httpx
+
+    from ledger_rag.external.service import ExternalData
+
+    root = ROOT / "tests" / "fixtures" / "external"
+
+    def recorded(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        names = {
+            "/files/company_tickers.json": "sec/company_tickers.json",
+            "/api/xbrl/companyconcept/CIK0000320193/us-gaap/InterestExpense.json": (
+                "sec/concept_0000320193_us-gaap_InterestExpense.json"
+            ),
+            "/fred/series": "fred/series_FEDFUNDS.json",
+            "/fred/series/observations": "fred/observations_FEDFUNDS.json",
+        }
+        name = names.get(path)
+        if name is None:
+            return httpx.Response(404)
+        return httpx.Response(200, content=(root / name).read_bytes())
+
+    class Provider:
+        model = "offline-recorded-provider"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(
+            self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
+        ) -> dict[str, Any]:
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "tool_calls": [
+                        {
+                            "id": "sec-1",
+                            "name": "lookup_company_facts",
+                            "arguments": {
+                                "company": "AAPL",
+                                "concepts": ["InterestExpense"],
+                                "periods": ["FY2023"],
+                            },
+                        },
+                        {
+                            "id": "fred-1",
+                            "name": "lookup_macro_series",
+                            "arguments": {"series_id": "FEDFUNDS", "dates": ["2023-08-01"]},
+                        },
+                    ]
+                }
+            return {
+                "content": (
+                    "Apple reported interest expense of $3,933 million in FY2023 [C1]. "
+                    "The effective federal funds rate was 5.33% in August 2023 [C2]."
+                )
+            }
+
+        async def close(self) -> None:
+            pass
+
+    settings = Settings.model_construct(
+        external_data_enabled=False, planner_enabled=False, verification_mode="enforce"
+    )
+    from pydantic import SecretStr
+
+    configured = settings.model_copy(
+        update={
+            "external_data_enabled": True,
+            "fred_api_key": SecretStr("0" * 32),
+        }
+    )
+    store = MemoryRetriever()
+    service = RagService(settings, store, Provider())
+    service.external = ExternalData(
+        configured,
+        transport=httpx.MockTransport(recorded),
+        now=lambda: datetime(2026, 8, 1, 12, tzinfo=UTC),
+    )
+    query = QueryRequest(
+        question="Apple interest expense and federal funds rate", as_of=date(2024, 1, 1)
+    )
+    principal = Principal(subject="contract-fixtures", tenant_id="demo", roles=["reader"])
+    events: list[Activity] = []
+
+    async def collect(event: Activity) -> None:
+        events.append(event)
+
+    try:
+        answer = await service.generate(
+            query, [], 0, "req-external", principal, on_activity=collect
+        )
+    finally:
+        await service.close()
+    if answer.abstained or len(answer.citations) != 2:
+        raise ValueError("Recorded external fixture did not produce two validated citations")
+    return answer, events, evidence_event("req-external", 0, [])
+
+
 def schema() -> dict[str, Any]:
     _, definitions = models_json_schema(
         [(Answer, "serialization"), (Activity, "serialization"), (Evidence, "serialization")],
@@ -215,7 +318,16 @@ def render(data: dict[str, Any]) -> str:
 
 
 def outputs() -> dict[Path, str]:
-    return {ANSWERS: render(asyncio.run(build())), SCHEMA: render(schema())}
+    fixtures = asyncio.run(build())
+    external = {
+        "answer": fixtures["external"],
+        "activities": fixtures["activities"]["external"],
+    }
+    return {
+        ANSWERS: render(fixtures),
+        SCHEMA: render(schema()),
+        FIXTURES / "external.json": render(external),
+    }
 
 
 def main() -> int:

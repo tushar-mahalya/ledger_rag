@@ -167,16 +167,30 @@ export function Inspector({
                     <span>
                       <strong>{citation.title}</strong>
                       <small>Published {citation.published_at}</small>
+                      {citation.source_kind &&
+                        citation.source_kind !== "corpus" && (
+                          <span className="tiny-badge">
+                            {citation.source_kind === "sec_xbrl"
+                              ? "SEC XBRL"
+                              : "FRED / ALFRED"}
+                          </span>
+                        )}
                     </span>
                     <FileText size={17} />
                   </button>
                   {selected && (
                     <div className="source-content">
                       <span className="source-type">
-                        {turn?.demo ||
-                        citation.source.startsWith("urn:ledger:synthetic:")
-                          ? "FICTIONAL DISCLOSURE"
-                          : "RETRIEVED EXCERPT"}
+                        {citation.provenance
+                          ? turn?.demo
+                            ? "RECORDED EXTERNAL EVIDENCE"
+                            : "OFFICIAL EXTERNAL EVIDENCE"
+                          : turn?.demo ||
+                              citation.source.startsWith(
+                                "urn:ledger:synthetic:",
+                              )
+                            ? "FICTIONAL DISCLOSURE"
+                            : "RETRIEVED EXCERPT"}
                       </span>
                       <blockquote>
                         {highlightSpan(
@@ -194,6 +208,40 @@ export function Inspector({
                           ),
                         )}
                       </blockquote>
+                      {citation.provenance && (
+                        <dl
+                          className="provenance-panel"
+                          aria-label="Evidence provenance"
+                        >
+                          {Object.entries({
+                            Provider: citation.provenance.provider,
+                            Entity: citation.provenance.entity,
+                            Concept: citation.provenance.concept,
+                            Identifier: citation.provenance.identifier,
+                            Form: citation.provenance.form,
+                            Period: citation.provenance.period_label,
+                            Value: citation.provenance.value,
+                            Unit: citation.provenance.unit,
+                            "Base-unit scale": `10^${citation.provenance.scale}`,
+                            "As of": citation.provenance.as_of,
+                            "Filed / vintage": citation.provenance.published_at,
+                            Retrieved: citation.provenance.retrieved_at,
+                            Freshness: citation.provenance.freshness,
+                            "Later revision": citation.provenance.superseded_by,
+                            "Restated before cutoff": citation.provenance
+                              .revised_before_as_of
+                              ? "Yes"
+                              : "No",
+                          })
+                            .filter(([, value]) => value != null)
+                            .map(([label, value]) => (
+                              <div key={label}>
+                                <dt>{label}</dt>
+                                <dd>{value}</dd>
+                              </div>
+                            ))}
+                        </dl>
+                      )}
                       <div className="source-identifier">
                         <span>Document ID</span>
                         <code>{citation.document_id}</code>

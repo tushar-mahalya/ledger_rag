@@ -1,0 +1,141 @@
+{
+ "cik": 320193,
+ "entityName": "Apple Inc.",
+ "facts": {
+  "dei": {
+   "EntityCommonStockSharesOutstanding": {
+    "label": "Entity Common Stock, Shares Outstanding",
+    "description": "Indicate number of shares or other units outstanding of each of registrant's classes of capital or common stock or other ownership interests, if and as stated on cover of related periodic report. Where multiple classes or units exist define each class/interest by adding class of stock items such as Common Class A [Member], Common Class B [Member] or Partnership Interest [Member] onto the Instrument [Domain] of the Entity Listings, Instrument.",
+    "units": {
+     "shares": [
+      {
+       "end": "2026-07-17",
+       "val": 14594180000,
+       "accn": "0000320193-26-000020",
+       "fy": 2026,
+       "fp": "Q3",
+       "form": "10-Q",
+       "filed": "2026-07-31",
+       "frame": "CY2026Q2I"
+      }
+     ]
+    }
+   }
+  },
+  "us-gaap": {
+   "InterestExpense": {
+    "label": "Interest Expense",
+    "description": "Amount of the cost of borrowed funds accounted for as interest expense.",
+    "units": {
+     "USD": [
+      {
+       "start": "2022-09-25",
+       "end": "2023-09-30",
+       "val": 3933000000,
+       "accn": "0000320193-23-000106",
+       "fy": 2023,
+       "fp": "FY",
+       "form": "10-K",
+       "filed": "2023-11-03",
+       "frame": "CY2023"
+      }
+     ]
+    }
+   },
+   "InterestPaidNet": {
+    "label": "Interest Paid, Excluding Capitalized Interest, Operating Activities",
+    "description": "Amount of cash paid for interest, excluding capitalized interest, classified as operating activity. Includes, but is not limited to, payment to settle zero-coupon bond for accreted interest of debt discount and debt instrument with insignificant coupon interest rate in relation to effective interest rate of borrowing attributable to accreted interest of debt discount.",
+    "units": {
+     "USD": [
+      {
+       "start": "2022-09-25",
+       "end": "2023-09-30",
+       "val": 3803000000,
+       "accn": "0000320193-23-000106",
+       "fy": 2023,
+       "fp": "FY",
+       "form": "10-K",
+       "filed": "2023-11-03",
+       "frame": "CY2023"
+      }
+     ]
+    }
+   },
+   "Revenues": {
+    "label": "Revenues",
+    "description": "Amount of revenue recognized from goods sold, services rendered, insurance premiums, or other activities that constitute an earning process. Includes, but is not limited to, investment and interest income before deduction of interest expense when recognized as a component of revenue, and sales and trading gain (loss).",
+    "units": {
+     "USD": [
+      {
+       "start": "2018-07-01",
+       "end": "2018-09-29",
+       "val": 62900000000,
+       "accn": "0000320193-18-000145",
+       "fy": 2018,
+       "fp": "FY",
+       "form": "10-K",
+       "filed": "2018-11-05",
+       "frame": "CY2018Q3"
+      }
+     ]
+    }
+   },
+   "RevenueFromContractWithCustomerExcludingAssessedTax": {
+    "label": "Revenue from Contract with Customer, Excluding Assessed Tax",
+    "description": "Amount, excluding tax collected from customer, of revenue from satisfaction of performance obligation by transferring promised good or service to customer. Tax collected from customer is tax assessed by governmental authority that is both imposed on and concurrent with specific revenue-producing transaction, including, but not limited to, sales, use, value added and excise.",
+    "units": {
+     "USD": [
+      {
+       "start": "2026-03-29",
+       "end": "2026-06-27",
+       "val": 109417000000,
+       "accn": "0000320193-26-000020",
+       "fy": 2026,
+       "fp": "Q3",
+       "form": "10-Q",
+       "filed": "2026-07-31",
+       "frame": "CY2026Q2"
+      }
+     ]
+    }
+   },
+   "NetIncomeLoss": {
+    "label": "Net Income (Loss) Attributable to Parent",
+    "description": "The portion of profit or loss for the period, net of income taxes, which is attributable to the parent.",
+    "units": {
+     "USD": [
+      {
+       "start": "2026-03-29",
+       "end": "2026-06-27",
+       "val": 29789000000,
+       "accn": "0000320193-26-000020",
+       "fy": 2026,
+       "fp": "Q3",
+       "form": "10-Q",
+       "filed": "2026-07-31",
+       "frame": "CY2026Q2"
+      }
+     ]
+    }
+   },
+   "Assets": {
+    "label": "Assets",
+    "description": "Sum of the carrying amounts as of the balance sheet date of all assets that are recognized. Assets are probable future economic benefits obtained or controlled by an entity as a result of past transactions or events.",
+    "units": {
+     "USD": [
+      {
+       "end": "2026-06-27",
+       "val": 383266000000,
+       "accn": "0000320193-26-000020",
+       "fy": 2026,
+       "fp": "Q3",
+       "form": "10-Q",
+       "filed": "2026-07-31",
+       "frame": "CY2026Q2I"
+      }
+     ]
+    }
+   }
+  }
+ }
+}

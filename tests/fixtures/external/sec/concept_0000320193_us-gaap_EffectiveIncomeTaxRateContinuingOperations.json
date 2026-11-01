@@ -1,0 +1,43 @@
+{
+ "cik": 320193,
+ "taxonomy": "us-gaap",
+ "tag": "EffectiveIncomeTaxRateContinuingOperations",
+ "label": "Effective Income Tax Rate Reconciliation, Percent",
+ "description": "Percentage of current income tax expense (benefit) and deferred income tax expense (benefit) pertaining to continuing operations.",
+ "entityName": "Apple Inc.",
+ "units": {
+  "pure": [
+   {
+    "start": "2020-09-27",
+    "end": "2021-09-25",
+    "val": 0.133,
+    "accn": "0000320193-23-000106",
+    "fy": 2023,
+    "fp": "FY",
+    "form": "10-K",
+    "filed": "2023-11-03",
+    "frame": "CY2021"
+   },
+   {
+    "start": "2021-09-26",
+    "end": "2022-09-24",
+    "val": 0.162,
+    "accn": "0000320193-23-000106",
+    "fy": 2023,
+    "fp": "FY",
+    "form": "10-K",
+    "filed": "2023-11-03"
+   },
+   {
+    "start": "2022-09-25",
+    "end": "2023-09-30",
+    "val": 0.147,
+    "accn": "0000320193-23-000106",
+    "fy": 2023,
+    "fp": "FY",
+    "form": "10-K",
+    "filed": "2023-11-03"
+   }
+  ]
+ }
+}

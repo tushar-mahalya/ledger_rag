@@ -165,6 +165,8 @@
             "Generating answer",
             "Calculating",
             "Searching evidence",
+            "Looking up SEC filings",
+            "Looking up macro data",
             "Checking tool request",
             "Validating citations",
             "Verifying grounding"
@@ -177,7 +179,9 @@
             {
               "enum": [
                 "calculator",
-                "search_evidence"
+                "search_evidence",
+                "lookup_company_facts",
+                "lookup_macro_series"
               ],
               "type": "string"
             },
@@ -188,6 +192,24 @@
           "default": null,
           "title": "Tool"
         },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "ok",
+                "error",
+                "timeout",
+                "unavailable"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        },
         "kind": {
           "enum": [
             "planning",
@@ -195,6 +217,8 @@
             "generation",
             "calculator",
             "evidence_search",
+            "company_facts_lookup",
+            "macro_series_lookup",
             "tool_check",
             "citation_validation",
             "grounding_verification"
@@ -629,7 +653,7 @@
           "type": "string"
         },
         "document_id": {
-          "maxLength": 200,
+          "maxLength": 261,
           "title": "Document Id",
           "type": "string"
         },
@@ -652,6 +676,27 @@
           "maxLength": 100000,
           "title": "Quote",
           "type": "string"
+        },
+        "source_kind": {
+          "default": "corpus",
+          "enum": [
+            "corpus",
+            "sec_xbrl",
+            "fred"
+          ],
+          "title": "Source Kind",
+          "type": "string"
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Provenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -780,6 +825,206 @@
       ],
       "title": "Profile",
       "type": "string"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "Where an external value came from and what was known at the as-of cutoff.",
+      "properties": {
+        "source_kind": {
+          "enum": [
+            "sec_xbrl",
+            "fred"
+          ],
+          "title": "Source Kind",
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "SEC EDGAR",
+            "FRED"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "evidence_id": {
+          "maxLength": 261,
+          "minLength": 5,
+          "pattern": "^(?:sec|fred):[A-Za-z0-9._:/-]{1,257}$",
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "identifier": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Identifier",
+          "type": "string"
+        },
+        "entity": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Entity",
+          "type": "string"
+        },
+        "concept": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Concept",
+          "type": "string"
+        },
+        "form": {
+          "anyOf": [
+            {
+              "maxLength": 16,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Form"
+        },
+        "fiscal_year": {
+          "anyOf": [
+            {
+              "maximum": 2200,
+              "minimum": 1900,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fiscal Year"
+        },
+        "fiscal_period": {
+          "anyOf": [
+            {
+              "maxLength": 8,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fiscal Period"
+        },
+        "period_label": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Period Label",
+          "type": "string"
+        },
+        "period_start": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Period Start"
+        },
+        "period_end": {
+          "format": "date",
+          "title": "Period End",
+          "type": "string"
+        },
+        "unit": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        },
+        "scale": {
+          "default": 0,
+          "maximum": 12,
+          "minimum": 0,
+          "title": "Scale",
+          "type": "integer"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        },
+        "published_at": {
+          "format": "date",
+          "title": "Published At",
+          "type": "string"
+        },
+        "retrieved_at": {
+          "format": "date-time",
+          "title": "Retrieved At",
+          "type": "string"
+        },
+        "as_of": {
+          "format": "date",
+          "title": "As Of",
+          "type": "string"
+        },
+        "source_url": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Source Url",
+          "type": "string"
+        },
+        "freshness": {
+          "enum": [
+            "current",
+            "stale",
+            "superseded"
+          ],
+          "title": "Freshness",
+          "type": "string"
+        },
+        "amended": {
+          "default": false,
+          "title": "Amended",
+          "type": "boolean"
+        },
+        "superseded_by": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Superseded By"
+        },
+        "revised_before_as_of": {
+          "default": false,
+          "title": "Revised Before As Of",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source_kind",
+        "provider",
+        "evidence_id",
+        "identifier",
+        "entity",
+        "concept",
+        "period_label",
+        "period_end",
+        "unit",
+        "value",
+        "published_at",
+        "retrieved_at",
+        "as_of",
+        "source_url",
+        "freshness"
+      ],
+      "title": "Provenance",
+      "type": "object"
     },
     "Verification": {
       "properties": {
