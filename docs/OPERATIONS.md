@@ -273,6 +273,67 @@ decision tier is enabled with `LEDGER_DECISION_BACKEND=laya`, an HTTPS
 [query planning](ARCHITECTURE.md#query-planning) for the measured latency and the
 deploy command.
 
+### Self-hosted open-weight LLM (Modal vLLM)
+
+`compute/llm.py` serves `Qwen/Qwen3.8-27B-FP8` (Apache-2.0), pinned to Hub revision
+`017b9c7af6b5689d5dd426a76e0bc077eb5ca20a`, with vLLM 0.32.0 on one H100. It
+follows the vLLM recipe: `qwen3` reasoning parser, `qwen3_coder` tool calls, FP8 KV
+cache, `--language-model-only`, a 32,768-token context and MTP speculative decoding
+(`LEDGER_LLM_SPECULATIVE_TOKENS`, default 3, 0 disables). It exists because
+free-tier hosted APIs rate-limited the evaluation (see [Evaluation](EVALUATION.md)).
+
+```mermaid
+flowchart LR
+    vault[(Vault KV<br/>secret/ledger/llm-serve)] -->|sync_modal_secrets.sh llm-serve| msecret[Modal secret<br/>ledger-llm-serve]
+    msecret --> auth
+    api[Ledger API or eval job<br/>OpenAI provider] -->|HTTPS + bearer key| auth[BearerAuth ASGI<br/>route allowlist, body cap]
+    auth -->|key digest only| vllm[vLLM OpenAI server<br/>Qwen3.8-27B-FP8, H100]
+    vllm --- cache[(Volumes<br/>HF weights, compile cache)]
+```
+
+```bash
+scripts/sync_modal_secrets.sh llm-serve                       # Vault -> Modal secret
+uv run --group compute modal run compute/llm.py::download_weights
+uv run --group compute modal deploy compute/llm.py
+uv run --group compute modal run compute/llm_bench.py --phases cold,controls
+```
+
+`BearerAuth` (`compute/llm_middleware.py`) leaves only `GET /health` open. It
+allowlists the OpenAI routes plus `/metrics` and `/ledger/startup` (the cold-start
+breakdown), bounds request bodies, and logs no headers or keys. Point the API at it
+with `LEDGER_PROVIDER=openai`, `LEDGER_LLM_BASE_URL=https://<workspace>--ledger-llm-serve-serve.modal.run/v1`
+and `LEDGER_LLM_MODEL=Qwen/Qwen3.8-27B-FP8`. Server-specific controls go through
+`LEDGER_LLM_EXTRA_BODY`, a JSON object of at most 4 KiB merged into each request.
+It cannot override typed fields such as `model`, `messages`, `tools`, `temperature`
+or `max_tokens`. For grounded answers, disable thinking with
+`{"chat_template_kwargs":{"enable_thinking":false}}`. The provider strips leaked
+`<think>` blocks and rejects a reasoning-only reply with an actionable error.
+
+Measured in bench run `6e847a91` (H100 80GB HBM3, no compile cache
+yet):
+
+| Phase | Seconds |
+|---|---:|
+| Scheduling and image pull | 4.0 |
+| Weights load | 20.8 |
+| `torch.compile` | 35.7 |
+| CUDA graph capture | 152.0 |
+| Engine init (total) | 370.3 |
+| Process start to ready | 455.1 |
+| Client-observed cold start | 459.7 |
+
+The first request after ready had a TTFT of 1.03 s. With
+`enable_thinking: false`, a 64-token probe returned content and no reasoning.
+With the default, and with template `reasoning_effort` of `low`, `medium` or
+`xhigh`, the same probe returned only reasoning. A request-level
+`reasoning_effort: "high"` is rejected with HTTP 400 (the template supports `low`,
+`medium` and `xhigh`). The single-stream, concurrency, long-context and MTP
+acceptance phases have not been measured yet.
+
+Costs: `min_containers=0` with a 5-minute scaledown window and `max_containers=1`.
+Idle cost is zero, but the first request after scale-down waits through the cold
+start above. Keep the app warm only for the duration of an evaluation run.
+
 ## Telemetry and diagnostics
 
 `LEDGER_OTLP_ENDPOINT` is an OTLP/HTTP base URL; the application appends
