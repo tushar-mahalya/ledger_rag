@@ -109,13 +109,13 @@ For one-time workstation configuration, enter credentials in your own terminal,
 not in command arguments, source files or chat:
 
 ```bash
-uv run --locked --group compute modal token set --profile tushki10200 --activate --verify
+uv run --locked --group compute modal token set --profile ledger --activate --verify
 uv run --locked --group compute modal app list --limit 5
 ```
 
 With token arguments omitted, `token set` prompts for them and writes the local
 Modal configuration outside the repository. This requires terminal input, but
-not a browser. Use `modal profile activate tushki10200` to select an existing
+not a browser. Use `modal profile activate ledger` to select an existing
 profile. Profile selection alone does not verify access.
 
 For fully noninteractive CI/deployment, have the secret manager inject
