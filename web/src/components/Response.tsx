@@ -11,12 +11,15 @@ import {
   FileSearch,
   FileText,
   PenLine,
+  Quote,
   RotateCcw,
   ShieldCheck,
   Table2,
+  Wrench,
+  type LucideIcon,
 } from "lucide-react";
-import type { Activity, Citation, Turn } from "../contracts";
-import { timeline } from "../grounding";
+import type { ActivityKind, Citation, PlanSummary, Turn } from "../contracts";
+import { describePlan, timeline } from "../grounding";
 import { extractArtifacts, type Artifact } from "../markdown";
 import {
   AbstentionNotice,
@@ -50,6 +53,7 @@ export function Response({
   const rows = useMemo(() => timeline(turn.activities), [turn.activities]);
   const answer = turn.answer;
   const verification = answer?.verification;
+  // Inline marks exist only in flag mode: enforce failures abstain and send no draft.
   const unsupported =
     answer && !answer.abstained && verification?.status !== "verified"
       ? (verification?.unsupported_numbers ?? [])
@@ -110,12 +114,15 @@ export function Response({
                   return (
                     <li
                       key={row.key}
-                      className={`timeline-row ${row.stage} ${running ? "running" : ""}`}
+                      className={`timeline-row ${row.stage} ${row.kind} ${row.plan ? "has-plan" : ""} ${running ? "running" : ""}`}
                     >
                       <span className="timeline-icon">
-                        <StageIcon activity={row} />
+                        <KindIcon kind={row.kind} />
                       </span>
-                      {row.label}
+                      <div className="timeline-body">
+                        <span>{row.label}</span>
+                        {row.plan && <PlanFacts plan={row.plan} />}
+                      </div>
                       <span className="activity-status">
                         {row.done ? (
                           <>
@@ -246,7 +253,12 @@ export function Response({
                     : "References checked"}
               </span>
               {verification && (
-                <VerificationBadge verification={verification} />
+                <VerificationBadge
+                  verification={verification}
+                  unsupportedCount={
+                    turn.answer.abstention?.features.unsupported_number_count
+                  }
+                />
               )}
               <span className="footer-spacer" />
               <button
@@ -282,14 +294,35 @@ export function Response({
   );
 }
 
-function StageIcon({ activity }: { activity: Activity }) {
-  if (activity.stage === "planning") return <Compass size={12} />;
-  if (activity.stage === "retrieval") return <FileSearch size={12} />;
-  if (activity.stage === "generation") return <PenLine size={12} />;
-  if (activity.stage === "validation") return <ShieldCheck size={12} />;
-  return activity.tool === "calculator" ? (
-    <Calculator size={12} />
-  ) : (
-    <FileSearch size={12} />
+const KIND_ICONS: Record<ActivityKind, LucideIcon> = {
+  planning: Compass,
+  retrieval: FileSearch,
+  generation: PenLine,
+  calculator: Calculator,
+  evidence_search: FileSearch,
+  tool_check: Wrench,
+  citation_validation: Quote,
+  grounding_verification: ShieldCheck,
+};
+
+function KindIcon({ kind }: { kind: ActivityKind }) {
+  const Icon = KIND_ICONS[kind];
+  return <Icon size={12} />;
+}
+
+function PlanFacts({ plan }: { plan: PlanSummary }) {
+  return (
+    <div className="plan-facts" role="group" aria-label="Query plan">
+      <dl>
+        {describePlan(plan).map((fact) => (
+          <div key={fact.term}>
+            <dt>{fact.term}</dt>
+            {fact.values.map((value, index) => (
+              <dd key={index}>{value}</dd>
+            ))}
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }

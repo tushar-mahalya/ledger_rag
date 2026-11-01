@@ -1,11 +1,14 @@
 import type {
   AbstentionDecision,
   Activity,
+  ActivityKind,
   Answer,
   Calculation,
   CalculationOperand,
+  CalculationUnit,
   Citation,
   Conversation,
+  PlanSummary,
   Turn,
   Verification,
 } from "./contracts";
@@ -35,7 +38,8 @@ export const exampleQuestions = [
   "Compare Aurora's FY2024 and FY2025 performance.",
   "How did Aurora's liquidity change?",
   "Show the calculation for Aurora's revenue growth.",
-  "Will Aurora's revenue keep growing in 2027?",
+  // Matches the planner's high-precision out-of-scope rule, so the live API refuses it too.
+  "Forecast the share price for Aurora in 2027.",
 ];
 
 // Curated grounding examples. Shapes mirror the backend; nothing below was executed.
@@ -63,6 +67,24 @@ const ref = (step: number, value: string): CalculationOperand => ({
   unit: null,
   step,
 });
+const usdMillion: CalculationUnit = {
+  kind: "currency",
+  currency: "USD",
+  scale: "million",
+  display: "amount",
+};
+const ratio: CalculationUnit = {
+  kind: "ratio",
+  currency: null,
+  scale: null,
+  display: "ratio",
+};
+const percent: CalculationUnit = {
+  kind: "percent",
+  currency: null,
+  scale: null,
+  display: "percent",
+};
 const constant = (value: string): CalculationOperand => ({
   kind: "constant",
   value,
@@ -85,6 +107,7 @@ const growth: Calculation = {
       ],
       result: "30000000",
       kind: "currency",
+      unit: usdMillion,
       citation_ids: ["C1", "C2"],
       evidence_backed: true,
     },
@@ -97,6 +120,7 @@ const growth: Calculation = {
       ],
       result: "0.25",
       kind: "ratio",
+      unit: ratio,
       citation_ids: ["C1", "C2"],
       evidence_backed: true,
     },
@@ -106,11 +130,13 @@ const growth: Calculation = {
       operands: [ref(1, "0.25"), constant("100")],
       result: "25",
       kind: "percent",
+      unit: percent,
       citation_ids: ["C1", "C2"],
       evidence_backed: true,
     },
   ],
   result: "25",
+  unit: percent,
   citation_ids: ["C1", "C2"],
 };
 
@@ -130,11 +156,13 @@ const netCash = (
       ],
       result: `${result}000000`,
       kind: "currency",
+      unit: usdMillion,
       citation_ids: [citation],
       evidence_backed: true,
     },
   ],
   result: `${result}000000`,
+  unit: usdMillion,
   citation_ids: [citation],
 });
 
@@ -152,20 +180,22 @@ function verified(checked: number, score?: number): Verification {
 
 function decision(
   verification: Verification,
-  reasons: string[],
+  reasons: AbstentionDecision["reasons"],
   toolCalls: number,
 ): AbstentionDecision {
+  // A planner refusal happens before retrieval, so no evidence features exist.
+  const refused = reasons.includes("out_of_scope");
   return {
     abstained: reasons.length > 0,
     reasons,
     calibrated: false,
     features: {
-      hit_count: 2,
-      top_score: 0.82,
-      mean_score: 0.79,
+      hit_count: refused ? 0 : 2,
+      top_score: refused ? null : 0.82,
+      mean_score: refused ? null : 0.79,
       citation_coverage: reasons.length ? null : 1,
       checked_numbers: verification.checked_numbers,
-      unsupported_numbers: verification.unsupported_numbers.length,
+      unsupported_number_count: verification.unsupported_numbers.length,
       verification_status: verification.status,
       verifier_score: verification.verifier_score ?? null,
       tool_calls: toolCalls,
@@ -174,14 +204,47 @@ function decision(
   };
 }
 
-const pair = (
-  stage: Activity["stage"],
-  label: string,
-  tool?: Activity["tool"],
-): Activity[] => [
-  { stage, status: "started", label, ...(tool ? { tool } : {}) },
-  { stage, status: "completed", label, ...(tool ? { tool } : {}) },
+// Stage, label and tool for each kind, as the backend's ACTIVITY_KINDS sends them.
+const KINDS: Record<
+  ActivityKind,
+  Pick<Activity, "stage" | "label"> & { tool?: Activity["tool"] }
+> = {
+  planning: { stage: "planning", label: "Planning query" },
+  retrieval: { stage: "retrieval", label: "Retrieving evidence" },
+  generation: { stage: "generation", label: "Generating answer" },
+  calculator: { stage: "tool", label: "Calculating", tool: "calculator" },
+  evidence_search: {
+    stage: "tool",
+    label: "Searching evidence",
+    tool: "search_evidence",
+  },
+  tool_check: { stage: "tool", label: "Checking tool request" },
+  citation_validation: { stage: "validation", label: "Validating citations" },
+  grounding_verification: {
+    stage: "validation",
+    label: "Verifying grounding",
+  },
+};
+
+const pair = (kind: ActivityKind, plan?: PlanSummary): Activity[] => [
+  { ...KINDS[kind], kind, status: "started" },
+  { ...KINDS[kind], kind, status: "completed", ...(plan ? { plan } : {}) },
 ];
+
+// Summaries the deterministic planner produces for the example questions.
+const plan = (
+  intent: PlanSummary["intent"],
+  periods: string[],
+  subquestions: string[],
+  route: PlanSummary["route"] = "retrieve",
+): PlanSummary => ({
+  intent,
+  route,
+  subquestion_count: subquestions.length,
+  subquestions,
+  companies: ["AURORA"],
+  periods,
+});
 
 const comparison = `## Growth, with stronger fundamentals
 
@@ -214,6 +277,7 @@ export function demoTurn(question: string): Turn {
   const calculation = /calculation|calculate/.test(question.toLowerCase());
   const liquidity = /liquidity/.test(question.toLowerCase());
   const forecast = question === exampleQuestions[3];
+  const comparing = question === exampleQuestions[0];
   const base = {
     profile: "chat" as const,
     retrieval_ms: 0,
@@ -221,21 +285,40 @@ export function demoTurn(question: string): Turn {
     request_id: "design-preview",
     model: "Curated preview · no model call",
   };
-  const activities: Activity[] = supported
-    ? [
-        ...pair("retrieval", "Retrieving evidence"),
-        ...pair("planning", "Planning query"),
-        ...pair("generation", "Generating answer"),
-        ...(calculation || liquidity
-          ? [
-              ...pair("tool", "Calculating", "calculator"),
-              ...pair("generation", "Generating answer"),
-            ]
-          : []),
-        ...pair("validation", "Validating citations"),
-        ...(calculation ? pair("validation", "Verifying grounding") : []),
-      ]
-    : [];
+  const activities: Activity[] = !supported
+    ? []
+    : forecast
+      ? [
+          ...pair("retrieval"),
+          ...pair(
+            "planning",
+            plan("lookup", ["2027"], [], "refuse_out_of_scope"),
+          ),
+          ...pair("citation_validation"),
+        ]
+      : [
+          ...pair("retrieval"),
+          ...pair(
+            "planning",
+            comparing
+              ? plan(
+                  "compare",
+                  ["2024", "2025"],
+                  [
+                    question,
+                    `AURORA ${question} 2024`,
+                    `AURORA ${question} 2025`,
+                  ],
+                )
+              : plan("change", [], [question]),
+          ),
+          ...pair("generation"),
+          ...(calculation || liquidity
+            ? [...pair("calculator"), ...pair("generation")]
+            : []),
+          ...pair("citation_validation"),
+          ...(calculation ? pair("grounding_verification") : []),
+        ];
   let answer: Answer;
   if (!supported) {
     answer = {
@@ -269,7 +352,7 @@ export function demoTurn(question: string): Turn {
       calculation: null,
       calculations: [],
       verification,
-      abstention: decision(verification, ["no_validated_answer"], 0),
+      abstention: decision(verification, ["out_of_scope"], 0),
     };
   } else if (calculation) {
     const verification = verified(4, 0.94);
