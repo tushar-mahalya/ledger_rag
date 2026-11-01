@@ -46,12 +46,23 @@ describe("point-in-time external evidence", () => {
   it("bounds provenance and rejects mismatched or credential-bearing sources", () => {
     const valid = fixtures.external.citations[0];
     expect(citationSchema.safeParse(valid).success).toBe(true);
+    for (const value of ["1E+20", "999999999999999999999999999999", "1E-20"]) {
+      expect(
+        citationSchema.safeParse({
+          ...valid,
+          provenance: { ...valid.provenance, value },
+        }).success,
+      ).toBe(true);
+    }
     for (const changes of [
       { source_kind: "corpus" },
       { source_kind: "fred" },
+      { document_id: "other-id" },
+      { source: "https://evil.example" },
       { provenance: null },
       { provenance: { ...valid.provenance, entity: "a".repeat(301) } },
       { provenance: { ...valid.provenance, value: "NaN" } },
+      { provenance: { ...valid.provenance, value: "1E-21" } },
       {
         provenance: {
           ...valid.provenance,
@@ -81,6 +92,16 @@ describe("point-in-time external evidence", () => {
         tool: "lookup_macro_series",
         kind: "macro_series_lookup",
         outcome: "raw failure",
+      }).success,
+    ).toBe(false);
+    expect(
+      activitySchema.safeParse({
+        stage: "tool",
+        status: "started",
+        label: "Looking up macro data",
+        tool: "lookup_macro_series",
+        kind: "macro_series_lookup",
+        outcome: "ok",
       }).success,
     ).toBe(false);
   });

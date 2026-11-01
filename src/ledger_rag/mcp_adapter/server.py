@@ -26,7 +26,7 @@ from starlette.responses import JSONResponse
 from starlette.types import Message, Receive, Scope, Send
 
 from ledger_rag.core.config import Settings
-from ledger_rag.core.models import Citation, Principal, QueryRequest
+from ledger_rag.core.models import MAX_RESPONSE_JSON_BYTES, Citation, Principal, QueryRequest
 from ledger_rag.core.retry import request_deadline
 from ledger_rag.external.errors import ExternalDataError
 from ledger_rag.external.service import ExternalSession
@@ -154,7 +154,19 @@ async def run_tool(context: CallContext, params: CallToolRequestParams) -> CallT
             content=[TextContent(type="text", text='{"error":"Evidence service failed"}')],
             is_error=True,
         )
-    return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))])
+    result = CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))]
+    )
+    if len(result.model_dump_json().encode("utf-8")) > MAX_RESPONSE_JSON_BYTES:
+        return CallToolResult(
+            content=[
+                TextContent(
+                    type="text", text='{"error":"Evidence response exceeds the size limit"}'
+                )
+            ],
+            is_error=True,
+        )
+    return result
 
 
 class MCPAdapter:

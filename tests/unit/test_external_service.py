@@ -379,7 +379,16 @@ def test_citation_provenance_must_match_its_kind(settings: Settings) -> None:
         Citation(**{**base, "provenance": provenance})
     with pytest.raises(ValidationError):
         Citation(**{**base, "source_kind": "sec_xbrl", "provenance": provenance})
-    assert Citation(**{**base, "source_kind": "fred", "provenance": provenance}).provenance
+    assert Citation(
+        **{
+            **base,
+            "source_kind": "fred",
+            "provenance": provenance,
+            "document_id": provenance.evidence_id,
+            "source": provenance.source_url,
+            "published_at": provenance.published_at,
+        }
+    ).provenance
     with pytest.raises(ValidationError):
         provenance.model_copy(update={}).model_validate(
             {**provenance.model_dump(), "source_url": "https://evil.example/sec.gov"}

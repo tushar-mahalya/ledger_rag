@@ -310,3 +310,25 @@ def test_mcp_rejects_oversize_body(settings: Settings) -> None:
     with TestClient(create_app(enabled(settings), MemoryRetriever(), FakeProvider([]))) as client:
         response = client.post("/mcp", headers=HEADERS, content="x" * 65537)
         assert response.status_code == 413
+
+
+def test_mcp_bounds_aggregate_multibyte_evidence(settings: Settings, document: Document) -> None:
+    from ledger_rag.core.models import Hit
+
+    chunk = chunk_document(document)[0].model_copy(
+        update={"text": "界" * 100_000, "parent_text": "界" * 100_000}
+    )
+    with TestClient(create_app(enabled(settings), MemoryRetriever(), FakeProvider([]))) as client:
+
+        async def oversized(query: object, principal: Principal) -> tuple[list[Hit], float]:
+            return [
+                Hit(chunk=chunk.model_copy(update={"id": f"chunk-{i}"}), score=1) for i in range(10)
+            ], 0
+
+        client.app.state.runtime.service.retrieve = oversized
+        result = rpc(
+            client, "tools/call", {"name": "search_evidence", "arguments": {"question": "Revenue"}}
+        )
+        assert result["result"]["isError"]
+        assert "size limit" in result["result"]["content"][0]["text"]
+        assert len(str(result)) < 1000

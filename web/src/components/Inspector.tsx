@@ -181,10 +181,16 @@ export function Inspector({
                   {selected && (
                     <div className="source-content">
                       <span className="source-type">
-                        {turn?.demo ||
-                        citation.source.startsWith("urn:ledger:synthetic:")
-                          ? "FICTIONAL DISCLOSURE"
-                          : "RETRIEVED EXCERPT"}
+                        {citation.provenance
+                          ? turn?.demo
+                            ? "RECORDED EXTERNAL EVIDENCE"
+                            : "OFFICIAL EXTERNAL EVIDENCE"
+                          : turn?.demo ||
+                              citation.source.startsWith(
+                                "urn:ledger:synthetic:",
+                              )
+                            ? "FICTIONAL DISCLOSURE"
+                            : "RETRIEVED EXCERPT"}
                       </span>
                       <blockquote>
                         {highlightSpan(

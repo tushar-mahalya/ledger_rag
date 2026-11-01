@@ -4,8 +4,9 @@ from pathlib import Path
 import pytest
 
 from ledger_rag.core.config import Settings
-from ledger_rag.core.models import Activity, Principal, Profile, QueryRequest
+from ledger_rag.core.models import Activity, Document, Hit, Principal, Profile, QueryRequest
 from ledger_rag.generation.chat_tools import execute_tool
+from ledger_rag.ingestion.chunking import chunk_document
 from ledger_rag.orchestration.service import RagService
 from ledger_rag.retrieval.memory import MemoryRetriever
 from tests.unit.external_fakes import FakeUpstream, external_data
@@ -23,7 +24,9 @@ def test_recorded_fixtures_never_contain_credentials() -> None:
             assert "0123456789abcdef0123456789abcdef" not in contents, path.name
 
 
-async def test_chat_external_budget_activity_and_voice_isolation(settings: Settings) -> None:
+async def test_chat_external_budget_activity_and_voice_isolation(
+    settings: Settings, document: Document
+) -> None:
     class Provider(FakeProvider):
         def __init__(self) -> None:
             self.offered: list[object] = []
@@ -75,12 +78,13 @@ async def test_chat_external_budget_activity_and_voice_isolation(settings: Setti
     before = len(upstream.requests)
     await service.generate(
         QueryRequest(question="Apple interest expense", profile=Profile.VOICE),
-        [],
+        [Hit(chunk=chunk_document(document)[0], score=1)],
         0,
         "voice",
         READER,
     )
     assert len(upstream.requests) == before
+    assert provider.offered[-1] is None
     await service.close()
 
 
@@ -112,3 +116,26 @@ async def test_unentitled_external_tools_not_offered(settings: Settings) -> None
     assert "error" in json.loads(result["content"])
     assert events[-1].outcome == "unavailable"
     await data.aclose()
+
+
+async def test_external_citation_identity_cannot_diverge_from_provenance() -> None:
+    from pydantic import ValidationError
+
+    from ledger_rag.core.models import Citation
+    from ledger_rag.external.tools import citation_from_fact
+
+    data = external_data()
+    try:
+        lookup = await data.company_facts(
+            "AAPL", ["InterestExpense"], ["FY2023"], as_of=data.as_of(None)
+        )
+        original = citation_from_fact(lookup.facts[0], 1).model_dump()
+        for change in [
+            {"document_id": "other-id"},
+            {"source": "https://evil.example"},
+            {"published_at": "2026-09-01"},
+        ]:
+            with pytest.raises(ValidationError, match="match provenance"):
+                Citation.model_validate({**original, **change})
+    finally:
+        await data.aclose()

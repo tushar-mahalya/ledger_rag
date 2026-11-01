@@ -62,7 +62,8 @@ if a browser client needs it.
 
 HTTP requests share the API principal rate limiter and concurrency slots.
 Tool work uses the query deadline and external provider budgets, breakers,
-response limits and rate limits. MCP body size is limited to 64 KiB.
+response limits and rate limits. MCP body size is limited to 64 KiB; serialized
+tool results are bounded to the backend's 900,000-byte UTF-8 response limit.
 Each stateless external tool call is one new bounded turn; budgets do not span
 separate HTTP calls. Use gateway quotas for aggregate/distributed limits.
 

@@ -65,10 +65,20 @@ export const provenanceSchema = z
     }
     if (!validUrl)
       ctx.addIssue({ code: "custom", message: "Invalid provenance URL" });
+    const decimal = /^[-+]?(\d+)(?:\.(\d*))?(?:[eE]([-+]?\d+))?$/.exec(
+      value.value,
+    );
+    const digits = decimal
+      ? `${decimal[1]}${decimal[2] ?? ""}`.replace(/^0+/, "")
+      : "";
+    const exponent = decimal
+      ? Number(decimal[3] ?? 0) - (decimal[2]?.length ?? 0)
+      : NaN;
     if (
-      !/^-?\d+(?:\.\d{1,20})?$/.test(value.value) ||
-      !Number.isFinite(Number(value.value)) ||
-      Math.abs(Number(value.value)) >= 1e30
+      !decimal ||
+      !Number.isFinite(exponent) ||
+      exponent < -20 ||
+      (digits.length > 0 && digits.length + exponent > 30)
     )
       ctx.addIssue({ code: "custom", message: "Invalid provenance number" });
     for (const day of [
@@ -111,6 +121,16 @@ export const citationSchema = z
       ctx.addIssue({
         code: "custom",
         message: "Citation provenance does not match source kind",
+      });
+    if (
+      value.provenance &&
+      (value.document_id !== value.provenance.evidence_id ||
+        value.source !== value.provenance.source_url ||
+        value.published_at !== value.provenance.published_at)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Citation identity does not match provenance",
       });
   });
 
@@ -289,28 +309,60 @@ export const planSummarySchema = z.object({
   periods: z.array(z.string().max(64)).max(8).default([]),
 });
 
-export const activitySchema = z.object({
-  stage: z.enum(["planning", "retrieval", "generation", "tool", "validation"]),
-  status: z.enum(["started", "completed"]),
-  // The server sends a fixed set of labels; display text only, never a key.
-  label: z.string().max(160),
-  tool: z
-    .enum([
-      "calculator",
-      "search_evidence",
-      "lookup_company_facts",
-      "lookup_macro_series",
-    ])
-    .nullable()
-    .optional(),
-  // Absent from older servers; see activityKind() in grounding.ts.
-  kind: activityKindSchema.optional(),
-  plan: planSummarySchema.nullable().optional(),
-  outcome: z
-    .enum(["ok", "error", "timeout", "unavailable"])
-    .nullable()
-    .optional(),
-});
+export const activitySchema = z
+  .object({
+    stage: z.enum([
+      "planning",
+      "retrieval",
+      "generation",
+      "tool",
+      "validation",
+    ]),
+    status: z.enum(["started", "completed"]),
+    // The server sends a fixed set of labels; display text only, never a key.
+    label: z.string().max(160),
+    tool: z
+      .enum([
+        "calculator",
+        "search_evidence",
+        "lookup_company_facts",
+        "lookup_macro_series",
+      ])
+      .nullable()
+      .optional(),
+    // Absent from older servers; see activityKind() in grounding.ts.
+    kind: activityKindSchema.optional(),
+    plan: planSummarySchema.nullable().optional(),
+    outcome: z
+      .enum(["ok", "error", "timeout", "unavailable"])
+      .nullable()
+      .optional(),
+  })
+  .superRefine((value, ctx) => {
+    const externalTool =
+      value.kind === "company_facts_lookup"
+        ? "lookup_company_facts"
+        : value.kind === "macro_series_lookup"
+          ? "lookup_macro_series"
+          : null;
+    if (externalTool && (value.stage !== "tool" || value.tool !== externalTool))
+      ctx.addIssue({
+        code: "custom",
+        message: "External activity kind does not match tool",
+      });
+    if (
+      value.outcome != null &&
+      (value.status !== "completed" ||
+        value.stage !== "tool" ||
+        !["lookup_company_facts", "lookup_macro_series"].includes(
+          value.tool ?? "",
+        ))
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Only completed external lookups carry outcomes",
+      });
+  });
 
 export const evidenceSchema = z
   .object({

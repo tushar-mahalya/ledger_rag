@@ -136,6 +136,13 @@ class Citation(BaseModel):
             self.provenance is not None and self.provenance.source_kind != self.source_kind
         ):
             raise ValueError("External citations need provenance of the same source kind")
+        if self.provenance is not None and (
+            self.document_id != self.provenance.evidence_id
+            or self.source != self.provenance.source_url
+            or self.published_at != self.provenance.published_at
+            or self.published_at > self.provenance.as_of
+        ):
+            raise ValueError("Citation identity and publication cutoff must match provenance")
         return self
 
 
@@ -253,6 +260,12 @@ class Activity(BaseModel):
             or self.kind not in {"company_facts_lookup", "macro_series_lookup"}
         ):
             raise ValueError("Only completed external lookups carry an outcome")
+        expected_tool = {
+            "company_facts_lookup": "lookup_company_facts",
+            "macro_series_lookup": "lookup_macro_series",
+        }.get(self.kind)
+        if expected_tool is not None and self.tool != expected_tool:
+            raise ValueError("External activity kind must match its tool")
         return self
 
 
