@@ -197,6 +197,44 @@ def test_deadline_stops_a_hung_request_without_retrying() -> None:
     assert result.error == "deadline" and result.attempts == 1 and requests == 1
 
 
+def test_single_attempt_discards_partial_200_stream_after_read_timeout() -> None:
+    from collections.abc import AsyncIterator
+
+    class InterruptedStream(httpx.AsyncByteStream):
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            yield b'data: {"choices":[{"delta":{"content":"ANSWER: 4"}}]}\n\n'
+            raise httpx.ReadTimeout("synthetic interrupted stream")
+
+    async def run() -> tuple[Completion, dict[str, int], int, int]:
+        client = ChatClient(
+            "https://llm.test/v1",
+            "k",
+            endpoint_kind="self-hosted",
+            stream=True,
+            max_attempts=1,
+        )
+        client._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(
+                    200,
+                    stream=InterruptedStream(),
+                    headers={"content-type": "text/event-stream"},
+                )
+            )
+        )
+        try:
+            result = await client.complete(GenerationConfig("m"), [])
+            assert client.stats.requests == 1
+            return result, client.stats.status_counts, client.stats.retries, client.stats.failures
+        finally:
+            await client.close()
+
+    result, statuses, retries, failures = asyncio.run(run())
+    assert result.error == "ReadTimeout" and result.text == "" and result.attempts == 1
+    assert statuses == {"200": 1, "ReadTimeout": 1}
+    assert retries == 0 and failures == 1
+
+
 def test_probe_waits_for_cold_start_and_fails_fast_on_auth() -> None:
     calls: list[str] = []
 

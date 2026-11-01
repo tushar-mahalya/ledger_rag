@@ -62,11 +62,117 @@ and approximately 865 recorded GPU-seconds. Report SHA-256:
 Answer runs record that report's hash and original retrieval lineage; do not
 re-embed, rerank, or ingest again for the open-model arms.
 
-## Proposed bounded open-model session (not executed)
+## Measured bounded open-model pilot (2026-11-01)
+
+One approved, attached ephemeral App ran from 12:35 UTC to 12:48 UTC:
+`ap-GCf2INahj5pM2PghWo9I1j`, source Git
+`52b5f96787b71d5d2f7657f534fb4da852705284` after merging current main.
+Elapsed time including startup and shutdown: **786.634 seconds**, within the
+4,500-second cap. One H100 and one active 2-core/8-GiB CPU client were observed.
+The persistent serving App remained idle and was not invoked or redeployed.
+
+### Pilot quality and lineage
+
+FinQA report `4810c0ba57554f509f6301f388a80f35`:
+`ledger-data:/evaluation/4810c0ba57554f509f6301f388a80f35.json`.
+SHA-256 `ef7cb2c36fe2387e3780578d6fe3f1b85a93d96ccc19f3006b7d89105ab9b219`.
+Exactly 200 proportional-stratified dev questions / 126 report clusters, seed 13,
+were shared across all six arms. Sample-ID SHA-256:
+`35e862f3930af842f9ff08f1af79d4d07e12767d9eaaa4588ba738b998ea8097`.
+Corpus and source-context identities match the verified baseline above, including
+context report hash `be337ed346c960c2f1249cb4fdc725b868d8ea06f76875138a205bd48f492748`.
+Test questions stayed sealed. No new retrieval, embedding, ingestion or migration ran.
+
+| Arm | Exact | Tolerant | Format failure | Coverage | Generation p50 / p95, seconds |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| thinking off / retrieved@3 | .595 | .610 | .055 | .935 | 4.383 / 29.476 |
+| thinking off / retrieved@5 | .605 | .630 | .040 | .940 | 4.868 / 31.717 |
+| thinking off / oracle | .745 | .775 | .005 | .970 | 3.988 / 15.426 |
+| low / retrieved@3 | .620 | .640 | .000 | .945 | 4.450 / 13.363 |
+| low / retrieved@5 | .635 | .650 | .005 | .960 | 5.329 / 15.341 |
+| low / oracle | .775 | .790 | .000 | .980 | 3.858 / 9.277 |
+
+Headline 95% report-cluster bootstrap intervals: low/retrieved@5 exact
+[.5644, .7005], tolerant [.5805, .7163]; low/oracle exact [.7194, .8280],
+tolerant [.7336, .8429]. Paired **exact-accuracy** deltas:
+
+- low versus off at retrieved@5: +.0300 [0, .0635]; not a strict superiority result.
+- low versus off at oracle: +.0300 [-.0043, .0642]; no demonstrated superiority.
+- low oracle minus low retrieved@5: +.1400 [.0821, .2030].
+
+There were **1,200 completions / 1,200 HTTP requests / zero retries**. One stream
+raised `ReadTimeout` after HTTP 200 headers; partial output was discarded and that
+case remained in the denominator. Thus status counters contain 1,200 HTTP 200
+events plus one transport-error event, not 1,201 requests. This is not a zero-failure
+run. CPU answer-worker time was 288.2 seconds.
+
+**Selection remains pending separate approval:** recommend the best retrieved
+point-estimate arm, `qwen:low/retrieved@5`, plus the best oracle diagnostic arm,
+`qwen:low/oracle`. Literal top-two raw scores would instead select both oracle
+arms; that would not measure end-to-end retrieved QA. Conservative admission for
+the recommended 1,766 full-dev completions is approximately 2,346.648 seconds
+using the larger pilot p95, concurrency 32, 1,200-second readiness allowance and
+300-second cleanup allowance. No full-dev job has been launched.
+
+These are dev-pilot heuristic numeric scores, not official FinQA program-execution
+accuracy, entailment, financial-advice certification or held-out results. Arm order
+was not randomized; shared server load/prefix caching may affect latency. Oracle
+rendering differs from retrieved context, so the oracle gap is diagnostic, not proof
+that retrieval alone causes every error. Batch timings are not voice latency.
+
+### Measured serving and shutdown
+
+Benchmark `c0c06effb57e4581b86518d6c7e9803b`, stored at
+`ledger-data:/llm-serve/bench-c0c06effb57e4581b86518d6c7e9803b.json`:
+CPU worker 458.612 seconds, cold wait **207.6 seconds** with existing weight/compile
+caches; exact model/revision aliases and vLLM 0.32.0 were verified before generation.
+Single-stream p50 TTFT **1.047 s**, decode **197.1 token/s** (5/5 successful samples).
+Aggregate output throughput was **119.3 / 601.9 / 1,138.8 token/s** at concurrency
+1/8/32, with 6/6, 32/32 and 128/128 successful requests respectively.
+The 30,000-token stream completed in **162.194 s**, beyond the 150-second HTTP
+window. Benchmark cumulative MTP acceptance was **.738**, mean acceptance length
+**3.214**. These are synthetic serving measurements, separate from FinQA quality.
+
+Normal-completion cancellation and App-context shutdown were observed, not just
+assumed. Read-only App status reports **stopped**, timestamp **12:48:18 UTC**, zero
+tasks; `serve`, `measure`, and `generate` current stats all report zero runners and
+zero running inputs. The existing deployed serving App also has zero tasks.
+Deadline-expiry and workstation-loss paths remain locally tested/documented,
+not separately exercised by an additional paid fault-injection run.
+
+### Accrued cost, discrepancy and retained reservation
+
+Accounting snapshot/summary captured **2026-11-01T12:53:37Z**. Modal's per-App
+accrued billing report shows H100 **$0.83169462**, CPU **$0.09944496**, memory
+**$0.12118050**, egress **$0.00065714**, total **$1.05297722**. However the workspace
+monthly metered summary reports **$1.36065714**, with its ephemeral-App breakdown
+**$1.36050446**. These views do not fully reconcile; their discrepancy/cause and
+settlement remain unresolved. Use **$1.37** as conservative observed accounting
+pending reconciliation, not a final settled invoice. Zero billed cost after
+workspace adjustments is not zero gross compute spending.
+
+The elapsed/request-resource base estimate was **$1.091722**, or **$2.183444** at
+the 2x admission rate; it is an estimate, not a replacement for accrued usage.
+Workspace rates expose H100 $3.95/hour, CPU $0.04730/core-hour, memory
+$0.00800/GiB-hour and egress $0.04/GiB; public per-second rates are truncated.
+No final settled per-run invoice is exposed by these CLI views.
+
+The persistent ledger is **unchanged**: 4,500 seconds and **$12.4906** remain
+reserved, with **no refund/reset** after the early successful finish.
+Remaining cumulative admission capacity is **4,500 seconds / $15.5094**,
+including contingency. This is not authorization for another phase.
+Local retained manifest, sanitized summary, full report and billing/shutdown
+evidence are under `.scratch`; the manifest is `open-model-pilot.json`, summary
+`open-model-pilot-summary.json`, reports `approved-pilot-report.json` and
+`approved-benchmark.json`. Reports are retained, never printed with raw questions,
+documents, prompts or replies.
+
+## Bounded open-model workflow
 
 Read-only auth/status on 2026-11-01 verified locked Modal **1.6.3** and a deployed
 `ledger-llm-serve` with zero tasks, one H100, and a 300-second idle tail.
-No endpoint request was made: even `/health` can start paid GPU compute.
+During read-only preflight no endpoint request was made: even `/health` can start
+paid GPU compute. The separately approved ephemeral pilot is measured above.
 Pinned Qwen `Qwen/Qwen3.8-27B-FP8` revision
 `017b9c7af6b5689d5dd426a76e0bc077eb5ca20a` was previously served by vLLM 0.32.0.
 Prior report `6e847a9130e84fe7aef31ccc3ef972e2` verifies its model alias,
@@ -143,10 +249,11 @@ conservative runtime `2 * 883 * pilot_p95_seconds / 32 + 1200 + 300` within the
 remaining elapsed/spend allowance; otherwise defer. No automatic pilot selection
 or test unsealing is implemented.
 
-**Remaining blockers:** exact paid-phase approval; live verification that the
-ephemeral composed endpoint hydrates and cancellation stops every container;
-remaining real serving benchmarks; pilot/full-dev answer results and invoice
-reconciliation. Existing secret projections are the execution prerequisite;
+**Remaining blockers:** exact full-dev arm selection and separate phase approval;
+full-dev answer results, billing-view/invoice reconciliation and remote validation
+of failure/deadline shutdown paths if independently authorized. Composed endpoint
+hydration and normal-completion container shutdown were verified in the pilot.
+Existing secret projections are the execution prerequisite;
 Vault workload identity is not yet wired into these serving jobs.
 
 Sources (retrieved 2026-11-01):
