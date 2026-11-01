@@ -20,6 +20,7 @@ from ledger_rag.core.models import (
     Verification,
 )
 from ledger_rag.generation.abstention import AbstentionPolicy
+from ledger_rag.generation.evidence import ABSTENTION
 from ledger_rag.generation.program import run_program
 from ledger_rag.generation.verification import (
     AnswerVerifier,
@@ -415,7 +416,10 @@ async def test_enforce_abstains_on_unsupported_numbers(profile: Profile) -> None
     assert answer.verification.reasons == ["unsupported_numbers"]
     assert answer.abstention is not None and "verification_failed" in answer.abstention.reasons
     assert answer.abstention.features.unsupported_number_count == 1
-    assert "125" not in answer.model_dump_json()
+    # Timing metadata may contain the rejected digits without leaking the draft.
+    payload = answer.model_copy(update={"generation_ms": 3.125}).model_dump(mode="json")
+    assert payload["answer"] == ABSTENTION
+    assert payload["verification"]["unsupported_numbers"] == []
 
 
 async def test_flag_mode_keeps_answer_but_marks_unverified() -> None:
