@@ -8,7 +8,7 @@ retrieval permissions, evidence provenance, bounded reasoning, and evaluation
 instead of hiding them inside an unconstrained agent.
 
 This is a working reference backend and a research-backed production architecture,
-not a claim of absolute SOTA, financial-advice suitability, or guaranteed hiring.
+not a claim of absolute SOTA or financial-advice suitability.
 The portfolio differentiator is reproducible evidence and engineering tradeoffs,
 not the number of frameworks in the diagram.
 

@@ -41,7 +41,7 @@ def chunk(chunk_id: str = "tenant/doc/0", **updates: Any) -> Chunk:
     return Chunk(**values)
 
 
-async def store() -> tuple[QdrantRetriever, AsyncMock, list[httpx.Request]]:
+async def store(**overrides: Any) -> tuple[QdrantRetriever, AsyncMock, list[httpx.Request]]:
     settings = Settings(
         demo_token=SecretStr("demo-test-token"),
         retrieval_backend="qdrant",
@@ -49,6 +49,7 @@ async def store() -> tuple[QdrantRetriever, AsyncMock, list[httpx.Request]]:
         embedding_dimensions=32,
         embedding_model="test-embedding",
         embedding_base_url="https://embedding.test/v1/",
+        **overrides,
     )
     retriever = QdrantRetriever(settings)
     await retriever._client.close()
@@ -753,6 +754,129 @@ async def test_embedding_requests_are_sub_batched_in_order() -> None:
     await retriever.upsert(chunks)
     assert [len(json.loads(r.content)["input"]) for r in requests] == [2, 2, 1]
     assert json.loads(requests[2].content)["input"] == ["Results\ntext 4"]
+
+
+async def profiled_store(
+    profile: str, summary_version: str = "", *, collection_metadata: dict[str, Any]
+) -> QdrantRetriever:
+    retriever, client, _ = await store(chunk_profile=profile, chunk_summary_version=summary_version)
+    client.get_collection.return_value.config.metadata = collection_metadata
+    return retriever
+
+
+async def test_v1_identity_stays_compatible_with_legacy_collections() -> None:
+    retriever, _, _ = await store()
+    assert "chunk_profile" not in retriever._identity
+    assert "chunk_summary_version" not in retriever._identity
+    await retriever._ensure_collection(create=False)
+    await retriever.close()
+
+
+def test_contextual_profiles_extend_the_collection_identity() -> None:
+    base = {
+        "demo_token": SecretStr("demo-test-token"),
+        "retrieval_backend": "qdrant",
+        "embedding_api_key": SecretStr("embedding-secret"),
+    }
+    v2 = QdrantRetriever(Settings(**base, chunk_profile="v2"))
+    assert v2._identity["chunk_text"] == "contextual-v2"
+    assert v2._identity["chunk_profile"] == "v2"
+    assert "chunk_summary_version" not in v2._identity
+    v3 = QdrantRetriever(
+        Settings(**base, chunk_profile="v3", chunk_summary_version="s1/gemini-3.5-flash-lite")
+    )
+    assert v3._identity["chunk_text"] == "contextual-v3"
+    assert v3._identity["chunk_summary_version"] == "s1/gemini-3.5-flash-lite"
+
+
+async def test_profile_mismatch_fails_closed_with_actionable_error() -> None:
+    legacy, _, _ = await store()
+    retriever = await profiled_store("v2", collection_metadata=dict(legacy._identity))
+    with pytest.raises(RetrievalError, match=r"chunk profile v1 .* configured for v2"):
+        await retriever._ensure_collection(create=False)
+    await retriever.close()
+    await legacy.close()
+
+
+async def test_summary_version_mismatch_fails_closed() -> None:
+    built = await profiled_store("v3", "s1/model-a", collection_metadata={})
+    stale = dict(built._identity, chunk_profile="v3", chunk_summary_version="s0/model-a")
+    retriever = await profiled_store("v3", "s1/model-a", collection_metadata=stale)
+    with pytest.raises(RetrievalError, match=r"summaries s0/model-a"):
+        await retriever._ensure_collection(create=False)
+    await retriever.close()
+    await built.close()
+
+
+@pytest.mark.parametrize(
+    ("profile", "summary_version"),
+    [("v1", ""), ("v2", ""), ("v3", "s1/model-a")],
+)
+async def test_matching_profile_readiness_is_read_only(profile: str, summary_version: str) -> None:
+    retriever, client, _ = await store(chunk_profile=profile, chunk_summary_version=summary_version)
+    assert await retriever.ready()
+    client.collection_exists.assert_not_called()
+    client.create_collection.assert_not_called()
+    client.create_payload_index.assert_not_called()
+    client.update_collection.assert_not_called()
+    await retriever.close()
+
+
+@pytest.mark.parametrize(
+    ("configured", "stored"),
+    [("v1", "v2"), ("v1", "v3"), ("v2", "v1"), ("v2", "v3"), ("v3", "v1"), ("v3", "v2")],
+)
+async def test_profile_mismatch_blocks_reads_and_writes_without_side_effects(
+    configured: str, stored: str
+) -> None:
+    retriever, client, requests = await store(
+        chunk_profile=configured,
+        chunk_summary_version="s1/model-a" if configured == "v3" else "",
+    )
+    client.get_collection.return_value.config.metadata["chunk_profile"] = stored
+    assert not await retriever.ready()
+    with pytest.raises(RetrievalError, match="chunk profile"):
+        await retriever.search(
+            QueryRequest(question="revenue"), Principal(subject="user", tenant_id="tenant")
+        )
+    with pytest.raises(RetrievalError, match="chunk profile"):
+        await retriever.upsert([chunk()])
+    assert not requests
+    client.query_points.assert_not_called()
+    client.upsert.assert_not_called()
+    client.delete.assert_not_called()
+    client.update_collection.assert_not_called()
+    await retriever.close()
+
+
+async def test_profile_label_alone_cannot_relabel_legacy_index_text() -> None:
+    retriever, client, _ = await store(chunk_profile="v2")
+    client.get_collection.return_value.config.metadata["chunk_text"] = "title-header-v1"
+    with pytest.raises(RetrievalError, match="embedding/schema identity is incompatible"):
+        await retriever._ensure_collection(create=False)
+    client.update_collection.assert_not_called()
+    await retriever.close()
+
+
+async def test_matching_contextual_profile_still_checks_abandoned_write_lease() -> None:
+    retriever, client, _ = await store(chunk_profile="v2")
+    client.get_collection.return_value.config.metadata[WRITE_LEASE_KEY] = {
+        "writer": "abandoned",
+        "expires_at": 0,
+    }
+    assert not await retriever.ready()
+    with pytest.raises(RetrievalError, match="abandoned write lease"):
+        await retriever._ensure_collection(create=False)
+    client.update_collection.assert_not_called()
+    await retriever.close()
+
+
+def test_summary_version_is_required_exactly_for_v3() -> None:
+    base = {"demo_token": SecretStr("demo-test-token")}
+    with pytest.raises(ValueError, match="requires LEDGER_CHUNK_SUMMARY_VERSION"):
+        Settings(**base, chunk_profile="v3")
+    with pytest.raises(ValueError, match="applies only to chunk profile v3"):
+        Settings(**base, chunk_profile="v2", chunk_summary_version="s1/model")
 
 
 async def test_write_lease_brackets_mutations_and_survives_failures() -> None:

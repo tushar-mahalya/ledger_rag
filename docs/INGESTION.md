@@ -87,6 +87,80 @@ The GPU is allocated for loading and uploading too; colocating saves embedding
 network hops but slow database writes can leave GPU time idle. Measure before
 adding concurrency. `max_containers=1` is per function/app, not a global index lock.
 
+## Chunk profiles
+
+`--chunk-profile` selects how chunks are indexed (default `v1`). See
+[ADR 0002](adr/0002-chunk-profiles-and-qwen3-rerankers.md) for the design.
+
+- **`v1`:** the original, byte-identical chunking.
+- **`v2`:** adds a deterministic filing header (ticker, fiscal year, form, page,
+  section and table caption) and a row-wise table linearization, headed by the
+  table's units or row-dimension cell, to the *indexed* text.
+  Displayed and cited text keeps the Markdown table. Expect 8,647 FinQA chunks.
+- **`v3`:** adds a cached per-document LLM summary line to the v2 header.
+
+Each profile needs its own new collection. Never reuse a v1 collection name.
+
+The profile is part of the collection identity. Ingestion writes `chunk_text`,
+`chunk_profile` and, for v3, `chunk_summary_version` (`<prompt>/<model>`) into the
+collection metadata. Serving reads `LEDGER_CHUNK_PROFILE` and
+`LEDGER_CHUNK_SUMMARY_VERSION` and refuses to query a collection whose metadata
+disagrees, naming both profiles in the error. A missing `chunk_profile` key means
+`v1`, so existing v1 collections keep working unchanged.
+
+```bash
+uv run --locked --group compute modal run compute/ingestion.py \
+  --collection finqa_gte_modernbert_v2ctx_1 --chunk-profile v2 \
+  --model-revision e7f32e3c00f91d699e8c43b53106206bcc72bb22
+```
+
+A change to a profile's rendered text also needs a new collection, with the next `_N`
+suffix (as with `tatqa_gte_modernbert_v1_1`). The current v2 FinQA collections are
+listed below; ADR 0002 has their run lineage.
+
+| Collection | Embedding | Run ID | Points |
+|---|---|---|---:|
+| `finqa_gte_modernbert_v2ctx_1` | gte-modernbert-base, 768-d | `3ad18a9d04494ee0b087b4916960634b` | 8,647 |
+| `finqa_qwen3emb_v2ctx_1` | Qwen3-Embedding-0.6B, 1024-d | `75b8926c58d8462f985e4b2183ebcf9f` | 8,647 |
+
+The last authenticated check (2026-10-31) found legacy metadata on both collections:
+`chunk_text: title-header-v1` with no `chunk_profile` key. Do not serve these v2
+collections under `v1` merely to bypass the identity check.
+
+Before a metadata-only repair, retrieve the recorded ingestion reports and verify
+their dataset checksum, code revision, embedding identity and chunk profile.
+Compare live points against the deterministic v2 corpus, including chunk IDs,
+`index_text`, units/captions and sparse vectors; a collection name or point count
+alone is not lineage evidence. Preserve unrelated metadata, including write leases.
+Only if the actual indexed corpus matches the current v2 rendering may an operator
+set `chunk_text: contextual-v2` and `chunk_profile: v2` using Qdrant's
+update-collection `metadata` field. Otherwise explicitly re-ingest a compatible
+corpus; never relabel incompatible vectors. Re-read metadata, then verify v2
+readiness succeeds and v1 readiness fails. Readiness itself never repairs metadata.
+
+**2026-11-01 verification blocker:** the local Vault was initialized but sealed
+(health HTTP 503); neither documented credential path could read the Qdrant key.
+No authenticated live corpus/metadata verification or correction was performed,
+and no re-ingestion or paid compute was started. Treat the repair as pending,
+not as a verified metadata migration.
+
+`finqa_gte_modernbert_v2ctx` and `finqa_qwen3emb_v2ctx` (8,644 points each) indexed
+v2 text from before the review fixes. That text had no top-left table cells and missed
+177 captions. Both were deleted from Qdrant Cloud on 2026-10-31.
+
+v3 reads summaries only from the `ledger-data` Volume cache and fails if any
+document lacks one. Fill the cache first. The command below runs on a CPU
+container, uses the `ledger-llm` secret, makes at most 8 concurrent requests and is
+idempotent, so rerun it to fill any gaps:
+
+```bash
+uv run --locked --group compute modal run compute/summaries.py   # --limit 20 to probe
+```
+
+For `Qwen/Qwen3-Embedding-0.6B` pass `--model-id`, the pinned `--model-revision`
+and `--dimensions 1024`. Queries then need the Qwen3 instruction prefix (see the
+ADR); documents are embedded without a prefix.
+
 ## Reuse with application documents
 
 Supply UTF-8 JSONL containing one validated

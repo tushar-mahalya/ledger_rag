@@ -259,6 +259,10 @@ For optional BGE reranking, set `LEDGER_RERANKER_URL` to the TEI HTTPS base endp
 bypasses reranking. If protected, add an Agent template analogous to the API key
 templates that renders `LEDGER_RERANKER_API_KEY` into `/run/ledger-secrets` from a
 dedicated KV field. The supplied template does not require this optional secret.
+`LEDGER_RERANKER_VOICE_URL` is read only by the Qwen3 `VllmRerankingRetriever`
+(not wired into `make_retriever`). It receives the same bearer key, is validated like
+other endpoints and must use HTTPS in production. An empty URL disables reranking
+for that profile instead of failing.
 Validate provider/model compatibility and capacity independently; this deployment
 does not ship or benchmark a TEI service, OCR pipeline, ASR, or TTS.
 

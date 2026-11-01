@@ -10,7 +10,7 @@ from ledger_rag.ingestion.tei import embedding_server
 
 @pytest.fixture
 def process(monkeypatch: pytest.MonkeyPatch) -> Mock:
-    child = Mock(returncode=None, wait=AsyncMock(return_value=0))
+    child = Mock(returncode=None, wait=AsyncMock(return_value=0), stdout=None, stderr=None)
     start = AsyncMock(return_value=child)
     monkeypatch.setattr("ledger_rag.ingestion.tei.asyncio.create_subprocess_exec", start)
     child.start = start
@@ -43,6 +43,8 @@ async def test_router_is_private_pinned_and_key_is_not_in_argv(
         assert environment["API_KEY"] == "per-job-key"
         assert environment["AUTO_TRUNCATE"] == "false"
         assert "LEDGER_QDRANT_API_KEY" not in environment
+        assert process.start.call_args.kwargs["stdout"] == asyncio.subprocess.PIPE
+        assert process.start.call_args.kwargs["stderr"] == asyncio.subprocess.PIPE
     process.terminate.assert_called_once()
     process.wait.assert_awaited_once()
 
@@ -96,3 +98,38 @@ async def test_unresponsive_router_is_killed(
     async with embedding_server(IngestSpec(collection="new", model_revision="a" * 40), "key"):
         pass
     process.kill.assert_called_once()
+
+
+async def test_router_output_is_forwarded_with_the_key_redacted(
+    monkeypatch: pytest.MonkeyPatch, process: Mock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client(monkeypatch, 200)
+    key = "per-job-key-0123456789"
+    stdout, stderr = asyncio.StreamReader(), asyncio.StreamReader()
+    process.stdout, process.stderr = stdout, stderr
+    stdout.feed_data(f'Args {{ api_key: Some("{key}"), port: 8000 }}\n'.encode())
+    stdout.feed_data(b"Ready\n")
+    stderr.feed_data(f"warn {key}".encode())
+    stdout.feed_eof()
+    stderr.feed_eof()
+    async with embedding_server(IngestSpec(collection="new", model_revision="a" * 40), key):
+        pass
+    captured = capsys.readouterr()
+    assert key not in captured.out + captured.err
+    assert 'api_key: Some("[REDACTED]")' in captured.out
+    assert "Ready" in captured.out
+    assert captured.err == "warn [REDACTED]"
+
+
+async def test_overlong_router_line_never_leaks_the_key(
+    monkeypatch: pytest.MonkeyPatch, process: Mock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client(monkeypatch, 200)
+    monkeypatch.setattr("ledger_rag.ingestion.tei._LINE_LIMIT", 64)
+    stdout = asyncio.StreamReader(limit=64)
+    process.stdout = stdout
+    stdout.feed_data(b"key " + b"x" * 100 + b"\n")
+    stdout.feed_eof()
+    async with embedding_server(IngestSpec(collection="new", model_revision="a" * 40), "x" * 100):
+        pass
+    assert "x" * 100 not in capsys.readouterr().out
