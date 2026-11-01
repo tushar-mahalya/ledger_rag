@@ -2322,3 +2322,19 @@ mark.operand-highlight {
     scroll-behavior: auto !important;
   }
 }
+.provenance-panel {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.provenance-panel > div {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 10px;
+  padding: 4px 0;
+}
+.provenance-panel dt {
+  color: var(--muted);
+}
+.provenance-panel dd {
+  margin: 0;
+}

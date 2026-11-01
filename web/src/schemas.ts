@@ -1,16 +1,104 @@
 import { z } from "zod";
 
-export const citationSchema = z.object({
-  id: z
-    .string()
-    .max(16)
-    .regex(/^C\d+$/),
-  document_id: z.string().max(200),
-  title: z.string().max(500),
-  source: z.string().max(2048),
-  published_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  quote: z.string().max(100_000),
-});
+const dateText = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const provenanceSchema = z
+  .object({
+    source_kind: z.enum(["sec_xbrl", "fred"]),
+    provider: z.enum(["SEC EDGAR", "FRED"]),
+    evidence_id: z
+      .string()
+      .min(5)
+      .max(200)
+      .regex(/^(?:sec|fred):[A-Za-z0-9._:/-]{1,195}$/),
+    identifier: z.string().min(1).max(64),
+    entity: z.string().min(1).max(300),
+    concept: z.string().min(1).max(300),
+    form: z.string().max(16).nullable().optional(),
+    fiscal_year: z.number().int().min(1900).max(2200).nullable().optional(),
+    fiscal_period: z.string().max(8).nullable().optional(),
+    period_label: z.string().min(1).max(40),
+    period_start: dateText.nullable().optional(),
+    period_end: dateText,
+    unit: z.string().min(1).max(120),
+    scale: z.number().int().min(0).max(12).default(0),
+    value: z.string(),
+    published_at: dateText,
+    retrieved_at: z.string(),
+    as_of: dateText,
+    source_url: z.string().min(1).max(2048),
+    freshness: z.enum(["current", "stale", "superseded"]),
+    amended: z.boolean().default(false),
+    superseded_by: z.string().max(64).nullable().optional(),
+    revised_before_as_of: z.boolean().default(false),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    let validUrl = false;
+    try {
+      const url = new URL(value.source_url);
+      validUrl =
+        url.protocol === "https:" &&
+        ["www.sec.gov", "fred.stlouisfed.org"].includes(url.hostname) &&
+        !url.port &&
+        !url.username &&
+        !url.password &&
+        !url.hash &&
+        ![...url.searchParams.keys()].some((key) =>
+          /key|token|secret/i.test(key),
+        );
+    } catch {
+      /* Rejected below. */
+    }
+    if (!validUrl)
+      ctx.addIssue({ code: "custom", message: "Invalid provenance URL" });
+    if (
+      !/^-?\d+(?:\.\d{1,20})?$/.test(value.value) ||
+      !Number.isFinite(Number(value.value)) ||
+      Math.abs(Number(value.value)) >= 1e30
+    )
+      ctx.addIssue({ code: "custom", message: "Invalid provenance number" });
+    for (const day of [
+      value.period_start,
+      value.period_end,
+      value.published_at,
+      value.as_of,
+    ]) {
+      if (day != null && !dateText.safeParse(day).success)
+        ctx.addIssue({ code: "custom", message: "Invalid provenance date" });
+    }
+    if (value.published_at > value.as_of)
+      ctx.addIssue({
+        code: "custom",
+        message: "Evidence published after cutoff",
+      });
+  });
+
+export const citationSchema = z
+  .object({
+    id: z
+      .string()
+      .max(16)
+      .regex(/^C\d+$/),
+    document_id: z.string().max(200),
+    title: z.string().max(500),
+    source: z.string().max(2048),
+    published_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    quote: z.string().max(100_000),
+    source_kind: z.enum(["corpus", "sec_xbrl", "fred"]).optional(),
+    provenance: provenanceSchema.nullable().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      ((value.source_kind ?? "corpus") === "corpus") !==
+        (value.provenance == null) ||
+      (value.provenance != null &&
+        value.provenance.source_kind !== value.source_kind)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Citation provenance does not match source kind",
+      });
+  });
 
 // Mirrors ledger_rag.core.models; contract.test.ts asserts the bounds match the Pydantic
 // JSON Schema in fixtures/contract.schema.json. Decimal values are strings so they
@@ -156,6 +244,8 @@ export const activityKindSchema = z.enum([
   "generation",
   "calculator",
   "evidence_search",
+  "company_facts_lookup",
+  "macro_series_lookup",
   "tool_check",
   "citation_validation",
   "grounding_verification",
@@ -188,10 +278,22 @@ export const activitySchema = z.object({
   status: z.enum(["started", "completed"]),
   // The server sends a fixed set of labels; display text only, never a key.
   label: z.string().max(160),
-  tool: z.enum(["calculator", "search_evidence"]).nullable().optional(),
+  tool: z
+    .enum([
+      "calculator",
+      "search_evidence",
+      "lookup_company_facts",
+      "lookup_macro_series",
+    ])
+    .nullable()
+    .optional(),
   // Absent from older servers; see activityKind() in grounding.ts.
   kind: activityKindSchema.optional(),
   plan: planSummarySchema.nullable().optional(),
+  outcome: z
+    .enum(["ok", "error", "timeout", "unavailable"])
+    .nullable()
+    .optional(),
 });
 
 export const evidenceSchema = z.object({

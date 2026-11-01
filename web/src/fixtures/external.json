@@ -1,0 +1,200 @@
+{
+  "answer": {
+    "answer": "Apple reported interest expense of $3,933 million in FY2023 [C1]. The effective federal funds rate was 5.33% in August 2023 [C2].",
+    "citations": [
+      {
+        "id": "C1",
+        "document_id": "sec:0000320193:us-gaap:InterestExpense:0000320193-23-000106:2022-09-25_2023-09-30",
+        "source": "https://www.sec.gov/Archives/edgar/data/320193/000032019323000106/0000320193-23-000106-index.htm",
+        "title": "Apple Inc. 10-K filed 2023-11-03: us-gaap:InterestExpense",
+        "published_at": "2023-11-03",
+        "quote": "Apple Inc. reported Interest Expense (us-gaap:InterestExpense) of USD 3,933,000,000 for the period 2022-09-25 to 2023-09-30, in Form 10-K filed 2023-11-03.",
+        "source_kind": "sec_xbrl",
+        "provenance": {
+          "source_kind": "sec_xbrl",
+          "provider": "SEC EDGAR",
+          "evidence_id": "sec:0000320193:us-gaap:InterestExpense:0000320193-23-000106:2022-09-25_2023-09-30",
+          "identifier": "0000320193-23-000106",
+          "entity": "Apple Inc.",
+          "concept": "us-gaap:InterestExpense",
+          "form": "10-K",
+          "fiscal_year": 2023,
+          "fiscal_period": "FY",
+          "period_label": "FY2023",
+          "period_start": "2022-09-25",
+          "period_end": "2023-09-30",
+          "unit": "USD",
+          "scale": 0,
+          "value": "3933000000",
+          "published_at": "2023-11-03",
+          "retrieved_at": "2026-08-01T12:00:00Z",
+          "as_of": "2024-01-01",
+          "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019323000106/0000320193-23-000106-index.htm",
+          "freshness": "current",
+          "amended": false,
+          "superseded_by": null,
+          "revised_before_as_of": false
+        }
+      },
+      {
+        "id": "C2",
+        "document_id": "fred:FEDFUNDS:2023-08-01:2023-09-01",
+        "source": "https://fred.stlouisfed.org/series/FEDFUNDS",
+        "title": "FRED FEDFUNDS: Federal Funds Effective Rate",
+        "published_at": "2023-09-01",
+        "quote": "FRED series FEDFUNDS (Federal Funds Effective Rate), monthly observation for 2023-08-01: 5.33%, as published in the vintage of 2023-09-01.",
+        "source_kind": "fred",
+        "provenance": {
+          "source_kind": "fred",
+          "provider": "FRED",
+          "evidence_id": "fred:FEDFUNDS:2023-08-01:2023-09-01",
+          "identifier": "FEDFUNDS",
+          "entity": "Federal Reserve Bank of St. Louis (FRED/ALFRED)",
+          "concept": "Federal Funds Effective Rate",
+          "form": null,
+          "fiscal_year": null,
+          "fiscal_period": null,
+          "period_label": "2023-08-01",
+          "period_start": "2023-08-01",
+          "period_end": "2023-08-31",
+          "unit": "Percent",
+          "scale": 0,
+          "value": "5.33",
+          "published_at": "2023-09-01",
+          "retrieved_at": "2026-08-01T12:00:00Z",
+          "as_of": "2024-01-01",
+          "source_url": "https://fred.stlouisfed.org/series/FEDFUNDS",
+          "freshness": "current",
+          "amended": false,
+          "superseded_by": null,
+          "revised_before_as_of": false
+        }
+      }
+    ],
+    "abstained": false,
+    "profile": "chat",
+    "retrieval_ms": 12.345,
+    "generation_ms": 842.1,
+    "request_id": "req-external",
+    "model": "offline-recorded-provider",
+    "tool_calls": 2,
+    "calculation": null,
+    "calculations": [],
+    "verification": {
+      "status": "verified",
+      "mode": "enforce",
+      "checked_numbers": 2,
+      "unsupported_numbers": [],
+      "reasons": [],
+      "verifier": null,
+      "verifier_score": null
+    },
+    "abstention": {
+      "abstained": false,
+      "reasons": [],
+      "features": {
+        "hit_count": 0,
+        "top_score": null,
+        "mean_score": null,
+        "citation_coverage": 1.0,
+        "checked_numbers": 2,
+        "unsupported_number_count": 0,
+        "verification_status": "verified",
+        "verifier_score": null,
+        "tool_calls": 2,
+        "tool_errors": 0
+      },
+      "calibrated": false
+    }
+  },
+  "activities": [
+    {
+      "stage": "planning",
+      "status": "started",
+      "label": "Planning query",
+      "kind": "planning"
+    },
+    {
+      "stage": "planning",
+      "status": "completed",
+      "label": "Planning query",
+      "kind": "planning",
+      "plan": {
+        "intent": "lookup",
+        "route": "retrieve",
+        "subquestion_count": 1,
+        "subquestions": [
+          "Apple interest expense and federal funds rate"
+        ],
+        "companies": [],
+        "periods": []
+      }
+    },
+    {
+      "stage": "generation",
+      "status": "started",
+      "label": "Generating answer",
+      "kind": "generation"
+    },
+    {
+      "stage": "generation",
+      "status": "completed",
+      "label": "Generating answer",
+      "kind": "generation"
+    },
+    {
+      "stage": "tool",
+      "status": "started",
+      "label": "Looking up SEC filings",
+      "tool": "lookup_company_facts",
+      "kind": "company_facts_lookup"
+    },
+    {
+      "stage": "tool",
+      "status": "completed",
+      "label": "Looking up SEC filings",
+      "tool": "lookup_company_facts",
+      "outcome": "ok",
+      "kind": "company_facts_lookup"
+    },
+    {
+      "stage": "tool",
+      "status": "started",
+      "label": "Looking up macro data",
+      "tool": "lookup_macro_series",
+      "kind": "macro_series_lookup"
+    },
+    {
+      "stage": "tool",
+      "status": "completed",
+      "label": "Looking up macro data",
+      "tool": "lookup_macro_series",
+      "outcome": "ok",
+      "kind": "macro_series_lookup"
+    },
+    {
+      "stage": "generation",
+      "status": "started",
+      "label": "Generating answer",
+      "kind": "generation"
+    },
+    {
+      "stage": "generation",
+      "status": "completed",
+      "label": "Generating answer",
+      "kind": "generation"
+    },
+    {
+      "stage": "validation",
+      "status": "started",
+      "label": "Validating citations",
+      "kind": "citation_validation"
+    },
+    {
+      "stage": "validation",
+      "status": "completed",
+      "label": "Validating citations",
+      "kind": "citation_validation"
+    }
+  ]
+}
