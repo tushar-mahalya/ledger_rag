@@ -1,0 +1,14 @@
+# Reader model. Registry contract: ledger_rag/evaluation/models.py
+id = "phi-4-mini"
+publisher = "Microsoft"
+license = "mit"
+parameters_b = 3.8
+default_mode = "off"
+
+[serving]
+kind = "vllm"
+repo = "microsoft/Phi-4-mini-instruct"
+revision = "cfbefacb99257ffa30c83adab238a50856ac3083"
+gpu = "L40S"
+
+[modes.off]

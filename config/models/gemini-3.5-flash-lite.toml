@@ -1,0 +1,15 @@
+# Hosted through Gemini's OpenAI-compatible API; key and URL come from ledgerctl.
+id = "gemini-3.5-flash-lite"
+publisher = "Google"
+license = "proprietary"
+default_mode = "off"
+
+[serving]
+kind = "hosted"
+model = "gemini-3.5-flash-lite"
+base_url_env = "LEDGER_LLM_BASE_URL"
+key_env = "LEDGER_LLM_API_KEY"
+requests_per_minute = 10
+
+[modes.off]
+reasoning_effort = "none"

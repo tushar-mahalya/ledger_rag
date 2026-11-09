@@ -1,0 +1,14 @@
+# Reader model. Registry contract: ledger_rag/evaluation/models.py
+id = "granite-4.0-micro"
+publisher = "IBM"
+license = "apache-2.0"
+parameters_b = 3.4
+default_mode = "off"
+
+[serving]
+kind = "vllm"
+repo = "ibm-granite/granite-4.0-micro"
+revision = "56111ae135df9c53a78c99028e7bc24035a9e979"
+gpu = "L40S"
+
+[modes.off]

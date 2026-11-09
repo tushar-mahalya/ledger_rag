@@ -1,0 +1,20 @@
+# Reader model. Registry contract: ledger_rag/evaluation/models.py
+id = "qwen3.5-4b"
+publisher = "Alibaba Qwen"
+license = "apache-2.0"
+parameters_b = 4.7
+default_mode = "off"
+
+[serving]
+kind = "vllm"
+repo = "Qwen/Qwen3.5-4B"
+revision = "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+gpu = "L40S"
+vllm_args = ["--language-model-only", "--reasoning-parser", "qwen3"]
+
+[modes.off]
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
+
+[modes.think]
+max_tokens = 8192
+extra_body = { chat_template_kwargs = { enable_thinking = true } }

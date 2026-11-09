@@ -1,0 +1,16 @@
+# Mixture of experts: 21B total, 3.6B active; reasoning cannot be disabled, only lowered.
+id = "gpt-oss-20b"
+publisher = "OpenAI"
+license = "apache-2.0"
+parameters_b = 20.9
+default_mode = "low"
+
+[serving]
+kind = "vllm"
+repo = "openai/gpt-oss-20b"
+revision = "6cee5e81ee83917806bbde320786a8fb61efebee"
+gpu = "H100!"
+
+[modes.low]
+max_tokens = 4096
+reasoning_effort = "low"

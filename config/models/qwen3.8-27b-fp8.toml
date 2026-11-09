@@ -1,0 +1,20 @@
+# Reader model of the 2026-11-01 baseline (docs/EVALUATION.md).
+id = "qwen3.8-27b-fp8"
+publisher = "Alibaba Qwen"
+license = "apache-2.0"
+parameters_b = 27.8
+default_mode = "off"
+
+[serving]
+kind = "vllm"
+repo = "Qwen/Qwen3.8-27B-FP8"
+revision = "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a"
+gpu = "H100!"
+vllm_args = ["--language-model-only", "--reasoning-parser", "qwen3", "--kv-cache-dtype", "fp8"]
+
+[modes.off]
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
+
+[modes.low]
+max_tokens = 8192
+extra_body = { chat_template_kwargs = { reasoning_effort = "low" } }

@@ -1,0 +1,16 @@
+# Mixture of experts: 35B total, 3B active per token.
+id = "qwen3.6-35b-a3b-fp8"
+publisher = "Alibaba Qwen"
+license = "apache-2.0"
+parameters_b = 36.0
+default_mode = "off"
+
+[serving]
+kind = "vllm"
+repo = "Qwen/Qwen3.6-35B-A3B-FP8"
+revision = "c653bba46dfa06e9658dcc0b0dc87fe4685f14a2"
+gpu = "H100!"
+vllm_args = ["--language-model-only", "--reasoning-parser", "qwen3"]
+
+[modes.off]
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
