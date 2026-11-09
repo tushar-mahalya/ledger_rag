@@ -3,11 +3,11 @@
 - Status: accepted for A/B evaluation. No profile or reranker is promoted yet.
 - Date: 2026-10-31 (revised the same day after code review; see
   [Revision after code review](#revision-after-code-review))
-- Context: retrieval workstream. Scope: [chunking](../../src/ledger_rag/ingestion/chunking.py),
-  [document context](../../src/ledger_rag/ingestion/context.py),
+- Context: retrieval workstream. Scope: [chunking](../../services/engine/src/ledger_rag/ingestion/chunking.py),
+  [document context](../../services/engine/src/ledger_rag/ingestion/context.py),
   [Modal ingestion](../../compute/ingestion.py), [summaries](../../compute/summaries.py),
   [vLLM reranker app](../../compute/reranker.py) and its
-  [client](../../src/ledger_rag/retrieval/vllm_reranker.py).
+  [client](../../services/engine/src/ledger_rag/retrieval/vllm_reranker.py).
 
 ## Context
 

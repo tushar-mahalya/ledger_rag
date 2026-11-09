@@ -8,7 +8,6 @@ __pycache__/
 htmlcov/
 .env
 .env.*
-!.env.example
 secrets/
 .modal.toml
 data/raw/
@@ -19,9 +18,16 @@ build/
 *.egg-info/
 data/finqa/
 node_modules/
-web/test-results/
-web/playwright-report/
+services/web/test-results/
+services/web/playwright-report/
 *.tsbuildinfo
 data/convfinqa/
 data/tatqa/
 data/financebench/
+# Never commit decrypted SOPS output or age identities.
+*.dec
+*.dec.*
+*.plain
+*.plain.*
+age*.txt
+*.agekey

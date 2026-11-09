@@ -351,8 +351,8 @@ frozen configuration, billing-view/invoice reconciliation and remote validation
 of failure/deadline shutdown paths if independently authorized. Pilot and selected
 full-dev measurements are complete; no further paid phase is authorized here.
 Composed endpoint hydration and normal-completion container shutdown were verified.
-Existing secret projections are the execution prerequisite;
-Vault workload identity is not yet wired into these serving jobs.
+The Modal Secrets delivered by `ledgerctl push` are the execution
+prerequisite; runtimes receive copies, not keyless workload identity.
 
 Sources (retrieved 2026-11-01):
 [Modal pricing](https://modal.com/pricing),
@@ -390,7 +390,7 @@ uv run python -m ledger_rag.evaluation.harness \
   --corpus data/examples.jsonl --cases data/eval.jsonl \
   --repeats 3 --top-k 5 --seed 42 --bootstrap-samples 2000 \
   --output evaluation.json
-uv run python -m pytest tests/unit/test_evaluation.py -q
+uv run python -m pytest services/engine/tests/unit/test_evaluation.py -q
 ```
 
 The default CLI reports measurements; it does **not** demand perfection.
@@ -687,7 +687,7 @@ Do not imply possession of the full benchmark or commercial clearance.
 **Implemented retrieval-only preparation:**
 
 ```sh
-uv run python scripts/prepare_financebench.py \
+uv run python -m ledger_rag.evaluation.datasets prepare-financebench \
   --input licensed-financebench.jsonl --corpus independently-prepared-filings.jsonl \
   --mapping financebench-document-mapping.json --output financebench-cases-v1.jsonl \
   --accept-dataset-terms
@@ -916,7 +916,7 @@ which open the collection with `create=False` and verify its embedding identity.
 ```mermaid
 flowchart LR
   subgraph GPU["evaluate · L4 (L40S fallback, CC 8.9)"]
-    F[fetch_finqa.sh<br/>pinned commit] --> V[verify corpus SHA-256<br/>and 8,611 points]
+    F[datasets fetch finqa<br/>pinned commit] --> V[verify corpus SHA-256<br/>and 8,611 points]
     T1[TEI embedder :8000<br/>gte-modernbert-base@e7f32e3] --> R
     T2[TEI reranker :8001<br/>gte-reranker-modernbert-base@f7481e6] --> R
     V --> R[retrieval: 4 arms × 2 scopes]

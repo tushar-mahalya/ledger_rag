@@ -3,7 +3,7 @@
 An expired ``ledger_write_lease`` makes every API instance fail closed. Run this
 only after the authoritative document/ACL state has been re-ingested or the
 collection rebuilt and validated. It reads the same ``LEDGER_*`` settings as the
-API (including ``LEDGER_SECRETS_DIR``) and changes only that metadata key.
+API (run it through ``ledgerctl run``) and changes only that metadata key.
 """
 
 import argparse

@@ -23,13 +23,14 @@ not the number of frameworks in the diagram.
 | Local, keyless demo | Deterministic lexical retrieval and extractive responses over **fictional** disclosures |
 | Persistent retrieval | Qdrant dense/sparse RRF retrieval with an OpenAI-compatible embedding endpoint |
 | Reranking | Optional TEI cross-encoder over bounded authorized candidates; explicit failures, no silent bypass |
-| Ingestion | Paragraph-aware bounded chunks, neighboring parent metadata, content hashes and stable tenant-scoped IDs |
+| Ingestion | One corpus pipeline for any source: declarative specs, quality gates, lineage, versioned builds with atomic alias promotion and rollback, ACL changes and erasure without re-embedding ([ADR 0007](docs/adr/0007-corpus-pipeline.md)) |
 | Identity and permissions | OIDC signature/issuer/audience/expiry validation; server-derived tenant and group ACLs, admin/reader roles |
 | Evidence contract | Source, disclosure date and exact retrieved quote; unknown or missing paragraph citations trigger abstention |
 | Tool harness | Typed request-scoped LangGraph chat; allowlisted retrieval and Decimal arithmetic, bounded untrusted history, cumulative tool budget and deadlines |
 | External evidence | Opt-in chat-only SEC EDGAR and FRED/ALFRED lookups with bounded calls, typed provenance and explicit failure outcomes |
 | MCP adapter | Opt-in authenticated Streamable HTTP tools with principal-derived permissions and protected-resource metadata |
-| Operations | Structured redacted logs, request/trace IDs, OTLP traces, Prometheus metrics, Docker, Vault Agent templates, CI |
+| Operations | Structured redacted logs, request/trace IDs, OTLP traces, Prometheus metrics, Docker, CI |
+| Secrets | One SOPS + age encrypted store, a public routing manifest and `ledgerctl` delivery to local runs and per-app Modal Secrets ([secrets](docs/SECRETS.md)) |
 | Evaluation | Retrieval/answer smoke tests, authorization/failure-path suites, reproducible evaluation and HTTP benchmarking |
 | Voice gateway | Generic PCM and Twilio Media Streams adapters, VAD and barge-in; synthetic lifecycle tests, not verified carrier calls |
 | Compute plane | Colocated Modal GPU ingestion, training/inference and model manifests; bounded open-model serving and FinQA dev evaluation measured, training/quantization release gates remain |
@@ -62,6 +63,34 @@ Qwen3.8-27B-FP8. These reuse saved v1 contexts and are not official FinQA
 program-execution scores, full chat-pipeline validation or SOTA evidence.
 [Measured quality, paired intervals and provisional cost](docs/EVALUATION.md#measured-selected-full-dev-arms-2026-11-01)
 are published with lineage; the test split remains sealed.
+
+## Repository layout
+
+One uv workspace (Python) plus one npm project (web). Every deployable or installable
+unit owns its dependencies, sources, tests and README; shared, non-code artifacts sit
+at the root.
+
+```text
+services/                 independently deployed services
+  engine/                 evidence-first QA API (Python, ledger_rag): src/, tests/, Dockerfile
+  voice/                  Twilio + Pipecat voice channel, client of the engine (ADR 0006)
+  web/                    React/TypeScript research workspace, client of the engine
+compute/                  Modal GPU serving and batch jobs that reuse engine code; tests/
+tools/
+  ledgerctl/              operator CLI: SOPS + age secrets, inject and push
+contracts/                generated engine API contract that every client tests against
+config/                   secret manifest, per-environment profiles and corpus specs
+data/                     fictional seed and smoke-evaluation data; downloads are ignored
+deploy/observability/     collector, Prometheus, Grafana, Loki and Tempo configs
+docs/                     architecture, ADRs, runbooks, evaluation and research records
+scripts/                  repository tooling: datasets, evaluation drivers, maintenance; tests/
+compose.yaml              local orchestration (profiles: chat, qdrant, observability)
+pyproject.toml, uv.lock   workspace root: members, shared lint/type/test configuration
+```
+
+Dependency direction is one way: clients (`voice`, `web`) use the engine only through
+its HTTP contract (the MCP adapter is part of the engine); `compute` imports engine code so batch builds match
+serving; `ledgerctl` depends on nothing in the repository.
 
 ## Start locally
 
@@ -99,18 +128,18 @@ export LEDGER_DEMO_TOKEN="$(openssl rand -hex 32)"
 docker compose up --build
 ```
 
-The default binds to localhost and uses fictional demo data. For optional
-infrastructure, Vault bootstrap, telemetry, and the production overlay see
+The default binds to localhost and uses fictional demo data. Optional profiles add a
+local Qdrant (`--profile qdrant`) and telemetry (`--profile observability`); see
 [the operations runbook](docs/OPERATIONS.md). Do not expose demo authentication
-publicly or treat an unsecured local Vault as a production secrets service.
+publicly.
 
 ### Chat workspace
 
 With Node 22.12+:
 
 ```bash
-npm ci --prefix web --ignore-scripts
-npm --prefix web run dev
+npm ci --prefix services/web --ignore-scripts
+npm --prefix services/web run dev
 ```
 
 Open `http://127.0.0.1:5173` for the clearly labeled fictional design preview.
@@ -125,8 +154,8 @@ See [workspace design, deployment and checks](docs/CHAT_WORKSPACE.md) and
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy src/ledger_rag
-uv run --group compute pytest -q
+uv run mypy
+uv run --group compute pytest -q          # engine, voice, ledgerctl, compute, scripts
 uv run python -m ledger_rag.evaluation.harness --smoke --repeats 20 --output reports/smoke.json
 ```
 
@@ -165,11 +194,18 @@ retrieval or multimodal indexes.
 
 ## Configure real models
 
-Non-secret configuration comes from `LEDGER_*` environment variables. Secrets can
-come from Vault Agent-rendered, read-only files in `LEDGER_SECRETS_DIR`.
-The application never implicitly loads a dotenv file or sources shell templates.
-Explicit environment values override secret files; remove stale secret env values.
-Secrets are read at startup: rotate files, then roll the application instances.
+All configuration comes from `LEDGER_*` environment variables read at startup; the
+application never loads dotenv or secret files. Non-secret settings per environment
+live in [`config/env/`](config/env/). Secrets live in one SOPS + age encrypted store,
+and the public [manifest](config/secrets.toml) routes each one to the runtimes that
+need it. Run anything with an environment's settings and secrets, or deliver them to
+Modal, with [`ledgerctl`](docs/SECRETS.md):
+
+```bash
+ledgerctl status
+ledgerctl run --env dev -- uv run uvicorn ledger_rag.api.app:app --port 8080 --no-access-log
+ledgerctl push dev
+```
 
 | Needed | Configuration |
 |---|---|
@@ -184,14 +220,14 @@ Secrets are read at startup: rotate files, then roll the application instances.
 | Cross-encoder | Optional `LEDGER_RERANKER_URL` (TEI base URL) and API key |
 | Upstream retries | `LEDGER_UPSTREAM_MAX_RETRIES` (default 2; voice is capped at 1), `LEDGER_UPSTREAM_RETRY_BASE_SECONDS`, `LEDGER_UPSTREAM_RETRY_MAX_DELAY_SECONDS`: full-jitter, `Retry-After`-aware, deadline-bounded retries of LLM/embedding/reranker calls ([operations](docs/OPERATIONS.md#health-capacity-and-failure-handling)) |
 | Production identity | OIDC issuer, audience, JWKS URL and signed `tenant_id`, `roles`, `groups` claims; `sub` ≤256 and `tenant_id` ≤200 chars, ≤32 roles, ≤128 groups, each ≤256 chars, else 401 (duplicates are dropped; rejections log field names only) |
-| Vault | Vault address, workload AppRole bootstrap or production workload identity, least-privilege policy |
+| Secrets | Declared in [`config/secrets.toml`](config/secrets.toml), set with `ledgerctl set`, delivered with `ledgerctl push` |
 | Deployment | Target cloud/region/domain, TLS certificate, budget, CPU/GPU and model/data residency requirements |
 | IVR integration | Telephony credentials, signed-webhook/token-minting integration, STT/TTS endpoints and language/turn-taking requirements |
 
 Any model behind the supported **wire protocols** can be configured. Actual tool
 calling depends on that model/server's support; an arbitrary HTTP endpoint is not
 automatically compatible. The adapter does not implement Responses-only APIs.
-Never paste credentials into chat or commit them; provision them in Vault.
+Never paste credentials into chat or commit them; store them with `ledgerctl set`.
 
 ## Production promotion checklist
 
@@ -202,7 +238,8 @@ Never paste credentials into chat or commit them; provision them in Vault.
    allowlists; restrict `/metrics` to a monitoring identity.
 4. Make indexing transactional/versioned before concurrent ingestion, retention,
    hard deletions, or authorization changes are served at scale.
-5. Provision Vault securely; exercise credential rotation, Qdrant recovery,
+5. Give CI and deployments their own age identity or platform token; exercise
+   credential rotation, Qdrant recovery,
    outage/cancellation tests and telemetry retention.
 6. Deploy to your selected cloud; execute real-model canaries and latency/quality
    gates before accepting external traffic.

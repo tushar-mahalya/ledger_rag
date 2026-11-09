@@ -11,7 +11,7 @@ Smoke/latency benchmark (ephemeral app, stops when the command exits)::
 
 Deploy::
 
-    scripts/sync_modal_secrets.sh       # projects Vault's TEI_API_KEY into ledger-tei
+    ledgerctl push dev --target modal-tei   # TEI_API_KEY into ledger-tei
     LEDGER_DECISIONS_MIN_CONTAINERS=1 \
         uv run --locked --group compute modal deploy compute/decisions.py
 

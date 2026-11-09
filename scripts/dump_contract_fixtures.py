@@ -1,13 +1,15 @@
-"""Regenerate the web client's answer-contract fixtures from the Python models.
+"""Regenerate the engine's public answer contract fixtures from the Python models.
 
 Each scenario runs the real ``RagService`` chat pipeline offline: two synthetic Aurora
 Devices disclosures in the in-memory retriever, the deterministic planner, a scripted
 provider (one calculator call, then the final text) and a stub groundedness verifier.
 Only timings are replaced, so the fixtures are byte-for-byte reproducible.
 
-Writes ``web/src/fixtures/answers.json`` (answers, activity streams and evidence events,
-serialized like the SSE route) and ``web/src/fixtures/contract.schema.json`` (Pydantic
-JSON Schema for the zod bound-parity test in ``web/src/contract.test.ts``).
+Writes ``contracts/answers.json`` (answers, activity streams and evidence events,
+serialized like the SSE route) and ``contracts/contract.schema.json`` (Pydantic JSON
+Schema for the zod bound-parity test in ``services/web/src/contract.test.ts``). Every
+client (web workspace, voice service) tests against these files. The web demo's
+recorded external-evidence turn goes to ``services/web/src/fixtures/external.json``.
 
     uv run --frozen python scripts/dump_contract_fixtures.py          # rewrite
     uv run --frozen python scripts/dump_contract_fixtures.py --check  # fail when stale
@@ -41,9 +43,10 @@ from ledger_rag.planning.planner import Planner
 from ledger_rag.retrieval.memory import MemoryRetriever
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = ROOT / "web" / "src" / "fixtures"
-ANSWERS = FIXTURES / "answers.json"
-SCHEMA = FIXTURES / "contract.schema.json"
+CONTRACTS = ROOT / "contracts"
+WEB_FIXTURES = ROOT / "services" / "web" / "src" / "fixtures"
+ANSWERS = CONTRACTS / "answers.json"
+SCHEMA = CONTRACTS / "contract.schema.json"
 
 QUESTION = "What was the percentage change in Aurora Devices revenue from 2024 to 2025?"
 FORECAST = "Forecast the share price for Aurora in 2027."
@@ -211,7 +214,7 @@ async def external_scenario() -> tuple[Answer, list[Activity], Evidence]:
 
     from ledger_rag.external.service import ExternalData
 
-    root = ROOT / "tests" / "fixtures" / "external"
+    root = ROOT / "services" / "engine" / "tests" / "fixtures" / "external"
 
     def recorded(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -326,7 +329,7 @@ def outputs() -> dict[Path, str]:
     return {
         ANSWERS: render(fixtures),
         SCHEMA: render(schema()),
-        FIXTURES / "external.json": render(external),
+        WEB_FIXTURES / "external.json": render(external),
     }
 
 

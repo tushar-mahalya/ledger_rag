@@ -13,7 +13,7 @@ accepts ``chat_template_kwargs.reasoning_effort`` of ``low``, ``medium`` or ``xh
 
 Operations::
 
-    scripts/sync_modal_secrets.sh llm-serve          # Vault -> Modal secret ledger-llm-serve
+    ledgerctl push dev --target modal-llm-serve   # key into ledger-llm-serve
     uv run --group compute modal run compute/llm.py::download_weights
     uv run --group compute modal deploy compute/llm.py
     uv run --group compute modal run compute/llm_bench.py     # serving measurements

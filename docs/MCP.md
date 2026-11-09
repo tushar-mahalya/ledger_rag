@@ -76,7 +76,7 @@ Cancelled work releases its concurrency slot and provider breaker probe.
 ## Local validation
 
 ```sh
-uv run --locked pytest -q tests/unit/test_mcp_adapter.py tests/unit/test_external_chat.py
+uv run --locked pytest -q services/engine/tests/unit/test_mcp_adapter.py services/engine/tests/unit/test_external_chat.py
 ```
 
 Tests cover protocol initialization, the three-tool allowlist, metadata and

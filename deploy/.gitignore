@@ -1,1 +1,2 @@
-private/
+# Local-only credentials for the observability profile (metrics token, Grafana password).
+**/private/

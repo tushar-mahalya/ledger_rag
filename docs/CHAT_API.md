@@ -290,9 +290,9 @@ explicit request/stream failure, never a truncated final answer.
 
 Scores are finite (never `NaN` or `Infinity`), and counts and timings are
 non-negative. `scripts/dump_contract_fixtures.py` regenerates
-`web/src/fixtures/answers.json` by running the real chat pipeline offline. It also
-writes `web/src/fixtures/contract.schema.json`, the Pydantic JSON Schema that
-`web/src/contract.test.ts` compares with the zod schemas bound for bound (types,
+`contracts/answers.json` by running the real chat pipeline offline. It also
+writes `contracts/contract.schema.json`, the Pydantic JSON Schema that
+`services/web/src/contract.test.ts` compares with the zod schemas bound for bound (types,
 lengths, item counts, ranges and patterns). Check for stale fixtures with
 `uv run --frozen python scripts/dump_contract_fixtures.py --check`.
 
@@ -475,14 +475,14 @@ voice entry points enforce their existing deadlines.
 
 The existing exporter can be configured with
 `LEDGER_OTLP_ENDPOINT=https://<your-langfuse-host>/api/public/otel`; it appends
-`/v1/traces`. Use protected/Vault-rendered `LEDGER_OTLP_HEADERS` JSON containing
+`/v1/traces`. Use a protected `LEDGER_OTLP_HEADERS` JSON value (declared in the secret manifest) containing
 `Authorization: Basic <base64(public-key:secret-key)>` and, for v4 ingestion,
 `x-langfuse-ingestion-version: "4"`. Choose the correct regional or self-hosted
 endpoint. Do not put credentials in URLs, source control, logs, or browser code.
 This is an **optional configuration route**, not a verified live Langfuse
 deployment or a full Langfuse generation/evaluation integration.
 
-The checked-in `deploy/otel-collector.yaml` retains `http.request.method`,
+The checked-in `deploy/observability/otel-collector.yaml` retains `http.request.method`,
 `http.response.status_code`, `http.route`, and `error.type`, plus these safe
 fixed-enum, count, and boolean span attributes:
 `rag.stage`, `rag.tool`, `rag.profile`, `rag.tool_calls`, `rag.abstained`,
@@ -503,9 +503,9 @@ failure sanitization, bounded buffering, disconnect/deadline cleanup, and tracin
 disablement. Run:
 
 ```bash
-uv run ruff check src tests
+uv run ruff check .
 uv run mypy
-uv run pytest tests/unit/test_chat_graph.py tests/integration/test_chat_stream.py
+uv run pytest services/engine/tests/unit/test_chat_graph.py services/engine/tests/integration/test_chat_stream.py
 ```
 
 These use deterministic providers/local retrieval, not paid models or external

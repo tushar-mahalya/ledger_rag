@@ -63,7 +63,9 @@ image = (
     modal.Image.from_registry(TEI_IMAGE, add_python="3.12")
     .entrypoint([])
     .apt_install("curl")
-    .uv_sync(uv_project_dir=str(ROOT), extra_options="--no-dev")
+    # Hash-pinned export of uv.lock (scripts/export_requirements.py); uv_sync does not
+    # support uv workspaces.
+    .uv_pip_install(requirements=[str(Path(__file__).with_name("requirements") / "engine.txt")])
     .env(
         {
             "HUGGINGFACE_HUB_CACHE": "/cache/tei",
@@ -71,7 +73,6 @@ image = (
             "NO_PROXY": "127.0.0.1,localhost",
         }
     )
-    .add_local_file(ROOT / "scripts/fetch_finqa.sh", "/opt/ledger/fetch_finqa.sh")
     .add_local_python_source("ledger_rag")
 )
 app = modal.App("ledger-evaluation", image=image)
@@ -336,6 +337,7 @@ async def evaluate(commands: list[str], options: dict[str, Any]) -> dict[str, An
         execute,
         validate_args,
     )
+    from ledger_rag.evaluation.datasets.fetch import fetch_verified
     from ledger_rag.retrieval.qdrant import QdrantRetriever
 
     started = time.perf_counter()
@@ -357,11 +359,8 @@ async def evaluate(commands: list[str], options: dict[str, Any]) -> dict[str, An
         "options": {k: v for k, v in options.items() if "key" not in k},
     }
     with tempfile.TemporaryDirectory(prefix="ledger-eval-", dir=".") as directory:
-        fetch = await asyncio.create_subprocess_exec(
-            "bash", "/opt/ledger/fetch_finqa.sh", directory
-        )
-        if await fetch.wait() != 0:
-            raise RuntimeError("Pinned FinQA fetch or checksum verification failed")
+        # Pinned, SHA-256-verified (the shared dataset registry).
+        await asyncio.to_thread(fetch_verified, "finqa", Path(directory))
         parsed = {}
         for command in commands:
             args = parser.parse_args(benchmark_argv(command, options, directory, key))
@@ -428,6 +427,7 @@ async def _generate(options: dict[str, Any], contexts_path: str) -> dict[str, An
     from uuid import uuid4
 
     from ledger_rag.evaluation.benchmarks.finqa import build_parser, execute, validate_args
+    from ledger_rag.evaluation.datasets.fetch import fetch_verified
 
     started = time.perf_counter()
     if not re.fullmatch(r"/data/evaluation/[0-9a-f]{32}\.json", contexts_path):
@@ -448,11 +448,8 @@ async def _generate(options: dict[str, Any], contexts_path: str) -> dict[str, An
         "options": {k: v for k, v in options.items() if "key" not in k},
     }
     with tempfile.TemporaryDirectory(prefix="ledger-eval-", dir=".") as directory:
-        fetch = await asyncio.create_subprocess_exec(
-            "bash", "/opt/ledger/fetch_finqa.sh", directory
-        )
-        if await fetch.wait() != 0:
-            raise RuntimeError("Pinned FinQA fetch or checksum verification failed")
+        # Pinned, SHA-256-verified (the shared dataset registry).
+        await asyncio.to_thread(fetch_verified, "finqa", Path(directory))
         parser = build_parser()
         args = parser.parse_args(
             benchmark_argv("answers", options, directory, "unused", str(source))

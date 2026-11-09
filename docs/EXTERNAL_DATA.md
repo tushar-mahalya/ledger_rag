@@ -14,9 +14,9 @@ A principal needs the `reader` role and, when configured,
 arguments. A missing or rejected FRED credential disables FRED rather than
 falling back to current observations.
 
-SEC requires `LEDGER_SEC_USER_AGENT` with a contact email. FRED credentials come
-from a Vault-rendered configuration file; never source that file, put credentials
-in command arguments, record request URLs, or log upstream bodies.
+SEC requires `LEDGER_SEC_USER_AGENT` with a contact email. The FRED key is
+`LEDGER_FRED_API_KEY` in the encrypted store ([secrets](SECRETS.md)); never put
+credentials in command arguments, record request URLs, or log upstream bodies.
 
 ## Read-only tools
 
@@ -80,7 +80,7 @@ external enablement and reject attempts to override it. External activity and
 provenance are tested separately from benchmark correctness.
 
 ```sh
-uv run --locked pytest -q tests/unit/test_external_*.py tests/unit/test_mcp_adapter.py
+uv run --locked pytest -q services/engine/tests/unit/test_external_*.py services/engine/tests/unit/test_mcp_adapter.py
 uv run --locked python scripts/dump_contract_fixtures.py --check
 cd web && npm test -- src/external.test.ts src/contract.test.ts
 ```

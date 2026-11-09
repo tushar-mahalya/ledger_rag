@@ -7,7 +7,7 @@ and database writes instead. The warm CPU query tier needs measured INT8 parity;
 
 Deploy::
 
-    scripts/sync_modal_secrets.sh        # projects Vault's embedding key into Modal
+    ledgerctl push dev --target modal-tei   # TEI_API_KEY into ledger-tei
     uv run --group compute modal deploy compute/inference.py
     uv run --group compute modal run compute/inference.py::space_id  # LEDGER_EMBEDDING_SPACE_ID
 

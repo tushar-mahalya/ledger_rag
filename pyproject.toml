@@ -1,22 +1,9 @@
-[project]
-name = "ledger-rag"
-version = "0.1.0"
-description = "Evidence-first financial intelligence RAG backend for chat and voice"
-requires-python = ">=3.11"
-dependencies = [
-  "fastapi>=0.115,<1",
-  "uvicorn[standard]>=0.34,<1",
-  "pydantic-settings>=2.7,<3",
-  "httpx>=0.28,<1",
-  "PyJWT[crypto]>=2.10,<3",
-  "prometheus-client>=0.21,<1",
-  "structlog>=25,<27",
-  "opentelemetry-sdk>=1.30,<2",
-  "opentelemetry-exporter-otlp-proto-http>=1.30,<2",
-  "qdrant-client>=1.13,<2",
-  "langgraph>=1.0,<2",
-  "mcp>=2.3,<3",
-]
+# Ledger monorepo: a virtual uv workspace. Each member is a self-contained unit with
+# its own dependencies, sources and tests; this file holds only shared tooling.
+# See README.md "Repository layout".
+
+[tool.uv.workspace]
+members = ["services/engine", "services/voice", "tools/ledgerctl"]
 
 [dependency-groups]
 compute = [
@@ -29,18 +16,6 @@ dev = [
     "mypy>=1.15,<2",
     "pyyaml>=6,<7",
 ]
-train = [
-    "datasets>=3,<5",
-    "sentence-transformers[onnx,train]>=5,<6",
-    "torch>=2.7,<3",
-]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/ledger_rag"]
 
 [tool.ruff]
 target-version = "py311"
@@ -49,15 +24,27 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["ledger_rag", "ledger_voice", "ledgerctl", "compute", "scripts"]
+
 [tool.mypy]
 strict = true
 packages = ["ledger_rag"]
-mypy_path = "src"
+mypy_path = "services/engine/src"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-testpaths = ["tests"]
+# Every unit keeps its tests beside its code.
+testpaths = [
+    "services/engine/tests",
+    "services/voice/tests",
+    "tools/ledgerctl/tests",
+    "compute/tests",
+    "scripts/tests",
+]
+# Repository root, so tests can import the compute/ and scripts/ packages.
+pythonpath = ["."]
 markers = [
     "live: calls real SEC EDGAR / FRED APIs; skipped unless LEDGER_LIVE_TESTS=1",
 ]

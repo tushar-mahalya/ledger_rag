@@ -127,14 +127,14 @@ semantic entailment or that the model chose the right operands; the optional
 LettuceDetect verifier is an unmeasured, chat-only signal, and the abstention
 thresholds are uncalibrated. See [grounded calculation](CHAT_API.md#grounded-calculation-and-verification).
 
-Sources: [API](../src/ledger_rag/api/app.py),
-[RAG service](../src/ledger_rag/orchestration/service.py),
-[reranking](../src/ledger_rag/retrieval/reranking.py).
+Sources: [API](../services/engine/src/ledger_rag/api/app.py),
+[RAG service](../services/engine/src/ledger_rag/orchestration/service.py),
+[reranking](../services/engine/src/ledger_rag/retrieval/reranking.py).
 
 ### Query planning
 
 `RagService.retrieve` plans each request before searching
-([planning package](../src/ledger_rag/planning/)). The chat graph's `plan` node
+([planning package](../services/engine/src/ledger_rag/planning/)). The chat graph's `plan` node
 at `START` reuses that plan (it is matched to the request by a hash, so it never
 re-runs remote calls) and records only enum/count attributes. Set
 `LEDGER_PLANNER_ENABLED=false` to restore single-query retrieval exactly.
@@ -258,7 +258,7 @@ labelled routing data. The paid Jev API is not integrated.
 | Small replacements | Upload all new chunks before tenant/document-scoped stale deletion; a write lease in collection metadata makes an abandoned write fail closed in every instance | Not transactional; the lease is best-effort coordination, not a distributed lock; release only after reconciliation |
 
 See [ingestion and release boundaries](INGESTION.md),
-[Qdrant implementation](../src/ledger_rag/retrieval/qdrant.py) and
+[Qdrant implementation](../services/engine/src/ledger_rag/retrieval/qdrant.py) and
 [chunk-profile decisions](adr/0002-chunk-profiles-and-qwen3-rerankers.md), with
 [evaluation methodology](EVALUATION.md). Keep prior indexes for rollback.
 Do not share a float16-built space with an INT8 query encoder merely because
@@ -269,6 +269,13 @@ their model names match.
 The implemented gateway supports generic PCM and Twilio Media Streams,
 OpenAI-compatible STT/TTS, energy VAD, resampling and cancellation. Real carrier
 interoperability and mouth-to-ear latency remain unverified.
+
+**Transitional.** [ADR 0006](adr/0006-voice-channel-service.md) moves voice out of
+the engine process into a separate `ledger-voice` service. That service calls
+`/v1/query` with `profile=voice` as a per-line service principal and builds its
+media pipeline on Pipecat with no LLM service. The in-process gateway described
+here stays until that service passes the ADR's gates. The lifecycle and bounds
+below remain requirements either way.
 
 ```mermaid
 stateDiagram-v2
@@ -301,8 +308,8 @@ server finishing TTS generation.
   cold starts, STT, retrieval, generation, TTS and transport. Stage targets are
   not additive guarantees or measurements.
 
-Sources: [gateway](../src/ledger_rag/voice/gateway.py),
-[transport](../src/ledger_rag/voice/transport.py),
+Sources: [gateway](../services/engine/src/ledger_rag/voice/gateway.py),
+[transport](../services/engine/src/ledger_rag/voice/transport.py),
 [operating targets](OPERATIONS.md#health-capacity-and-failure-handling).
 
 ## 5. Identity, secrets and operations
@@ -318,12 +325,13 @@ tracked separately from retrieved filings; these tools never run on the voice
 path or contaminate benchmark runs. Provenance and valid citation markers still
 do not establish semantic entailment.
 
-Service secrets are loaded from Vault-rendered files at startup. Explicit
-environment values can override those files; the application does not source
-shell templates or implicitly read dotenv files. The production waiter requires
-LLM, embedding, Qdrant and OTLP-header files. Rotation needs a controlled restart.
-Modal platform credentials, the batch database secret and serving TEI keys are
-separate credentials with different consumers.
+Service settings, secrets included, come from `LEDGER_*` environment variables read
+once at startup; the application never reads dotenv or secret files. Values live
+in one SOPS + age encrypted store and `ledgerctl` delivers each runtime only the
+keys its [manifest](../config/secrets.toml) routes to it ([secrets](SECRETS.md)).
+Rotation needs a sync and a controlled restart. Modal platform credentials, the
+batch database secret and serving TEI keys are separate credentials with
+different consumers; platform tokens never reach a runtime.
 
 The application emits JSON logs, metrics, and HTTP/RAG/rerank/voice spans plus
 safe LangGraph model/tool/validation spans. The Collector retains fixed stage,
