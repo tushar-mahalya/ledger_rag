@@ -1,0 +1,15 @@
+# Reader model; serving flags follow the model card (Mistral-format weights and tokenizer).
+id = "ministral-3-8b"
+publisher = "Mistral AI"
+license = "apache-2.0"
+parameters_b = 8.9
+default_mode = "off"
+
+[serving]
+kind = "vllm"
+repo = "mistralai/Ministral-3-8B-Instruct-2512"
+revision = "5b26027e7b19eeb4b7352e1fed3926375dd2cb4d"
+gpu = "L40S"
+vllm_args = ["--tokenizer-mode", "mistral", "--config-format", "mistral", "--load-format", "mistral"]
+
+[modes.off]
