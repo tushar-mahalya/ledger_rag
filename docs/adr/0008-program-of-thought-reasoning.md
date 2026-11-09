@@ -1,7 +1,7 @@
 # ADR 0008: Program-of-thought reasoning core and benchmark-comparable evaluation
 
-- Status: accepted; core and FinQA/ConvFinQA runners implemented 2026-11-09,
-  measurements in progress (see [Evaluation](../EVALUATION.md#program-of-thought-reasoning-2026-11-09))
+- Status: accepted; reasoning core, FinQA/ConvFinQA/TAT-QA runners, raw-vs-Ledger
+  arms and the model registry implemented 2026-11-09; measurements in progress (see [Evaluation](../EVALUATION.md#program-of-thought-reasoning-2026-11-09))
 - Date: 2026-11-09
 
 ## Context
@@ -70,6 +70,20 @@ Technique evidence that shaped the design:
 5. **Compute is colocated and bounded.** `compute/reasoning.py` runs vLLM on
    loopback and the benchmark in one GPU container with a hard timeout; nothing is
    deployed. Weights and compile caches persist in Volumes.
+6. **The backend, not the model, is what is measured.** Every run compares arms
+   of the *same* model on identical questions and generation settings:
+   `raw` (the model alone: same evidence, free reasoning, one `ANSWER:`) versus
+   `ledger` (exemplars, programs or typed answers, grounding, deterministic
+   execution, voting), plus ablations such as `ledger-zero-shot`. Reports carry
+   paired report-cluster bootstrap deltas (`ledger-minus-raw`). Raw answers are
+   parsed leniently and also scored with the PoT percentage-tolerant comparison,
+   so the control is never penalized for formatting; gold replay checks that the
+   raw parser scores 99.7–100% on gold answers.
+7. **Any LLM, one interface.** Models are declared in `config/models/<id>.toml`
+   (`ledger_rag.evaluation.models`): pinned self-hosted weights served by vLLM, or
+   a hosted OpenAI-compatible API, each with named generation modes. Adding a
+   model is a file, not code; the Modal job runs many models in parallel, one
+   container per model serving all benchmarks and arms.
 
 ## Budget (authorized 2026-11-09: $25 of Modal credit)
 

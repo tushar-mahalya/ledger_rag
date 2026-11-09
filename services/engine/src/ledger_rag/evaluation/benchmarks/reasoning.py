@@ -379,23 +379,28 @@ class Pipeline:
     """Ledger contract (programs or typed answers, grounding, execution) or raw answers."""
     samples: int
     exemplars: int
+    refine_samples: int = 0
 
     def describe(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
 
 
-PIPELINES = ("raw", "ledger", "ledger-zero-shot")
+PIPELINES = ("raw", "ledger", "ledger-zero-shot", "ledger-refine")
+REFINE_SAMPLES = 3
 
 
 def pipeline(name: str, samples: int, exemplars: int) -> Pipeline:
     """``raw``: the model alone, one answer. ``ledger``: the full backend.
-    ``ledger-zero-shot``: the backend without retrieved exemplars (an ablation)."""
+    ``ledger-zero-shot``: the backend without retrieved exemplars (an ablation).
+    ``ledger-refine``: the backend plus execution-feedback refinement when votes split."""
     if name == "raw":
         return Pipeline("raw", False, 1, 0)
     if name == "ledger":
         return Pipeline("ledger", True, samples, exemplars)
     if name == "ledger-zero-shot":
         return Pipeline("ledger-zero-shot", True, samples, 0)
+    if name == "ledger-refine":
+        return Pipeline("ledger-refine", True, samples, exemplars, REFINE_SAMPLES)
     raise ValueError(f"unknown pipeline {name!r}; choose from {', '.join(PIPELINES)}")
 
 
@@ -579,6 +584,7 @@ async def _solve_arm(
         samples=arm.samples,
         exemplar_search=search if arm.exemplars and index is not None else None,
         keep_replies=keep_replies,
+        refine_samples=arm.refine_samples,
     )
     return list(await asyncio.gather(*(solver.solve(item.problem) for item in items)))
 

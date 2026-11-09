@@ -191,3 +191,43 @@ def test_prompt_contains_exemplars_page_and_question_only_as_data() -> None:
     assert "| net revenue | $ 5829 | $ 5735 |" in user
     with pytest.raises(ValueError):
         Solver(reader=_Scripted([]), task=ProgramTask(_execute), samples=0)
+
+
+class _Refining:
+    """Split first round; refinement replies see execution feedback and converge."""
+
+    def __init__(self) -> None:
+        self.feedback: list[str] = []
+
+    async def read(self, prompt: list[dict[str, str]], sample: int) -> Reply:
+        content = prompt[-1]["content"]
+        if "Independent attempts" in content:
+            self.feedback.append(content.rsplit("Question:", 1)[-1])
+            return Reply("PROGRAM: subtract(5829, 5735), divide(#0, 5735)")
+        first = [
+            "PROGRAM: subtract(5829, 5735)",
+            "PROGRAM: divide(5829, 5735)",
+            "PROGRAM: subtract(5829, 5000)",
+        ]
+        return Reply(first[sample])
+
+
+def test_refinement_runs_only_without_a_majority_and_joins_the_vote() -> None:
+    problem = Problem("q1", "what is the growth rate?", ["Revenue rose."], [], TABLE)
+    reader = _Refining()
+    solver = Solver(reader=reader, task=ProgramTask(_execute), samples=3, refine_samples=2)
+    solution = asyncio.run(solver.solve(problem))
+    assert solution.decision.value == round(94 / 5735, 5)
+    assert solution.decision.total == 5 and len(solution.refined) == 2
+    shown = reader.feedback[0]
+    assert "subtract(5829, 5735) -> = 94.0" in shown
+    assert "subtract(5829, 5000) -> uses numbers" in shown
+    record = solution.record()
+    assert record["refined_reasons"] == ["ok", "ok"] and len(record["sample_values"]) == 3
+    agreed = Solver(
+        reader=_Scripted([Reply("PROGRAM: subtract(5829, 5735)")] * 3),
+        task=ProgramTask(_execute),
+        samples=3,
+        refine_samples=2,
+    )
+    assert asyncio.run(agreed.solve(problem)).refined == ()
