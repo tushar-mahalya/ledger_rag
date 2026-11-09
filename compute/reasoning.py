@@ -72,14 +72,15 @@ def vllm_argv(spec: dict[str, Any]) -> list[str]:
 def benchmark_argv(
     benchmark: str, options: dict[str, Any], spec_path: Path, data_dir: Path
 ) -> list[str]:
-    """Arguments for the benchmark CLI; the test split is never reachable from here."""
+    """Arguments for the benchmark CLI; test needs ``unseal_test`` and a dev-frozen config."""
+    split = str(options.get("split", "dev"))
     argv = [
         "--benchmark",
         benchmark,
         "--data-dir",
         str(data_dir),
         "--split",
-        "dev",
+        split,
         "--reader",
         "endpoint",
         "--model-spec",
@@ -99,6 +100,10 @@ def benchmark_argv(
         "--seed",
         str(int(options.get("seed", 13))),
     ]
+    if split == "test":
+        if not options.get("unseal_test"):
+            raise ValueError("the test split is sealed; pass --unseal-test with a frozen config")
+        argv.append("--unseal-test")
     if options.get("mode"):
         argv += ["--mode", str(options["mode"])]
     if options.get("limit"):
@@ -256,6 +261,8 @@ def main(
     sample_temperature: float = 0.7,
     concurrency: int = 128,
     debug_replies: int = 0,
+    split: str = "dev",
+    unseal_test: bool = False,
     output: str = "",
 ) -> None:
     from ledger_rag.evaluation.models import load
@@ -278,7 +285,11 @@ def main(
         "sample_temperature": sample_temperature,
         "concurrency": concurrency,
         "debug_replies": debug_replies,
+        "split": split,
+        "unseal_test": unseal_test,
     }
+    if split not in {"dev", "test"} or (split == "test" and not unseal_test):
+        raise SystemExit("use --split dev, or --split test with --unseal-test (frozen config)")
     calls = [run.with_options(gpu=spec.gpu).spawn(spec.manifest(), options) for spec in specs]
     results = []
     for spec, call in zip(specs, calls, strict=True):
