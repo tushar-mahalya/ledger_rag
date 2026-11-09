@@ -41,6 +41,60 @@ uv run python -m ledger_rag.evaluation.benchmarks.reasoning_table matrix.json
 Results are dev selections until a configuration is frozen; held-out test runs
 need `--split test --unseal-test`. Results are recorded below as they are measured.
 
+### Dev matrix: 8 open models x 3 benchmarks (measured 2026-11-09)
+
+300 seeded dev questions per benchmark (seed 13), identical across models and arms;
+Ledger = 5 samples, 4 exemplars, prompt `pot-expression-v4`; thinking off (gpt-oss:
+low). Aggregates: [`results/2026-11-09-matrix-expression-v4.json`](results/2026-11-09-matrix-expression-v4.json).
+Cells are % with 95% report-cluster CIs; deltas are paired on identical questions.
+
+**Official metrics** (FinQA/ConvFinQA execution accuracy, TAT-QA exact match):
+
+| Model | FinQA raw → Ledger (Δ) | ConvFinQA raw → Ledger (Δ) | TAT-QA EM raw → Ledger (Δ) |
+|---|---|---|---|
+| Qwen3.5-4B | 25.7 → **72.7** (+47.0 [39.7, 53.8]) | 58.7 → **75.0** (+16.3 [10.5, 22.4]) | 18.3 → **70.7** (+52.3 [45.3, 58.5]) |
+| Phi-4-mini 3.8B | 21.7 → 54.7 (+33.0 [25.6, 40.6]) | 45.3 → 55.7 (+10.3 [4.0, 16.3]) | 27.7 → 39.0 (+11.3 [3.6, 18.6]) |
+| Granite-4.0-micro 3.4B | 20.0 → 62.7 (+42.7 [36.0, 49.3]) | 51.3 → 68.0 (+16.7 [11.0, 22.4]) | 30.7 → 56.0 (+25.3 [18.4, 32.0]) |
+| Qwen3.5-9B | 25.0 → **74.7** (+49.7 [42.6, 56.4]) | 60.3 → **80.3** (+20.0 [15.1, 25.1]) | 47.7 → 71.7 (+24.0 [17.5, 30.5]) |
+| Ministral-3 8B | 31.3 → 73.0 (+41.7 [33.8, 49.5]) | 61.3 → **83.3** (+22.0 [17.0, 27.0]) | 32.0 → 69.0 (+37.0 [30.3, 43.9]) |
+| Qwen3.6-35B-A3B (3B active) | 29.0 → **76.7** (+47.7 [40.6, 54.6]) | 62.7 → **82.3** (+19.7 [14.6, 24.6]) | 45.7 → **79.0** (+33.3 [27.2, 39.6]) |
+| gpt-oss-20b (3.6B active) | 27.7 → 73.3 (+45.7 [38.9, 51.8]) | 59.3 → 78.7 (+19.3 [14.2, 24.3]) | 12.7 → 69.3 (+56.7 [50.3, 63.0]) |
+| Qwen3.8-27B | 32.0 → **77.7** (+45.7 [38.9, 52.0]) | 67.3 → **85.7** (+18.3 [13.4, 23.2]) | 60.0 → **81.0** (+21.0 [15.5, 26.9]) |
+
+**Fairest view for raw answers** (FinQA/ConvFinQA percentage-tolerant `lenient`,
+TAT-QA F1): Ledger still wins on every model and benchmark, by +4.7 to +24.0 on
+FinQA, 0.0 to +10.3 on ConvFinQA and +10.7 to +47.9 F1 on TAT-QA (full table in
+the aggregates file). Most of the official-metric gap is raw models giving rounded
+or reformatted numbers; Ledger answers are exact by construction.
+
+Further measured findings:
+
+- **One sample captures most of the gain.** Vote-at-k (k = 1 to 5) adds 0 to 4
+  points for most models (Qwen3.5-4B FinQA 70.7 → 72.7; Qwen3.8-27B flat), up to
+  +16 for Phi-4-mini on TAT-QA. Execution-feedback refinement changed results by
+  at most ±2 points, so it stays optional.
+- **What fixed the first matrix** (prompt `pot-dsl-v3`, same subsets; kept in
+  [`results/2026-11-09-matrix-dsl-v3.json`](results/2026-11-09-matrix-dsl-v3.json)):
+  small models misnumbered FinQA step references, and ConvFinQA programs reusing
+  earlier answers were wrongly rejected as ungrounded. Expressions compiled to the
+  DSL and history-aware grounding turned ConvFinQA from -21 to +16 points for
+  Qwen3.5-4B (lenient view: -20.7 to 0.0) and lifted FinQA by 8 to 13 points.
+- OLMo-3-7B could not be measured: its chat template crashes vLLM 0.32 at startup.
+- Batch latencies under 1,800 concurrent requests are not per-request latency.
+
+These are **dev** results on 300-question subsets, selected before any test run.
+They are not test-set or SOTA claims.
+
+### Frozen configuration for held-out test runs
+
+Frozen on 2026-11-09 at commit `6f65953` after the dev matrix above, before any
+test split was opened: prompt `pot-expression-v4` (SHA-256 prefixes: FinQA Ledger
+`7bbfad68faf1616c`, TAT-QA Ledger `3a22da8dd75b8978`, FinQA raw
+`7e25e2e12d013bd4`, TAT-QA raw `cb9cd5d35d65da4f`), 5 samples at temperature 0.7,
+4 BM25 exemplars from train, seed 13, each model's default registry mode, arms
+`raw` and `ledger-refine` (whose first round is the `ledger` arm). Test splits are
+run once with this configuration; no change is made after seeing them.
+
 ## Verified prior full-dev retrieval measurement
 
 Verified read-only from `ledger-data:/evaluation/c17d398f34f24efd874e29bb641d9738.json`

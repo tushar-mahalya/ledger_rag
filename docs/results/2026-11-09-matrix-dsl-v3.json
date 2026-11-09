@@ -1,0 +1,2713 @@
+[
+ {
+  "model": "qwen3.5-4b",
+  "gpu": "NVIDIA L40S",
+  "timings": {
+   "weights_s": 0.0,
+   "ready_s": 69.1,
+   "total_s": 589.2
+  },
+  "runs": [
+   {
+    "run_id": "f7ec0e1408644f02be5e94fa0568e991",
+    "benchmark": "finqa",
+    "brief": "finqa/dev n=300 model=qwen3.5-4b raw:official_accuracy=0.2533 [0.1987, 0.3118] ledger:official_accuracy=0.6433 [0.5774, 0.7027] ledger-minus-raw=0.39 [0.3137, 0.4633]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9367,
+       "ci95": [
+        0.9037,
+        0.9656
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.68,
+       "ci95": [
+        0.6081,
+        0.7425
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.2533,
+       "ci95": [
+        0.1987,
+        0.3118
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.43,
+       "ci95": [
+        0.3654,
+        0.4953
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.98,
+       "ci95": [
+        0.9623,
+        0.9935
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.6867,
+       "ci95": [
+        0.6229,
+        0.7446
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.6433,
+       "ci95": [
+        0.5774,
+        0.7027
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.6433,
+       "ci95": [
+        0.5774,
+        0.7027
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.39,
+       "ci95": [
+        0.3137,
+        0.4633
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "tolerant_accuracy": {
+       "delta": 0.2133,
+       "ci95": [
+        0.1377,
+        0.2853
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "lenient_accuracy": {
+       "delta": 0.0067,
+       "ci95": [
+        -0.0538,
+        0.0669
+       ],
+       "n": 300,
+       "clusters": 159
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 281,
+      "parse": 19
+     },
+     "ledger": {
+      "execution": 1,
+      "ok": 1344,
+      "parse": 81,
+      "ungrounded": 74
+     }
+    },
+    "elapsed_seconds": 199.36
+   },
+   {
+    "run_id": "47f0309b99874be5a008a3ff4f5257d6",
+    "benchmark": "convfinqa",
+    "brief": "convfinqa/dev n=300 model=qwen3.5-4b raw:official_accuracy=0.5833 [0.5267, 0.6351] ledger:official_accuracy=0.5333 [0.4759, 0.5889] ledger-minus-raw=-0.05 [-0.118, 0.0167]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.95,
+       "ci95": [
+        0.9239,
+        0.9739
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.7833,
+       "ci95": [
+        0.73,
+        0.8313
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.5833,
+       "ci95": [
+        0.5267,
+        0.6351
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.6667,
+       "ci95": [
+        0.609,
+        0.7215
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.87,
+       "ci95": [
+        0.8322,
+        0.9074
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.5767,
+       "ci95": [
+        0.5212,
+        0.6331
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.5333,
+       "ci95": [
+        0.4759,
+        0.5889
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.5333,
+       "ci95": [
+        0.4759,
+        0.5889
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": -0.05,
+       "ci95": [
+        -0.118,
+        0.0167
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "tolerant_accuracy": {
+       "delta": -0.1333,
+       "ci95": [
+        -0.2007,
+        -0.0678
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "lenient_accuracy": {
+       "delta": -0.2067,
+       "ci95": [
+        -0.2673,
+        -0.1439
+       ],
+       "n": 300,
+       "clusters": 131
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 285,
+      "parse": 15
+     },
+     "ledger": {
+      "ok": 1064,
+      "parse": 240,
+      "ungrounded": 196
+     }
+    },
+    "elapsed_seconds": 172.53
+   },
+   {
+    "run_id": "4e342f084d074ce9982f1dbc9557c5bf",
+    "benchmark": "tatqa",
+    "brief": "tatqa/dev n=300 model=qwen3.5-4b raw:exact_match=0.1867 [0.1424, 0.2329] ledger:exact_match=0.68 [0.6206, 0.737] ledger-minus-raw=0.4933 [0.4277, 0.5585]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9933,
+       "ci95": [
+        0.9828,
+        1.0
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.1867,
+       "ci95": [
+        0.1424,
+        0.2329
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.3624,
+       "ci95": [
+        0.3155,
+        0.4087
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9867,
+       "ci95": [
+        0.9723,
+        0.9968
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.68,
+       "ci95": [
+        0.6206,
+        0.737
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.7335,
+       "ci95": [
+        0.6813,
+        0.7841
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "exact_match": {
+       "delta": 0.4933,
+       "ci95": [
+        0.4277,
+        0.5585
+       ],
+       "n": 300,
+       "clusters": 198
+      },
+      "f1": {
+       "delta": 0.3711,
+       "ci95": [
+        0.3099,
+        0.4293
+       ],
+       "n": 300,
+       "clusters": 198
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 298,
+      "parse": 2
+     },
+     "ledger": {
+      "execution": 1,
+      "ok": 1404,
+      "parse": 11,
+      "type": 6,
+      "ungrounded": 78
+     }
+    },
+    "elapsed_seconds": 136.57
+   }
+  ]
+ },
+ {
+  "model": "phi-4-mini",
+  "gpu": "NVIDIA L40S",
+  "timings": {
+   "weights_s": 40.3,
+   "ready_s": 145.3,
+   "total_s": 429.7
+  },
+  "runs": [
+   {
+    "run_id": "333e959f8d9541e4859e45aab7bc5a73",
+    "benchmark": "finqa",
+    "brief": "finqa/dev n=300 model=phi-4-mini raw:official_accuracy=0.2233 [0.1729, 0.2749] ledger:official_accuracy=0.5433 [0.483, 0.6067] ledger-minus-raw=0.32 [0.25, 0.3951]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9067,
+       "ci95": [
+        0.8693,
+        0.9387
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.3533,
+       "ci95": [
+        0.2965,
+        0.4073
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.2233,
+       "ci95": [
+        0.1729,
+        0.2749
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.3467,
+       "ci95": [
+        0.2911,
+        0.4013
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9467,
+       "ci95": [
+        0.9215,
+        0.9694
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.5667,
+       "ci95": [
+        0.5083,
+        0.6289
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.5433,
+       "ci95": [
+        0.483,
+        0.6067
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.5467,
+       "ci95": [
+        0.4849,
+        0.6105
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.32,
+       "ci95": [
+        0.25,
+        0.3951
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "tolerant_accuracy": {
+       "delta": 0.2,
+       "ci95": [
+        0.129,
+        0.2722
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "lenient_accuracy": {
+       "delta": 0.2133,
+       "ci95": [
+        0.1419,
+        0.2877
+       ],
+       "n": 300,
+       "clusters": 159
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 272,
+      "parse": 28
+     },
+     "ledger": {
+      "execution": 1,
+      "ok": 1221,
+      "parse": 89,
+      "ungrounded": 189
+     }
+    },
+    "elapsed_seconds": 95.07
+   },
+   {
+    "run_id": "ec546ef2ab5c4cfc91d5e1be808407f5",
+    "benchmark": "convfinqa",
+    "brief": "convfinqa/dev n=300 model=phi-4-mini raw:official_accuracy=0.46 [0.4072, 0.5143] ledger:official_accuracy=0.4333 [0.3779, 0.4884] ledger-minus-raw=-0.0267 [-0.0909, 0.037]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.83,
+       "ci95": [
+        0.7895,
+        0.869
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.52,
+       "ci95": [
+        0.4633,
+        0.5742
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.46,
+       "ci95": [
+        0.4072,
+        0.5143
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.5,
+       "ci95": [
+        0.4433,
+        0.5552
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.8567,
+       "ci95": [
+        0.8173,
+        0.8937
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.4633,
+       "ci95": [
+        0.4076,
+        0.5213
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.4333,
+       "ci95": [
+        0.3779,
+        0.4884
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.4333,
+       "ci95": [
+        0.3779,
+        0.4884
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": -0.0267,
+       "ci95": [
+        -0.0909,
+        0.037
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "tolerant_accuracy": {
+       "delta": -0.0667,
+       "ci95": [
+        -0.1311,
+        0.0
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "lenient_accuracy": {
+       "delta": -0.0567,
+       "ci95": [
+        -0.1271,
+        0.0184
+       ],
+       "n": 300,
+       "clusters": 131
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 249,
+      "parse": 51
+     },
+     "ledger": {
+      "execution": 2,
+      "ok": 1000,
+      "parse": 237,
+      "ungrounded": 261
+     }
+    },
+    "elapsed_seconds": 75.71
+   },
+   {
+    "run_id": "edbc8321b7fd479b86ab6a49b87eae46",
+    "benchmark": "tatqa",
+    "brief": "tatqa/dev n=300 model=phi-4-mini raw:exact_match=0.2933 [0.2468, 0.3459] ledger:exact_match=0.2967 [0.2473, 0.3483] ledger-minus-raw=0.0033 [-0.0657, 0.068]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.7233,
+       "ci95": [
+        0.671,
+        0.7749
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.2933,
+       "ci95": [
+        0.2468,
+        0.3459
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.3356,
+       "ci95": [
+        0.2862,
+        0.3874
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.76,
+       "ci95": [
+        0.71,
+        0.8086
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.2967,
+       "ci95": [
+        0.2473,
+        0.3483
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.3424,
+       "ci95": [
+        0.2945,
+        0.3931
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "exact_match": {
+       "delta": 0.0033,
+       "ci95": [
+        -0.0657,
+        0.068
+       ],
+       "n": 300,
+       "clusters": 198
+      },
+      "f1": {
+       "delta": 0.0068,
+       "ci95": [
+        -0.063,
+        0.0705
+       ],
+       "n": 300,
+       "clusters": 198
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 217,
+      "parse": 83
+     },
+     "ledger": {
+      "ok": 658,
+      "parse": 83,
+      "ungrounded": 759
+     }
+    },
+    "elapsed_seconds": 104.97
+   }
+  ]
+ },
+ {
+  "model": "granite-4.0-micro",
+  "gpu": "NVIDIA L40S",
+  "timings": {
+   "weights_s": 41.1,
+   "ready_s": 146.1,
+   "total_s": 406.0
+  },
+  "runs": [
+   {
+    "run_id": "fa3ba6990c1940d09b9f22e234c34fda",
+    "benchmark": "finqa",
+    "brief": "finqa/dev n=300 model=granite-4.0-micro raw:official_accuracy=0.2033 [0.1543, 0.2562] ledger:official_accuracy=0.5767 [0.5154, 0.6327] ledger-minus-raw=0.3733 [0.2987, 0.4404]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9833,
+       "ci95": [
+        0.9673,
+        0.9967
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.48,
+       "ci95": [
+        0.4143,
+        0.5448
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.2033,
+       "ci95": [
+        0.1543,
+        0.2562
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.27,
+       "ci95": [
+        0.2136,
+        0.329
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.91,
+       "ci95": [
+        0.8776,
+        0.9406
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.6233,
+       "ci95": [
+        0.5677,
+        0.6776
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.5767,
+       "ci95": [
+        0.5154,
+        0.6327
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.58,
+       "ci95": [
+        0.5184,
+        0.6358
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.3733,
+       "ci95": [
+        0.2987,
+        0.4404
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "tolerant_accuracy": {
+       "delta": 0.31,
+       "ci95": [
+        0.231,
+        0.3806
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "lenient_accuracy": {
+       "delta": 0.1433,
+       "ci95": [
+        0.0721,
+        0.2098
+       ],
+       "n": 300,
+       "clusters": 159
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 295,
+      "parse": 5
+     },
+     "ledger": {
+      "execution": 5,
+      "ok": 1210,
+      "parse": 150,
+      "ungrounded": 135
+     }
+    },
+    "elapsed_seconds": 105.23
+   },
+   {
+    "run_id": "e2a2e4b8b5ba4e89a54b00af353b19c4",
+    "benchmark": "convfinqa",
+    "brief": "convfinqa/dev n=300 model=granite-4.0-micro raw:official_accuracy=0.5067 [0.4536, 0.5607] ledger:official_accuracy=0.51 [0.4557, 0.5658] ledger-minus-raw=0.0033 [-0.0583, 0.0612]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9933,
+       "ci95": [
+        0.9829,
+        1.0
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.65,
+       "ci95": [
+        0.5961,
+        0.7049
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.5067,
+       "ci95": [
+        0.4536,
+        0.5607
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.5467,
+       "ci95": [
+        0.4946,
+        0.6026
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.73,
+       "ci95": [
+        0.6805,
+        0.7754
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.5333,
+       "ci95": [
+        0.4797,
+        0.5887
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.51,
+       "ci95": [
+        0.4557,
+        0.5658
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.51,
+       "ci95": [
+        0.4557,
+        0.5658
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.0033,
+       "ci95": [
+        -0.0583,
+        0.0612
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "tolerant_accuracy": {
+       "delta": -0.0367,
+       "ci95": [
+        -0.0972,
+        0.0201
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "lenient_accuracy": {
+       "delta": -0.1167,
+       "ci95": [
+        -0.1772,
+        -0.0615
+       ],
+       "n": 300,
+       "clusters": 131
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 298,
+      "parse": 2
+     },
+     "ledger": {
+      "execution": 14,
+      "ok": 817,
+      "parse": 454,
+      "ungrounded": 215
+     }
+    },
+    "elapsed_seconds": 61.2
+   },
+   {
+    "run_id": "5aad2e9e66a5431f9227e52ab5f6c164",
+    "benchmark": "tatqa",
+    "brief": "tatqa/dev n=300 model=granite-4.0-micro raw:exact_match=0.3067 [0.2551, 0.3574] ledger:exact_match=0.4967 [0.4369, 0.5548] ledger-minus-raw=0.19 [0.1174, 0.2589]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 1.0,
+       "ci95": [
+        1.0,
+        1.0
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.3067,
+       "ci95": [
+        0.2551,
+        0.3574
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.4325,
+       "ci95": [
+        0.3788,
+        0.4858
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9033,
+       "ci95": [
+        0.8667,
+        0.9381
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.4967,
+       "ci95": [
+        0.4369,
+        0.5548
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.5688,
+       "ci95": [
+        0.5136,
+        0.6234
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "exact_match": {
+       "delta": 0.19,
+       "ci95": [
+        0.1174,
+        0.2589
+       ],
+       "n": 300,
+       "clusters": 198
+      },
+      "f1": {
+       "delta": 0.1363,
+       "ci95": [
+        0.0714,
+        0.2013
+       ],
+       "n": 300,
+       "clusters": 198
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 300
+     },
+     "ledger": {
+      "ok": 1103,
+      "parse": 268,
+      "ungrounded": 129
+     }
+    },
+    "elapsed_seconds": 84.53
+   }
+  ]
+ },
+ {
+  "model": "olmo-3-7b",
+  "error": "RuntimeError",
+  "detail": "vLLM exited during startup with code 1"
+ },
+ {
+  "model": "qwen3.5-9b",
+  "gpu": "NVIDIA L40S",
+  "timings": {
+   "weights_s": 90.7,
+   "ready_s": 231.8,
+   "total_s": 978.9
+  },
+  "runs": [
+   {
+    "run_id": "446571b9e99e425598d33feab9e1ec05",
+    "benchmark": "finqa",
+    "brief": "finqa/dev n=300 model=qwen3.5-9b raw:official_accuracy=0.2567 [0.2068, 0.3109] ledger:official_accuracy=0.6167 [0.5591, 0.6709] ledger-minus-raw=0.36 [0.2932, 0.4241]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9533,
+       "ci95": [
+        0.9278,
+        0.9759
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.71,
+       "ci95": [
+        0.6475,
+        0.7669
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.2567,
+       "ci95": [
+        0.2068,
+        0.3109
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.3933,
+       "ci95": [
+        0.3366,
+        0.4504
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9767,
+       "ci95": [
+        0.9586,
+        0.9906
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.6633,
+       "ci95": [
+        0.609,
+        0.7153
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.6167,
+       "ci95": [
+        0.5591,
+        0.6709
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.6167,
+       "ci95": [
+        0.5591,
+        0.6709
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.36,
+       "ci95": [
+        0.2932,
+        0.4241
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "tolerant_accuracy": {
+       "delta": 0.2233,
+       "ci95": [
+        0.1551,
+        0.291
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "lenient_accuracy": {
+       "delta": -0.0467,
+       "ci95": [
+        -0.104,
+        0.0124
+       ],
+       "n": 300,
+       "clusters": 159
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 286,
+      "parse": 3,
+      "provider": 11
+     },
+     "ledger": {
+      "execution": 12,
+      "ok": 1382,
+      "parse": 46,
+      "provider": 5,
+      "ungrounded": 55
+     }
+    },
+    "elapsed_seconds": 289.76
+   },
+   {
+    "run_id": "982ae442a53c49969f8070109802af1d",
+    "benchmark": "convfinqa",
+    "brief": "convfinqa/dev n=300 model=qwen3.5-9b raw:official_accuracy=0.6067 [0.5574, 0.6562] ledger:official_accuracy=0.6433 [0.5897, 0.6965] ledger-minus-raw=0.0367 [-0.0195, 0.0949]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9667,
+       "ci95": [
+        0.9452,
+        0.9849
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.8033,
+       "ci95": [
+        0.7569,
+        0.8497
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.6067,
+       "ci95": [
+        0.5574,
+        0.6562
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.67,
+       "ci95": [
+        0.6242,
+        0.7171
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.8533,
+       "ci95": [
+        0.8173,
+        0.8889
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.6833,
+       "ci95": [
+        0.6299,
+        0.7383
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.6433,
+       "ci95": [
+        0.5897,
+        0.6965
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.6433,
+       "ci95": [
+        0.5897,
+        0.6965
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.0367,
+       "ci95": [
+        -0.0195,
+        0.0949
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "tolerant_accuracy": {
+       "delta": -0.0267,
+       "ci95": [
+        -0.0855,
+        0.0288
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "lenient_accuracy": {
+       "delta": -0.12,
+       "ci95": [
+        -0.1797,
+        -0.0604
+       ],
+       "n": 300,
+       "clusters": 131
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 290,
+      "parse": 4,
+      "provider": 6
+     },
+     "ledger": {
+      "execution": 1,
+      "ok": 1140,
+      "parse": 81,
+      "ungrounded": 278
+     }
+    },
+    "elapsed_seconds": 264.2
+   },
+   {
+    "run_id": "14ffab1e2a9c4e3d9954e59534b0d7d9",
+    "benchmark": "tatqa",
+    "brief": "tatqa/dev n=300 model=qwen3.5-9b raw:exact_match=0.47 [0.413, 0.5287] ledger:exact_match=0.7033 [0.6465, 0.7612] ledger-minus-raw=0.2333 [0.1733, 0.2945]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9967,
+       "ci95": [
+        0.9892,
+        1.0
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.47,
+       "ci95": [
+        0.413,
+        0.5287
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.5806,
+       "ci95": [
+        0.5281,
+        0.6363
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9967,
+       "ci95": [
+        0.9892,
+        1.0
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.7033,
+       "ci95": [
+        0.6465,
+        0.7612
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.7823,
+       "ci95": [
+        0.7352,
+        0.831
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "exact_match": {
+       "delta": 0.2333,
+       "ci95": [
+        0.1733,
+        0.2945
+       ],
+       "n": 300,
+       "clusters": 198
+      },
+      "f1": {
+       "delta": 0.2017,
+       "ci95": [
+        0.1461,
+        0.2558
+       ],
+       "n": 300,
+       "clusters": 198
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 299,
+      "provider": 1
+     },
+     "ledger": {
+      "execution": 1,
+      "ok": 1443,
+      "parse": 18,
+      "type": 8,
+      "ungrounded": 30
+     }
+    },
+    "elapsed_seconds": 183.9
+   }
+  ]
+ },
+ {
+  "model": "qwen3.6-35b-a3b-fp8",
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "timings": {
+   "weights_s": 167.8,
+   "ready_s": 741.9,
+   "total_s": 1171.2
+  },
+  "runs": [
+   {
+    "run_id": "292d4334a42140cd9a74d4b22a184a52",
+    "benchmark": "finqa",
+    "brief": "finqa/dev n=300 model=qwen3.6-35b-a3b-fp8 raw:official_accuracy=0.29 [0.2336, 0.3494] ledger:official_accuracy=0.7433 [0.6867, 0.7986] ledger-minus-raw=0.4533 [0.3846, 0.5224]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.97,
+       "ci95": [
+        0.9503,
+        0.9867
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.72,
+       "ci95": [
+        0.6643,
+        0.7738
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.29,
+       "ci95": [
+        0.2336,
+        0.3494
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.5833,
+       "ci95": [
+        0.5281,
+        0.64
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9767,
+       "ci95": [
+        0.9561,
+        0.9934
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.78,
+       "ci95": [
+        0.727,
+        0.8305
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.7433,
+       "ci95": [
+        0.6867,
+        0.7986
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.7433,
+       "ci95": [
+        0.6867,
+        0.7986
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.4533,
+       "ci95": [
+        0.3846,
+        0.5224
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "tolerant_accuracy": {
+       "delta": 0.16,
+       "ci95": [
+        0.1053,
+        0.2143
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "lenient_accuracy": {
+       "delta": 0.06,
+       "ci95": [
+        0.0168,
+        0.1036
+       ],
+       "n": 300,
+       "clusters": 159
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 291,
+      "parse": 9
+     },
+     "ledger": {
+      "execution": 6,
+      "ok": 1436,
+      "parse": 28,
+      "ungrounded": 30
+     }
+    },
+    "elapsed_seconds": 180.52
+   },
+   {
+    "run_id": "da4d21bbddc14429aeae3488a1ee1e2e",
+    "benchmark": "convfinqa",
+    "brief": "convfinqa/dev n=300 model=qwen3.6-35b-a3b-fp8 raw:official_accuracy=0.6167 [0.5607, 0.6701] ledger:official_accuracy=0.7067 [0.6589, 0.7548] ledger-minus-raw=0.09 [0.0349, 0.1453]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9867,
+       "ci95": [
+        0.9732,
+        0.9968
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.8067,
+       "ci95": [
+        0.7603,
+        0.852
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.6167,
+       "ci95": [
+        0.5607,
+        0.6701
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.77,
+       "ci95": [
+        0.7201,
+        0.8188
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.8367,
+       "ci95": [
+        0.7963,
+        0.8746
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.7367,
+       "ci95": [
+        0.6898,
+        0.7825
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.7067,
+       "ci95": [
+        0.6589,
+        0.7548
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.7067,
+       "ci95": [
+        0.6589,
+        0.7548
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.09,
+       "ci95": [
+        0.0349,
+        0.1453
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "tolerant_accuracy": {
+       "delta": -0.0633,
+       "ci95": [
+        -0.1163,
+        -0.0141
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "lenient_accuracy": {
+       "delta": -0.07,
+       "ci95": [
+        -0.1184,
+        -0.0208
+       ],
+       "n": 300,
+       "clusters": 131
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 296,
+      "parse": 4
+     },
+     "ledger": {
+      "ok": 1170,
+      "parse": 40,
+      "ungrounded": 290
+     }
+    },
+    "elapsed_seconds": 156.27
+   },
+   {
+    "run_id": "f20aa3ed17ad414fbeac25d2d244c178",
+    "benchmark": "tatqa",
+    "brief": "tatqa/dev n=300 model=qwen3.6-35b-a3b-fp8 raw:exact_match=0.4433 [0.3844, 0.5034] ledger:exact_match=0.7767 [0.7203, 0.829] ledger-minus-raw=0.3333 [0.2658, 0.402]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9933,
+       "ci95": [
+        0.9831,
+        1.0
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.4433,
+       "ci95": [
+        0.3844,
+        0.5034
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.5401,
+       "ci95": [
+        0.484,
+        0.5944
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9867,
+       "ci95": [
+        0.9723,
+        0.9969
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.7767,
+       "ci95": [
+        0.7203,
+        0.829
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.8347,
+       "ci95": [
+        0.7872,
+        0.8778
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "exact_match": {
+       "delta": 0.3333,
+       "ci95": [
+        0.2658,
+        0.402
+       ],
+       "n": 300,
+       "clusters": 198
+      },
+      "f1": {
+       "delta": 0.2946,
+       "ci95": [
+        0.2309,
+        0.3596
+       ],
+       "n": 300,
+       "clusters": 198
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 298,
+      "parse": 2
+     },
+     "ledger": {
+      "ok": 1384,
+      "parse": 89,
+      "type": 11,
+      "ungrounded": 16
+     }
+    },
+    "elapsed_seconds": 81.74
+   }
+  ]
+ },
+ {
+  "model": "gpt-oss-20b",
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "timings": {
+   "weights_s": 142.9,
+   "ready_s": 365.1,
+   "total_s": 525.7
+  },
+  "runs": [
+   {
+    "run_id": "f4d8de4fc1d64d5b8d8a1de91398c5f1",
+    "benchmark": "finqa",
+    "brief": "finqa/dev n=300 model=gpt-oss-20b raw:official_accuracy=0.2833 [0.2297, 0.3393] ledger:official_accuracy=0.7067 [0.646, 0.7633] ledger-minus-raw=0.4233 [0.3526, 0.4872]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.97,
+       "ci95": [
+        0.949,
+        0.9868
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.5967,
+       "ci95": [
+        0.5347,
+        0.6585
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.2833,
+       "ci95": [
+        0.2297,
+        0.3393
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.5733,
+       "ci95": [
+        0.5116,
+        0.6354
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9567,
+       "ci95": [
+        0.9318,
+        0.9797
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.7333,
+       "ci95": [
+        0.6744,
+        0.7875
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.7067,
+       "ci95": [
+        0.646,
+        0.7633
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.71,
+       "ci95": [
+        0.6498,
+        0.7647
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.4233,
+       "ci95": [
+        0.3526,
+        0.4872
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "tolerant_accuracy": {
+       "delta": 0.1367,
+       "ci95": [
+        0.0811,
+        0.1895
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "lenient_accuracy": {
+       "delta": 0.1367,
+       "ci95": [
+        0.0828,
+        0.1881
+       ],
+       "n": 300,
+       "clusters": 159
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 291,
+      "parse": 9
+     },
+     "ledger": {
+      "ok": 1371,
+      "parse": 48,
+      "ungrounded": 81
+     }
+    },
+    "elapsed_seconds": 78.73
+   },
+   {
+    "run_id": "cf67785873044ee9a96264965e163849",
+    "benchmark": "convfinqa",
+    "brief": "convfinqa/dev n=300 model=gpt-oss-20b raw:official_accuracy=0.6067 [0.551, 0.6615] ledger:official_accuracy=0.77 [0.7194, 0.8213] ledger-minus-raw=0.1633 [0.1133, 0.2168]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.98,
+       "ci95": [
+        0.9627,
+        0.9935
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.7633,
+       "ci95": [
+        0.7118,
+        0.8148
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.6067,
+       "ci95": [
+        0.551,
+        0.6615
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.73,
+       "ci95": [
+        0.6772,
+        0.7831
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9,
+       "ci95": [
+        0.866,
+        0.9308
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.7867,
+       "ci95": [
+        0.7384,
+        0.8367
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.77,
+       "ci95": [
+        0.7194,
+        0.8213
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.77,
+       "ci95": [
+        0.7194,
+        0.8213
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.1633,
+       "ci95": [
+        0.1133,
+        0.2168
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "tolerant_accuracy": {
+       "delta": 0.04,
+       "ci95": [
+        -0.0063,
+        0.0839
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "lenient_accuracy": {
+       "delta": 0.0233,
+       "ci95": [
+        -0.0199,
+        0.0654
+       ],
+       "n": 300,
+       "clusters": 131
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 294,
+      "parse": 6
+     },
+     "ledger": {
+      "ok": 1235,
+      "parse": 34,
+      "ungrounded": 231
+     }
+    },
+    "elapsed_seconds": 37.21
+   },
+   {
+    "run_id": "d19924111c3245cfa7ed4bfd88b395ff",
+    "benchmark": "tatqa",
+    "brief": "tatqa/dev n=300 model=gpt-oss-20b raw:exact_match=0.1267 [0.0912, 0.1656] ledger:exact_match=0.7167 [0.6635, 0.7703] ledger-minus-raw=0.59 [0.5281, 0.6498]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9967,
+       "ci95": [
+        0.9899,
+        1.0
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.1267,
+       "ci95": [
+        0.0912,
+        0.1656
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.288,
+       "ci95": [
+        0.2441,
+        0.3339
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9933,
+       "ci95": [
+        0.9831,
+        1.0
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.7167,
+       "ci95": [
+        0.6635,
+        0.7703
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.8002,
+       "ci95": [
+        0.7503,
+        0.8499
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "exact_match": {
+       "delta": 0.59,
+       "ci95": [
+        0.5281,
+        0.6498
+       ],
+       "n": 300,
+       "clusters": 198
+      },
+      "f1": {
+       "delta": 0.5122,
+       "ci95": [
+        0.4545,
+        0.5733
+       ],
+       "n": 300,
+       "clusters": 198
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 299,
+      "parse": 1
+     },
+     "ledger": {
+      "ok": 1417,
+      "parse": 13,
+      "ungrounded": 70
+     }
+    },
+    "elapsed_seconds": 24.88
+   }
+  ]
+ },
+ {
+  "model": "qwen3.8-27b-fp8",
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "timings": {
+   "weights_s": 140.3,
+   "ready_s": 624.9,
+   "total_s": 1210.3
+  },
+  "runs": [
+   {
+    "run_id": "0c696296294d4d40a7e9110426f4f814",
+    "benchmark": "finqa",
+    "brief": "finqa/dev n=300 model=qwen3.8-27b-fp8 raw:official_accuracy=0.3167 [0.2602, 0.3772] ledger:official_accuracy=0.76 [0.6974, 0.8159] ledger-minus-raw=0.4433 [0.375, 0.5071]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9467,
+       "ci95": [
+        0.9221,
+        0.969
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.7067,
+       "ci95": [
+        0.6471,
+        0.7627
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.3167,
+       "ci95": [
+        0.2602,
+        0.3772
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.6833,
+       "ci95": [
+        0.6228,
+        0.739
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9967,
+       "ci95": [
+        0.9893,
+        1.0
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.79,
+       "ci95": [
+        0.7312,
+        0.8423
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.76,
+       "ci95": [
+        0.6974,
+        0.8159
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.76,
+       "ci95": [
+        0.6974,
+        0.8159
+       ],
+       "n": 300,
+       "clusters": 159,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.4433,
+       "ci95": [
+        0.375,
+        0.5071
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "tolerant_accuracy": {
+       "delta": 0.0767,
+       "ci95": [
+        0.0252,
+        0.125
+       ],
+       "n": 300,
+       "clusters": 159
+      },
+      "lenient_accuracy": {
+       "delta": 0.0833,
+       "ci95": [
+        0.0375,
+        0.1254
+       ],
+       "n": 300,
+       "clusters": 159
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 284,
+      "parse": 4,
+      "provider": 12
+     },
+     "ledger": {
+      "execution": 5,
+      "ok": 1463,
+      "parse": 15,
+      "ungrounded": 17
+     }
+    },
+    "elapsed_seconds": 219.67
+   },
+   {
+    "run_id": "f4b3d793395a43648a5a95785d735e01",
+    "benchmark": "convfinqa",
+    "brief": "convfinqa/dev n=300 model=qwen3.8-27b-fp8 raw:official_accuracy=0.6633 [0.6122, 0.7119] ledger:official_accuracy=0.6867 [0.6382, 0.7352] ledger-minus-raw=0.0233 [-0.037, 0.083]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.97,
+       "ci95": [
+        0.9493,
+        0.9871
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.85,
+       "ci95": [
+        0.809,
+        0.8889
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.6633,
+       "ci95": [
+        0.6122,
+        0.7119
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.83,
+       "ci95": [
+        0.7829,
+        0.8733
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.82,
+       "ci95": [
+        0.777,
+        0.8625
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "lenient_accuracy": {
+       "mean": 0.7233,
+       "ci95": [
+        0.675,
+        0.7705
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "official_accuracy": {
+       "mean": 0.6867,
+       "ci95": [
+        0.6382,
+        0.7352
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      },
+      "tolerant_accuracy": {
+       "mean": 0.6867,
+       "ci95": [
+        0.6382,
+        0.7352
+       ],
+       "n": 300,
+       "clusters": 131,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "official_accuracy": {
+       "delta": 0.0233,
+       "ci95": [
+        -0.037,
+        0.083
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "tolerant_accuracy": {
+       "delta": -0.1433,
+       "ci95": [
+        -0.1988,
+        -0.0921
+       ],
+       "n": 300,
+       "clusters": 131
+      },
+      "lenient_accuracy": {
+       "delta": -0.1267,
+       "ci95": [
+        -0.1789,
+        -0.0786
+       ],
+       "n": 300,
+       "clusters": 131
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 291,
+      "parse": 4,
+      "provider": 5
+     },
+     "ledger": {
+      "ok": 1136,
+      "parse": 48,
+      "ungrounded": 316
+     }
+    },
+    "elapsed_seconds": 193.54
+   },
+   {
+    "run_id": "df644a4a241f4b55b35a25c1a82d4872",
+    "benchmark": "tatqa",
+    "brief": "tatqa/dev n=300 model=qwen3.8-27b-fp8 raw:exact_match=0.5933 [0.5331, 0.6532] ledger:exact_match=0.8067 [0.757, 0.853] ledger-minus-raw=0.2133 [0.1579, 0.2763]",
+    "arms": {
+     "raw": {
+      "answered": {
+       "mean": 0.9967,
+       "ci95": [
+        0.9895,
+        1.0
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.5933,
+       "ci95": [
+        0.5331,
+        0.6532
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.6789,
+       "ci95": [
+        0.6223,
+        0.7313
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     },
+     "ledger": {
+      "answered": {
+       "mean": 0.9967,
+       "ci95": [
+        0.9895,
+        1.0
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "exact_match": {
+       "mean": 0.8067,
+       "ci95": [
+        0.757,
+        0.853
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      },
+      "f1": {
+       "mean": 0.8725,
+       "ci95": [
+        0.8335,
+        0.9095
+       ],
+       "n": 300,
+       "clusters": 198,
+       "ineligible": 0
+      }
+     }
+    },
+    "paired": {
+     "ledger-minus-raw": {
+      "exact_match": {
+       "delta": 0.2133,
+       "ci95": [
+        0.1579,
+        0.2763
+       ],
+       "n": 300,
+       "clusters": 198
+      },
+      "f1": {
+       "delta": 0.1936,
+       "ci95": [
+        0.1441,
+        0.2493
+       ],
+       "n": 300,
+       "clusters": 198
+      }
+     }
+    },
+    "outcomes": {
+     "raw": {
+      "ok": 299,
+      "parse": 1
+     },
+     "ledger": {
+      "ok": 1487,
+      "parse": 1,
+      "ungrounded": 12
+     }
+    },
+    "elapsed_seconds": 160.11
+   }
+  ]
+ }
+]
