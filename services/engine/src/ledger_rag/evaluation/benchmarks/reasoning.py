@@ -161,6 +161,65 @@ def finqa_exemplars(directory: Path) -> list[Exemplar]:
     ]
 
 
+def retrieved_contexts(path: Path) -> dict[str, Any]:
+    """The ``contexts`` block of a saved retrieval report (``finqa_answers`` contexts)."""
+    report: dict[str, Any] = json.loads(path.read_text())
+    block: dict[str, Any] = report.get("contexts", report)
+    contexts: dict[str, Any] = block.get("contexts", block)
+    if "hits" not in contexts:
+        raise ValueError(f"{path} holds no retrieval hits")
+    contexts["lineage"] = block.get("lineage", {})
+    return contexts
+
+
+def markdown_rows(text: str) -> list[list[str]]:
+    """Table rows rendered as Markdown inside a chunk (``| a | b |``), separators dropped."""
+    rows = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not (stripped.startswith("|") and stripped.endswith("|")):
+            continue
+        cells = [cell.strip() for cell in stripped[1:-1].split("|")]
+        if all(set(cell) <= set("-: ") for cell in cells):
+            continue
+        rows.append(cells)
+    return rows
+
+
+def finqa_retrieved_items(directory: Path, split: str, path: Path) -> list[Item]:
+    """FinQA questions answered from saved top-k retrieved chunks, not the gold page."""
+    from ledger_rag.evaluation.benchmarks import finqa as finqa_bench  # Corpus rebuild.
+
+    contexts = retrieved_contexts(path)
+    corpus, _ = finqa_bench.load(directory, split)
+    expected = contexts["lineage"].get("corpus_sha256")
+    if expected and expected != finqa_bench.corpus_sha256(corpus):
+        raise ValueError("saved contexts were retrieved from a different FinQA corpus")
+    items = []
+    for item in finqa_items(directory, split):
+        rows = contexts["hits"].get(item.problem.id)
+        if rows is None:
+            raise ValueError(f"saved contexts do not cover {item.problem.id}")
+        passages, table = [], []
+        for document_id, chunk_id, _score in rows:
+            chunk = corpus.evidence(document_id).by_id.get(chunk_id)
+            if chunk is None:
+                raise ValueError(f"chunk {chunk_id} is not in the rebuilt corpus")
+            passages.append(f"{chunk.title}\n{chunk.text}")
+            table.extend(markdown_rows(chunk.text))  # Table functions run on retrieved rows.
+        problem = Problem(
+            id=item.problem.id,
+            question=item.problem.question,
+            pre_text=[],
+            post_text=[],
+            table=table,
+            group=item.problem.group,
+            passages=tuple(passages),
+        )
+        items.append(dataclasses.replace(item, problem=problem))
+    return items
+
+
 # --- ConvFinQA -----------------------------------------------------------------------
 
 
@@ -578,6 +637,18 @@ def first_round(row: dict[str, Any], item: Item, benchmark: Benchmark) -> dict[s
     }
 
 
+def retrieval_lineage(path: Path) -> dict[str, Any]:
+    contexts = retrieved_contexts(path)
+    return {
+        "contexts_sha256": sha256_file(path),
+        "arm": contexts.get("answer_retrieval"),
+        "scope": contexts.get("scope"),
+        "top_k": contexts.get("top_k"),
+        "collection": contexts["lineage"].get("collection"),
+        "corpus_sha256": contexts["lineage"].get("corpus_sha256"),
+    }
+
+
 def git_commit() -> str | None:
     try:
         out = subprocess.run(
@@ -618,7 +689,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     benchmark = BENCHMARKS[args.benchmark]
     directory: Path = args.data_dir or Path("data") / benchmark.name
     verify(directory, benchmark.name)  # Pinned SHA-256 of every artifact, before anything.
-    available = benchmark.items(directory, args.split)
+    if args.contexts:
+        available = finqa_retrieved_items(directory, args.split, args.contexts)
+    else:
+        available = benchmark.items(directory, args.split)
     items = select(available, args.limit, args.seed)
     arms = [pipeline(name, args.samples, args.exemplars) for name in args.pipelines]
     needs_index = any(arm.exemplars for arm in arms)
@@ -683,7 +757,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     tasks = {arm.name: benchmark.ledger_task if arm.ledger else benchmark.raw_task for arm in arms}
     return {
         "benchmark": benchmark.name,
-        "setting": "gold-evidence",
+        "setting": "retrieved" if args.contexts else "gold-evidence",
+        "retrieval": retrieval_lineage(args.contexts) if args.contexts else None,
         "split": args.split,
         "questions": len(items),
         "available": len(available),
@@ -749,6 +824,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--samples", type=int, default=5, help="Ledger self-consistency samples")
     parser.add_argument("--sample-temperature", type=float, default=0.7)
     parser.add_argument("--exemplars", type=int, default=4, help="Ledger dynamic exemplars")
+    parser.add_argument(
+        "--contexts",
+        type=Path,
+        default=None,
+        help="FinQA only: saved retrieval contexts; answer from retrieved chunks, not the page",
+    )
     parser.add_argument("--model", default="", help="Registry id in config/models")
     parser.add_argument("--models-dir", type=Path, default=models.MODELS_DIR)
     parser.add_argument("--model-spec", default="", help="A ModelSpec manifest JSON file")
@@ -773,6 +854,8 @@ def build_parser() -> argparse.ArgumentParser:
 def validate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if args.split == "test" and not args.unseal_test:
         parser.error("the test split is sealed; pass --unseal-test only with a dev-frozen config")
+    if args.contexts and args.benchmark != "finqa":
+        parser.error("--contexts applies to FinQA only")
     if args.benchmark == "convfinqa" and args.split == "test":
         parser.error("ConvFinQA test answers are private; report dev")
     if args.split == "train" and args.exemplars and "ledger" in args.pipelines:

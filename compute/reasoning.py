@@ -110,6 +110,9 @@ def benchmark_argv(
         argv += ["--limit", str(int(options["limit"]))]
     if options.get("debug_replies"):
         argv += ["--debug-replies", str(int(options["debug_replies"]))]
+    if options.get("contexts"):
+        # Saved retrieval contexts on the ledger-data volume (FinQA retrieved setting).
+        argv += ["--contexts", str(DATA / str(options["contexts"]))]
     return argv
 
 
@@ -263,6 +266,7 @@ def main(
     debug_replies: int = 0,
     split: str = "dev",
     unseal_test: bool = False,
+    contexts: str = "",
     output: str = "",
 ) -> None:
     from ledger_rag.evaluation.models import load
@@ -287,7 +291,10 @@ def main(
         "debug_replies": debug_replies,
         "split": split,
         "unseal_test": unseal_test,
+        "contexts": contexts or None,
     }
+    if contexts and chosen != ["finqa"]:
+        raise SystemExit("--contexts applies to --benchmarks finqa only")
     if split not in {"dev", "test"} or (split == "test" and not unseal_test):
         raise SystemExit("use --split dev, or --split test with --unseal-test (frozen config)")
     calls = [run.with_options(gpu=spec.gpu).spawn(spec.manifest(), options) for spec in specs]

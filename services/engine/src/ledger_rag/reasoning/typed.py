@@ -119,7 +119,8 @@ class TypedAnswerTask:
                 return Candidate(None, None, "parse")
             return Candidate(None, outcome(kind, [answer], scale), "ok")
         spans = [part.strip().strip("\"'") for part in answer.split("|") if part.strip()]
-        haystack = normalize(" ".join([*problem.pre_text, *problem.post_text, *_cells(problem)]))
+        texts = [*problem.passages, *problem.pre_text, *problem.post_text, *_cells(problem)]
+        haystack = normalize(" ".join(texts))
         if not spans or any(normalize(span) not in haystack for span in spans):
             return Candidate(None, None, "ungrounded")
         return Candidate(None, outcome(kind, spans, scale), "ok")

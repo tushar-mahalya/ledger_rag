@@ -78,6 +78,8 @@ class Problem:
     """Exemplars from the same group (report page) are excluded."""
     history: Sequence[tuple[str, str]] = ()
     """Earlier (question, answer) turns of a conversation, oldest first."""
+    passages: Sequence[str] = ()
+    """Retrieved evidence passages, in rank order (open-corpus setting)."""
 
 
 @dataclass(frozen=True)
@@ -108,8 +110,10 @@ def _sentences(texts: Sequence[str]) -> str:
 
 def render_page(problem: Problem) -> str:
     parts = [
+        "\n\n".join(f"[{i}] {passage}" for i, passage in enumerate(problem.passages, 1)),
         _sentences(problem.pre_text),
-        render_table(problem.table),
+        # Retrieved passages already show their tables; rows are kept only for execution.
+        "" if problem.passages else render_table(problem.table),
         _sentences(problem.post_text),
     ]
     return "\n\n".join(part for part in parts if part)
@@ -285,7 +289,9 @@ class Solver:
         prompt = messages(problem, shots, self.task.system_prompt)
         earlier = [f"{question} {answer}" for question, answer in problem.history]
         evidence = Evidence.build(
-            [*problem.pre_text, *problem.post_text, *earlier], problem.table, problem.question
+            [*problem.passages, *problem.pre_text, *problem.post_text, *earlier],
+            problem.table,
+            problem.question,
         )
         first = await self._round(prompt, self.samples, problem, evidence)
         candidates = [candidate for candidate, _ in first]
