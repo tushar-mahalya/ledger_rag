@@ -89,10 +89,15 @@ Technique evidence that shaped the design:
 
 | Phase | Allocation | Gate to proceed |
 |---|---:|---|
-| Dev measurements of the reasoning core (4B, 9B, 27B readers) | ~$4 | Pipeline bugs fixed on a 50-question pilot first |
-| Small-model specialization (SFT on train programs; optional execution-reward RL) | ~$10 | Dev gain from prompting alone measured first |
-| Frozen held-out test runs (FinQA test, TAT-QA test) | ~$4 | Configuration frozen on dev |
-| Contingency | ~$7 | — |
+| Multi-model raw-vs-Ledger dev matrices (8 models × 3 benchmarks) | ~$9 | Pipeline bugs fixed on 50/100-question pilots first |
+| Open-corpus (retrieved evidence) FinQA and ablations | ~$3 | Gold-evidence results analyzed first |
+| Frozen held-out test runs (FinQA test, TAT-QA test) | ~$3 | Configuration frozen on dev |
+| Contingency, then optional small-model SFT | ~$10 | Backend gains measured first; SFT changes the model, not the backend |
+
+Reallocated after the user asked that the backend, not a tuned model, carry the
+result: comparing many models raw versus Ledger now takes precedence over
+fine-tuning one. Spend is tracked per run (GPU seconds x list rates) in
+[Evaluation](../EVALUATION.md#raw-model-vs-ledger-backend-program-of-thought-reasoning-2026-11-09).
 
 Every run records GPU, timings and its report under `ledger-data:/reasoning/`.
 List rates (2026-11-09): H100 $3.95/h, L40S $1.95/h, CPU $0.047/core-h,
