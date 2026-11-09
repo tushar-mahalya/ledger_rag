@@ -5,7 +5,10 @@ or one or more full reports from ``reasoning --output``. Each row is one model o
 one benchmark: the primary metric per arm with its 95% CI and the paired
 ``ledger-minus-raw`` delta. Only aggregate numbers are rendered.
 
-    python -m ledger_rag.evaluation.benchmarks.reasoning_table matrix.json [more.json]
+    python -m ledger_rag.evaluation.benchmarks.reasoning_table [--lenient] matrix.json [...]
+
+``--lenient`` scores FinQA-family arms with the percentage-tolerant comparison and
+TAT-QA with F1: the fairest view of free-text raw answers.
 """
 
 import json
@@ -15,6 +18,9 @@ from pathlib import Path
 from typing import Any
 
 PRIMARY = {"finqa": "official_accuracy", "convfinqa": "official_accuracy", "tatqa": "exact_match"}
+# The fairest comparison for free-text raw answers: percentage-tolerant matching and F1.
+LENIENT = {"finqa": "lenient_accuracy", "convfinqa": "lenient_accuracy", "tatqa": "f1"}
+ARMS = ("raw", "ledger", "ledger-refine")
 
 
 def _cell(metric: dict[str, Any] | None) -> str:
@@ -47,29 +53,35 @@ def _runs(payload: Any) -> Iterator[tuple[str, str, dict[str, Any], dict[str, An
             yield model, entry["benchmark"], arms, entry["paired"], entry["questions"]
 
 
-def table(payloads: Sequence[Any]) -> str:
+def table(payloads: Sequence[Any], *, lenient: bool = False) -> str:
+    chosen = LENIENT if lenient else PRIMARY
     rows = [
-        "| Model | Benchmark (metric) | n | Raw model | Ledger | Ledger − raw (paired) |",
-        "|---|---|---:|---|---|---|",
+        "| Model | Benchmark (metric) | n | Raw model | Ledger | Ledger + refine | "
+        "Ledger − raw (paired) | Ledger + refine − raw |",
+        "|---|---|---:|---|---|---|---|---|",
     ]
     for payload in payloads:
         for model, benchmark, arms, paired, n in _runs(payload):
-            metric = PRIMARY.get(benchmark, "")
-            delta = (paired.get("ledger-minus-raw") or {}).get(metric)
+            metric = chosen.get(benchmark, "")
+            cells = [_cell((arms.get(arm) or {}).get(metric)) for arm in ARMS]
+            deltas = [
+                _delta((paired.get(f"{arm}-minus-raw") or {}).get(metric)) for arm in ARMS[1:]
+            ]
             rows.append(
-                f"| {model} | {benchmark} ({metric}) | {n or '—'} | "
-                f"{_cell((arms.get('raw') or {}).get(metric))} | "
-                f"{_cell((arms.get('ledger') or {}).get(metric))} | {_delta(delta)} |"
+                f"| {model} | {benchmark} ({metric}) | {n or '—'} | {' | '.join(cells)} | "
+                f"{' | '.join(deltas)} |"
             )
     return "\n".join(rows)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     paths = list(argv if argv is not None else sys.argv[1:])
+    lenient = "--lenient" in paths
+    paths = [path for path in paths if path != "--lenient"]
     if not paths:
         print(__doc__, file=sys.stderr)
         return 2
-    print(table([json.loads(Path(path).read_text()) for path in paths]))
+    print(table([json.loads(Path(path).read_text()) for path in paths], lenient=lenient))
     return 0
 
 

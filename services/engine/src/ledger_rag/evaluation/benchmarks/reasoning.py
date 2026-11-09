@@ -563,6 +563,21 @@ def paired(
     return out
 
 
+def first_round(row: dict[str, Any], item: Item, benchmark: Benchmark) -> dict[str, Any]:
+    """An arm's row as it was before refinement: the vote over its first-round samples."""
+    decision = decide([Candidate(None, value) for value in row["sample_values"]])
+    return {
+        **row,
+        "value": decision.value,
+        "votes": decision.votes,
+        "valid": decision.valid,
+        "agreement": round(decision.agreement, 4),
+        "refined_reasons": [],
+        "metrics": benchmark.metrics(decision.value, item.gold),
+        "derived_from": "first round of the refinement arm",
+    }
+
+
 def git_commit() -> str | None:
     try:
         out = subprocess.run(
@@ -656,6 +671,15 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                         "replies": [{"reason": s.reason, "text": s.text} for s in invalid],
                     }
                 )
+    for arm in arms:
+        # Refinement only changes split votes, so the same first round also measures the
+        # plain ledger arm without paying for it twice.
+        base = arm.name.removesuffix("-refine")
+        if arm.refine_samples and base not in rows:
+            rows[base] = [
+                first_round(row, item, benchmark)
+                for row, item in zip(rows[arm.name], items, strict=True)
+            ]
     tasks = {arm.name: benchmark.ledger_task if arm.ledger else benchmark.raw_task for arm in arms}
     return {
         "benchmark": benchmark.name,
