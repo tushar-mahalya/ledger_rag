@@ -1,19 +1,24 @@
-"""Colocated reasoning benchmark: vLLM on loopback plus the benchmark, one GPU container.
+"""Raw model vs Ledger backend, for any registered model, on Modal GPUs.
 
-The container downloads pinned weights into a cached Volume, starts ``vllm serve`` on
-127.0.0.1 (no network exposure, so no key), fetches the pinned FinQA splits (SHA-256
-verified), runs :mod:`ledger_rag.evaluation.benchmarks.finqa_reasoning` against it,
-writes the report to ``ledger-data:/reasoning/<run_id>.json`` and exits. Nothing is
-deployed and the GPU is released when the function returns; ``timeout`` bounds the
-worst case. Cost is the container's GPU time, reported per run.
+One container per model: it downloads the pinned weights into a cached Volume,
+serves them with vLLM on 127.0.0.1 (no network exposure, so no key), fetches each
+benchmark's pinned data (SHA-256 verified) and runs every requested arm of
+:mod:`ledger_rag.evaluation.benchmarks.reasoning` against that one server: the raw
+model and the model inside the Ledger pipeline see identical questions under
+identical generation settings. Reports go to ``ledger-data:/reasoning/<run_id>.json``.
+Several models run in parallel containers; nothing is deployed, and ``timeout``
+bounds each container's cost.
 
-    ledgerctl modal -- run compute/reasoning.py --model qwen3.5-4b --limit 200 --samples 5
+    ledgerctl modal -- run compute/reasoning.py --models qwen3.5-4b,phi-4-mini \\
+        --benchmarks finqa,tatqa --limit 200
 
-Models are pinned by Hub commit in :data:`MODELS`; add new ones there, never by name only.
+Models come from ``config/models/<id>.toml`` (:mod:`ledger_rag.evaluation.models`);
+hosted models (Gemini, ...) are run locally with the same benchmark CLI instead.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -22,11 +27,10 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 import modal
 
-HERE = Path(__file__).resolve().parent
 VLLM_VERSION = "0.32.0"
 CUDA_IMAGE = "nvidia/cuda:13.0.2-devel-ubuntu24.04"
 HF_CACHE = "/root/.cache/huggingface"
@@ -34,82 +38,60 @@ VLLM_CACHE = "/root/.cache/vllm"
 DATA = Path("/data")
 PORT = 8000
 STARTUP_SECONDS = 20 * 60
-# Hard ceiling per container; with H100 at ~$3.95/h this caps a run near $3.30.
+# Hard ceiling per container: about $3.70 on an H100, $2.00 on an L40S at list rates.
 TIMEOUT_SECONDS = 50 * 60
+BENCHMARK_CHOICES = ("finqa", "convfinqa", "tatqa")
 
 
-class Served(NamedTuple):
-    repo: str
-    revision: str
-    gpu: str
-    max_model_len: int = 16384
-    extra: tuple[str, ...] = ()
-
-
-MODELS: dict[str, Served] = {
-    # Small dense readers (Apache-2.0): the "less capable model" arms.
-    "qwen3.5-4b": Served("Qwen/Qwen3.5-4B", "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a", "L40S"),
-    "qwen3.5-9b": Served("Qwen/Qwen3.5-9B", "c202236235762e1c871ad0ccb60c8ee5ba337b9a", "L40S"),
-    # The reader of the 2026-11-01 baseline (docs/EVALUATION.md).
-    "qwen3.8-27b-fp8": Served(
-        "Qwen/Qwen3.8-27B-FP8",
-        "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
-        "H100!",
-        extra=("--kv-cache-dtype", "fp8"),
-    ),
-}
-
-
-def vllm_argv(served: Served) -> list[str]:
-    """Loopback-only server; text model only, Qwen reasoning parser, prefix caching on."""
+def vllm_argv(spec: dict[str, Any]) -> list[str]:
+    """Loopback-only server for a registry spec, with prefix caching for shared prompts."""
     return [
         "vllm",
         "serve",
-        served.repo,
+        spec["served_name"],
         "--revision",
-        served.revision,
+        spec["revision"],
         "--tokenizer-revision",
-        served.revision,
+        spec["revision"],
         "--host",
         "127.0.0.1",
         "--port",
         str(PORT),
         "--max-model-len",
-        str(served.max_model_len),
+        str(spec["max_model_len"]),
         "--gpu-memory-utilization",
         "0.90",
         "--max-num-seqs",
         "256",
         "--enable-prefix-caching",
-        "--language-model-only",
-        "--reasoning-parser",
-        "qwen3",
         "--disable-uvicorn-access-log",
-        *served.extra,
+        *spec["vllm_args"],
     ]
 
 
-def benchmark_argv(options: dict[str, Any], served: Served, data_dir: Path) -> list[str]:
-    """Arguments for ``finqa_reasoning``; the test split is never reachable from here."""
+def benchmark_argv(
+    benchmark: str, options: dict[str, Any], spec_path: Path, data_dir: Path
+) -> list[str]:
+    """Arguments for the benchmark CLI; the test split is never reachable from here."""
     argv = [
+        "--benchmark",
+        benchmark,
         "--data-dir",
         str(data_dir),
         "--split",
         "dev",
         "--reader",
         "endpoint",
+        "--model-spec",
+        str(spec_path),
         "--llm-base-url",
         f"http://127.0.0.1:{PORT}/v1",
-        "--llm-model",
-        served.repo,
-        "--llm-endpoint-kind",
-        "self-hosted",
         "--llm-concurrency",
         str(int(options.get("concurrency", 128))),
-        "--llm-max-tokens",
-        str(int(options.get("max_tokens", 1024))),
+        "--pipelines",
+        ",".join(options.get("pipelines", ["raw", "ledger"])),
         "--samples",
-        str(int(options.get("samples", 1))),
+        str(int(options.get("samples", 5))),
         "--exemplars",
         str(int(options.get("exemplars", 4))),
         "--sample-temperature",
@@ -117,17 +99,12 @@ def benchmark_argv(options: dict[str, Any], served: Served, data_dir: Path) -> l
         "--seed",
         str(int(options.get("seed", 13))),
     ]
+    if options.get("mode"):
+        argv += ["--mode", str(options["mode"])]
     if options.get("limit"):
         argv += ["--limit", str(int(options["limit"]))]
     if options.get("debug_replies"):
         argv += ["--debug-replies", str(int(options["debug_replies"]))]
-    if options.get("benchmark"):
-        argv += ["--benchmark", str(options["benchmark"])]
-    thinking = options.get("thinking", "off")
-    kwargs = (
-        {"enable_thinking": False} if thinking == "off" else {"reasoning_effort": str(thinking)}
-    )
-    argv += ["--llm-extra-body", json.dumps({"chat_template_kwargs": kwargs})]
     return argv
 
 
@@ -135,6 +112,8 @@ image = (
     modal.Image.from_registry(CUDA_IMAGE, add_python="3.12")
     .entrypoint([])
     .uv_pip_install(f"vllm=={VLLM_VERSION}")
+    # The official TAT-QA scorer (ledger_rag.evaluation.official); versions match uv.lock.
+    .uv_pip_install("scipy==1.18.1", "pandas==3.1.0")
     .env(
         {
             "HF_HOME": HF_CACHE,
@@ -178,6 +157,18 @@ def _gpu_name() -> str:
         return "unknown"
 
 
+def _save(report: dict[str, Any], run_id: str) -> None:
+    debug = report.pop("debug_replies", None)
+    if debug is not None:
+        # Raw replies over public benchmark data, kept apart from the report.
+        debug_path = DATA / "reasoning" / "debug" / f"{run_id}.json"
+        debug_path.parent.mkdir(parents=True, exist_ok=True)
+        debug_path.write_text(json.dumps(debug, indent=2) + "\n")
+    out = DATA / "reasoning" / f"{run_id}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2) + "\n")
+
+
 @app.function(
     gpu="L40S",
     volumes={HF_CACHE: hf_volume, VLLM_CACHE: vllm_volume, str(DATA): data_volume},
@@ -185,33 +176,44 @@ def _gpu_name() -> str:
     cpu=4,
     memory=32768,
 )
-def run(model: str, options: dict[str, Any]) -> dict[str, Any]:
+def run(spec: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
     from huggingface_hub import snapshot_download
 
-    from ledger_rag.evaluation.benchmarks import finqa_reasoning
+    from ledger_rag.evaluation.benchmarks import reasoning as benchmark
     from ledger_rag.evaluation.datasets.fetch import fetch_verified
 
-    served = MODELS[model]
     started = time.time()
     timings: dict[str, float] = {}
-    snapshot_download(served.repo, revision=served.revision)
+    snapshot_download(spec["served_name"], revision=spec["revision"])
     hf_volume.commit()
     timings["weights_s"] = round(time.time() - started, 1)
-    benchmark = str(options.get("benchmark") or "finqa")
-    data_dir = DATA / "datasets" / benchmark
-    data_dir.mkdir(parents=True, exist_ok=True)
-    fetch_verified(benchmark, data_dir)
-    process = subprocess.Popen(vllm_argv(served), env=os.environ.copy())
+    spec_path = Path("/tmp/model-spec.json")
+    spec_path.write_text(json.dumps(spec))
+    process = subprocess.Popen(vllm_argv(spec), env=os.environ.copy())
+    reports: list[dict[str, Any]] = []
     try:
         _wait_ready(process, time.time() + STARTUP_SECONDS)
         vllm_volume.commit()
         timings["ready_s"] = round(time.time() - started, 1)
-        parser = finqa_reasoning.build_parser()
-        args = parser.parse_args(benchmark_argv(options, served, data_dir))
-        finqa_reasoning.validate(parser, args)
-        import asyncio
-
-        report = asyncio.run(finqa_reasoning.run(args))
+        for name in options["benchmarks"]:
+            data_dir = DATA / "datasets" / name
+            data_dir.mkdir(parents=True, exist_ok=True)
+            fetch_verified(name, data_dir)
+            parser = benchmark.build_parser()
+            args = parser.parse_args(benchmark_argv(name, options, spec_path, data_dir))
+            benchmark.validate(parser, args)
+            report = asyncio.run(benchmark.run(args))
+            run_id = uuid.uuid4().hex
+            report["run_id"] = run_id
+            report["compute"] = {
+                "vllm": VLLM_VERSION,
+                "gpu": _gpu_name(),
+                "options": options,
+                "container_elapsed_s": round(time.time() - started, 1),
+            }
+            _save(report, run_id)
+            data_volume.commit()
+            reports.append(report)
     finally:
         process.terminate()
         try:
@@ -219,66 +221,77 @@ def run(model: str, options: dict[str, Any]) -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             process.kill()
     timings["total_s"] = round(time.time() - started, 1)
-    run_id = uuid.uuid4().hex
-    report["run_id"] = run_id
-    report["compute"] = {
-        "model_key": model,
-        "repo": served.repo,
-        "revision": served.revision,
-        "vllm": VLLM_VERSION,
+    return {
+        "model": spec["id"],
         "gpu": _gpu_name(),
         "timings": timings,
-        "options": options,
+        "runs": [
+            {
+                "run_id": r["run_id"],
+                "benchmark": r["benchmark"],
+                "brief": benchmark.brief(r),
+                "arms": {k: v["metrics"] for k, v in r["arms"].items()},
+                "paired": r["paired"],
+                "outcomes": {k: v["sample_outcomes"] for k, v in r["arms"].items()},
+                "elapsed_seconds": r["elapsed_seconds"],
+            }
+            for r in reports
+        ],
     }
-    debug = report.pop("debug_replies", None)
-    if debug is not None:
-        # Raw replies over public benchmark pages, kept apart from the report.
-        debug_path = DATA / "reasoning" / "debug" / f"{run_id}.json"
-        debug_path.parent.mkdir(parents=True, exist_ok=True)
-        debug_path.write_text(json.dumps(debug, indent=2) + "\n")
-    out = DATA / "reasoning" / f"{run_id}.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, indent=2) + "\n")
-    data_volume.commit()
-    return {
-        "run_id": run_id,
-        "brief": finqa_reasoning.brief(report),
-        "summary": report["summary"],
-        "compute": report["compute"],
-        "elapsed_seconds": report["elapsed_seconds"],
-        "provider_stats": report["provider_stats"],
-    }
+
+
+def _csv(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]
 
 
 @app.local_entrypoint()
 def main(
-    model: str = "qwen3.5-4b",
+    models: str = "qwen3.5-4b",
+    benchmarks: str = "finqa",
+    pipelines: str = "raw,ledger",
     limit: int = 0,
-    samples: int = 1,
+    samples: int = 5,
     exemplars: int = 4,
-    thinking: str = "off",
-    max_tokens: int = 1024,
+    mode: str = "",
     sample_temperature: float = 0.7,
     concurrency: int = 128,
-    benchmark: str = "finqa",
     debug_replies: int = 0,
     output: str = "",
 ) -> None:
-    if model not in MODELS:
-        raise SystemExit(f"unknown model {model!r}; choose from {', '.join(sorted(MODELS))}")
+    from ledger_rag.evaluation.models import load
+
+    specs = [load(model_id) for model_id in _csv(models)]
+    hosted = [spec.id for spec in specs if spec.kind != "vllm"]
+    if hosted:
+        raise SystemExit(f"hosted models run locally, not on Modal: {', '.join(hosted)}")
+    chosen = _csv(benchmarks)
+    unknown = sorted(set(chosen) - set(BENCHMARK_CHOICES))
+    if unknown:
+        raise SystemExit(f"unknown benchmarks: {', '.join(unknown)}")
     options = {
+        "benchmarks": chosen,
+        "pipelines": _csv(pipelines),
         "limit": limit or None,
         "samples": samples,
         "exemplars": exemplars,
-        "thinking": thinking,
-        "max_tokens": max_tokens,
+        "mode": mode or None,
         "sample_temperature": sample_temperature,
         "concurrency": concurrency,
-        "benchmark": benchmark,
         "debug_replies": debug_replies,
     }
-    function = run.with_options(gpu=MODELS[model].gpu)
-    result = function.remote(model, options)
-    print(json.dumps(result, indent=2))
+    calls = [run.with_options(gpu=spec.gpu).spawn(spec.manifest(), options) for spec in specs]
+    results = []
+    for spec, call in zip(specs, calls, strict=True):
+        try:
+            results.append(call.get())
+        except Exception as exc:  # One model failing must not discard the others.
+            results.append(
+                {"model": spec.id, "error": type(exc).__name__, "detail": str(exc)[:300]}
+            )
+    for result in results:
+        for item in result.get("runs", []):
+            print(item["brief"])
+        if "error" in result:
+            print(f"{result['model']}: FAILED {result['error']}")
     if output:
-        Path(output).write_text(json.dumps(result, indent=2) + "\n")
+        Path(output).write_text(json.dumps(results, indent=2) + "\n")
