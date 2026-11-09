@@ -525,12 +525,16 @@ def model_spec(args: argparse.Namespace) -> models.ModelSpec:
 def chat_client(spec: models.ModelSpec, args: argparse.Namespace) -> ChatClient:
     """Self-hosted models are reached at ``--llm-base-url``; hosted ones via their env."""
     if spec.kind == "vllm":
+        # A batch run queues thousands of requests on one server; a long free-text
+        # answer can wait minutes, and a timeout must never be scored as a wrong answer.
         return ChatClient(
             args.llm_base_url,
             os.environ.get("LEDGER_LLM_SERVE_API_KEY", "local-unused"),
             concurrency=args.llm_concurrency,
             endpoint_kind="self-hosted",
             stream=args.llm_stream,
+            request_timeout=args.llm_timeout,
+            deadline_seconds=args.llm_deadline,
         )
     base_url, key = os.environ.get(spec.base_url_env), os.environ.get(spec.key_env)
     if not base_url or not key:
@@ -840,6 +844,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Endpoint of a self-hosted (vllm) model",
     )
     parser.add_argument("--llm-concurrency", type=int, default=128)
+    parser.add_argument(
+        "--llm-timeout", type=float, default=900, help="Self-hosted read timeout, seconds"
+    )
+    parser.add_argument(
+        "--llm-deadline", type=float, default=2400, help="Self-hosted per-request deadline"
+    )
     parser.add_argument("--llm-stream", action="store_true")
     parser.add_argument(
         "--debug-replies",
