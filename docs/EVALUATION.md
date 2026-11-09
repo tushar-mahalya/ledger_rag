@@ -95,6 +95,84 @@ test split was opened: prompt `pot-expression-v4` (SHA-256 prefixes: FinQA Ledge
 `raw` and `ledger-refine` (whose first round is the `ledger` arm). Test splits are
 run once with this configuration; no change is made after seeing them.
 
+### Held-out test results with the frozen configuration (measured 2026-11-09)
+
+Run once each, after the configuration above was frozen; nothing was changed after
+seeing them. Official metrics with 95% report-cluster CIs; paired deltas on
+identical questions. Aggregates (no question text):
+[`results/2026-11-09-test-retrieved-reruns.json`](results/2026-11-09-test-retrieved-reruns.json).
+
+**FinQA test** (all 1,147 questions; execution accuracy with the official executor):
+
+| Model | Raw model | Ledger | Ledger − raw | Lenient raw → Ledger (Δ) |
+|---|---|---|---|---|
+| Qwen3.8-27B | 29.6 [26.1, 33.0] | **79.3 [76.6, 82.0]** | +49.8 [45.9, 53.7] | 74.5 → 80.9 (+6.5 [4.3, 8.7]) |
+| Qwen3.6-35B-A3B (3B active) | 25.9 [22.6, 29.0] | **77.3 [74.4, 80.0]** | +51.4 [47.9, 54.9] | 71.9 → 79.4 (+7.5 [5.3, 9.7]) |
+| Qwen3.5-9B | 22.2 [19.2, 25.2] | **74.7 [71.8, 77.5]** | +52.5 [48.7, 56.0] | 70.0 → 76.3 (+6.3 [4.0, 8.8]) |
+| Qwen3.5-4B | 22.8 [19.7, 25.7] | **72.8 [69.8, 75.6]** | +50.0 [46.4, 53.7] | 68.7 → 74.6 (+5.9 [3.5, 8.4]) |
+| Ministral-3 8B | 25.2 [22.1, 28.3] | **71.1 [67.8, 74.3]** | +46.0 [42.2, 49.8] | 61.3 → 72.8 (+11.5 [8.8, 14.2]) |
+
+Published FinQA test execution accuracy for context (not run here): FINDER with
+GPT-4 75.32 (EMNLP 2025, best peer-reviewed found), APOLLO 71.07, ENCORE 69.40,
+PoT with GPT-4 69.38 (reproduced in FINDER), FinQANet 61.24, human experts 91.16.
+Qwen3.8-27B with Ledger is above FINDER's point estimate with its whole interval;
+Qwen3.5-4B with Ledger is above APOLLO, ENCORE and PoT-GPT-4.
+
+**TAT-QA test** (all 1,663 questions; official exact match / F1):
+
+| Model | Raw EM / F1 | Ledger EM / F1 | Ledger − raw (EM) |
+|---|---|---|---|
+| Qwen3.6-35B-A3B | 46.1 / 57.2 | **74.7 [72.3, 77.0] / 82.5** | +28.6 [25.5, 31.6] |
+| Qwen3.5-4B | 20.4 / 37.6 | **68.8 [65.9, 71.6] / 76.2** | +48.4 [45.0, 51.5] |
+| Ministral-3 8B | 30.1 / 41.2 | **66.1 [63.5, 68.6] / 73.8** | +36.0 [32.7, 39.1] |
+
+The TAT-QA leaderboard's best is TAT-LLM 70B (fine-tuned) at 81.4 / 88.4 and GPT-4
+zero-shot reaches 79.7 F1: Ledger does **not** reach TAT-QA state of the art; the
+3B-active Qwen3.6 exceeds GPT-4's zero-shot F1. Qwen3.8-27B and Qwen3.5-9B TAT-QA
+test containers failed with an unexplained remote error after finishing FinQA and
+were not re-run (budget); their TAT-QA test results are **not measured**.
+
+Caveats: these models were released in 2026 and FinQA/TAT-QA test sets have been
+public since 2021, so pretraining contamination cannot be excluded (raw-model
+scores do not suggest memorized answers). Execution-feedback refinement moved test
+results by -0.4 to +1.2 points. Gold evidence is given, as in every compared result.
+
+### FinQA from retrieved evidence: the end-to-end RAG setting
+
+All 883 dev questions answered from the saved company-scoped hybrid + rerank top-5
+chunks of the 2026-11-01 run (contexts SHA-256 `be337ed3...`, recall@5 0.90), not
+the gold page. Gold replay bounds Ledger at 91.1% (evidence the retriever missed).
+
+| Model | Raw model | Ledger | Ledger − raw | Lenient raw → Ledger (Δ) |
+|---|---|---|---|---|
+| Qwen3.8-27B | 23.3 | **62.1 [57.8, 66.2]** | +38.7 [34.7, 42.6] | 54.1 → 63.5 (+9.4 [6.6, 12.0]) |
+| Qwen3.6-35B-A3B | 20.2 | **59.9 [55.7, 64.1]** | +39.8 [35.5, 44.0] | 52.2 → 61.7 (+9.5 [6.2, 12.9]) |
+| Qwen3.5-4B | 18.3 | **57.6 [53.4, 61.8]** | +39.3 [34.9, 43.5] | 52.1 → 59.5 (+7.4 [4.1, 10.8]) |
+| gpt-oss-20b | 20.5 | **55.9 [51.9, 60.0]** | +35.4 [31.6, 39.2] | 48.5 → 57.6 (+9.2 [5.8, 12.6]) |
+
+For reference, the same Qwen3.8-27B on the same contexts with the 2026-11-01
+single-shot reader scored 58.9% (its own heuristic exact score, not the official
+executor). The retrieval ceiling (91.1%) leaves the larger remaining gap in
+reasoning over retrieved chunks rather than retrieval itself.
+
+### Corrections and accounting
+
+- **Timeouts scored as wrong answers.** Batch runs first used a 120 s client read
+  timeout; long raw answers queued behind ~1,800 concurrent requests timed out
+  (5% of raw FinQA answers for Qwen3.5-9B and Qwen3.8-27B in the dev matrix, ~18%
+  in the first retrieved run). Timeouts were raised (commit `18eb769`), the
+  affected raw arms were re-run on identical questions and merged
+  (`reasoning_merge`), and every number above uses timeout-free raw arms
+  (0 provider errors). Corrected dev deltas: Qwen3.8-27B FinQA lenient +9.0
+  [4.9, 12.9] (reported +10.0 before), Qwen3.5-9B +6.7 [2.2, 11.4] (+8.3);
+  ConvFinQA lenient +4.0 [0.7, 7.4] and +3.7 [-0.4, 7.8].
+- A first test launch was stopped before producing any result to apply that fix.
+- **Spend.** Modal's metered summary for November reported $28.56 of ephemeral-app
+  usage after these runs, including about $2.07 from 2026-11-01; about $26.5 for
+  this session against a $25 authorization (about $1.5 over, covered by credits;
+  billed $0). The overrun came from the aborted test launch and the two failed
+  test containers. No further GPU jobs were launched.
+
 ## Verified prior full-dev retrieval measurement
 
 Verified read-only from `ledger-data:/evaluation/c17d398f34f24efd874e29bb641d9738.json`

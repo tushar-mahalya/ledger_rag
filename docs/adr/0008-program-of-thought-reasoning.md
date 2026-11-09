@@ -1,7 +1,8 @@
 # ADR 0008: Program-of-thought reasoning core and benchmark-comparable evaluation
 
-- Status: accepted; reasoning core, FinQA/ConvFinQA/TAT-QA runners, raw-vs-Ledger
-  arms and the model registry implemented 2026-11-09; measurements in progress (see [Evaluation](../EVALUATION.md#program-of-thought-reasoning-2026-11-09))
+- Status: accepted; implemented and measured 2026-11-09 (8-model dev matrix,
+  frozen-config FinQA and TAT-QA test runs, retrieved-evidence FinQA). Results:
+  [Evaluation](../EVALUATION.md#raw-model-vs-ledger-backend-program-of-thought-reasoning-2026-11-09) (see [Evaluation](../EVALUATION.md#program-of-thought-reasoning-2026-11-09))
 - Date: 2026-11-09
 
 ## Context
