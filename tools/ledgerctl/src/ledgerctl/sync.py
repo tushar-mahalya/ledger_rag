@@ -6,6 +6,7 @@ key removed from the manifest is also removed remotely. Operator credentials
 (Modal/Cloudflare tokens) authenticate the delivery and are never delivered.
 """
 
+import importlib
 import json
 import os
 from collections.abc import Mapping
@@ -71,8 +72,10 @@ class ModalPublisher:
 
     def _sdk(self) -> Any:
         if self._modal is None:
+            # Resolved at runtime: ledgerctl stays stdlib-only, Modal is the optional
+            # workspace `compute` group, and the SDK is used untyped (Any) here.
             try:
-                import modal
+                modal = importlib.import_module("modal")
             except ImportError:
                 raise OpsError(
                     "The Modal SDK is missing: run with `uv run --group compute`"
