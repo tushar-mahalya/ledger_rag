@@ -16,8 +16,10 @@ from typing import Any, Protocol
 
 from ledger_rag.reasoning.consistency import Candidate, Decision, decide
 from ledger_rag.reasoning.dsl import Program, ProgramParseError
+from ledger_rag.reasoning.dsl import parse as parse_dsl
 from ledger_rag.reasoning.exemplars import Exemplar, render
 from ledger_rag.reasoning.expression import read_program
+from ledger_rag.reasoning.expression import render as render_expression
 from ledger_rag.reasoning.grounding import Evidence, repair_rows, ungrounded
 
 PROMPT_VERSION = "pot-expression-v4"
@@ -211,7 +213,10 @@ _FAILURES = {
 
 def _shown(candidate: Candidate) -> str:
     if candidate.program:
-        return candidate.program
+        try:  # Show attempts in the language the reader writes.
+            return render_expression(parse_dsl(candidate.program))
+        except ProgramParseError:
+            return candidate.program
     if isinstance(candidate.value, str) and candidate.value.startswith("{"):
         return candidate.value  # A typed answer: its canonical JSON.
     return "(unreadable)"

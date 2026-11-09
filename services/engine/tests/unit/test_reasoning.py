@@ -222,8 +222,8 @@ def test_refinement_runs_only_without_a_majority_and_joins_the_vote() -> None:
     assert solution.decision.value == round(94 / 5735, 5)
     assert solution.decision.total == 5 and len(solution.refined) == 2
     shown = reader.feedback[0]
-    assert "subtract(5829, 5735) -> = 94.0" in shown
-    assert "subtract(5829, 5000) -> uses numbers" in shown
+    assert "5829 - 5735 -> = 94.0" in shown
+    assert "5829 - 5000 -> uses numbers" in shown
     record = solution.record()
     assert record["refined_reasons"] == ["ok", "ok"] and len(record["sample_values"]) == 3
     agreed = Solver(
