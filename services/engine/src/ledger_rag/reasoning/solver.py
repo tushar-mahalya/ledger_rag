@@ -1,10 +1,12 @@
-"""Program-of-thought solver: sample programs, ground, execute, vote.
+"""Program-of-thought solver: sample replies, judge each, vote on the outcome.
 
 The solver is model-agnostic. A :class:`Reader` turns messages into one reply per
 sample index (index 0 is the deterministic arm, later indices are stochastic
 samples); benchmarks adapt the evaluation chat client, tests use doubles.
-Executors are injected so benchmarks use the official FinQA semantics while
-production can use the unit-aware Decimal executor.
+A :class:`Task` is the answer contract: its system prompt and how one reply is
+parsed, grounded and executed into a voting candidate. :class:`ProgramTask`
+(FinQA/ConvFinQA) takes an injected executor so benchmarks use the official FinQA
+semantics while production can use the unit-aware Decimal executor.
 """
 
 import asyncio
@@ -15,9 +17,9 @@ from typing import Any, Protocol
 from ledger_rag.reasoning.consistency import Candidate, Decision, decide
 from ledger_rag.reasoning.dsl import Program, ProgramParseError, parse
 from ledger_rag.reasoning.exemplars import Exemplar, render
-from ledger_rag.reasoning.grounding import Evidence, ungrounded
+from ledger_rag.reasoning.grounding import Evidence, repair_rows, ungrounded
 
-PROMPT_VERSION = "pot-dsl-v2"
+PROMPT_VERSION = "pot-dsl-v3"
 SYSTEM_PROMPT = """You answer numerical questions about a page of a company's annual report.
 Do not calculate anything yourself: write a program, and a calculator will execute it.
 
@@ -27,8 +29,9 @@ Operations, each with exactly two operands:
   table_sum(ROW, none)  table_average(ROW, none)  table_max(ROW, none)  table_min(ROW, none)
     ROW is the exact text of a table row's first cell; these aggregate that row's numbers.
 Operands: a number copied exactly from the page or question (no $ or thousands separators;
-keep a trailing % if the page shows one), a constant (const_100, const_1000, const_1000000,
-const_m1 for -1) or #k, the result of step k (#0 is the first step).
+keep a trailing % if the page shows one), a constant (const_2, const_3, ... for counts such
+as the number of years averaged, const_100, const_1000, const_1000000, const_m1 for -1)
+or #k, the result of step k (#0 is the first step; never nest operations).
 The result of the last step is the answer. In a conversation, answer only the last question;
 earlier answers are context. Follow the conventions of the solved examples, for example
 whether a percentage is left as a ratio or multiplied by const_100.
@@ -51,6 +54,15 @@ class Reader(Protocol):
     async def read(self, messages: list[dict[str, str]], sample: int) -> Reply:
         """Sample 0 is the configured (usually greedy) arm; later samples are stochastic."""
         ...
+
+
+class Task(Protocol):
+    """An answer contract: the instructions and the judge of one reply."""
+
+    @property
+    def system_prompt(self) -> str: ...
+
+    def judge(self, text: str, problem: "Problem", evidence: Evidence) -> Candidate: ...
 
 
 @dataclass(frozen=True)
@@ -111,12 +123,14 @@ def problem_text(problem: Problem) -> str:
     return f"{PAGE_MARKER}{render_page(problem)}{conversation}\n\nQuestion: {problem.question}"
 
 
-def messages(problem: Problem, exemplars: Sequence[Exemplar]) -> list[dict[str, str]]:
+def messages(
+    problem: Problem, exemplars: Sequence[Exemplar], system_prompt: str = SYSTEM_PROMPT
+) -> list[dict[str, str]]:
     shots = render(exemplars)
     prefix = f"Solved examples:\n\n{shots}\n\n---\n\n" if shots else ""
     content = prefix + problem_text(problem)
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": content},
     ]
 
@@ -156,10 +170,10 @@ class Solution:
         }
 
 
-def judge(text: str, problem: Problem, evidence: Evidence, executor: Executor) -> Candidate:
-    """Parse, ground and execute one reply into a voting candidate."""
+def run_program(text: str, problem: Problem, evidence: Evidence, executor: Executor) -> Candidate:
+    """Parse, ground and execute a program reply into a voting candidate."""
     try:
-        program = parse(text)
+        program = repair_rows(parse(text), evidence)
     except ProgramParseError:
         return Candidate(None, None, "parse")
     if ungrounded(program, evidence):
@@ -170,10 +184,21 @@ def judge(text: str, problem: Problem, evidence: Evidence, executor: Executor) -
     return Candidate(program.text, execution.value, "ok")
 
 
+@dataclass(frozen=True)
+class ProgramTask:
+    """FinQA/ConvFinQA contract: the answer is the executed program."""
+
+    executor: Executor
+    system_prompt: str = SYSTEM_PROMPT
+
+    def judge(self, text: str, problem: Problem, evidence: Evidence) -> Candidate:
+        return run_program(text, problem, evidence, self.executor)
+
+
 @dataclass
 class Solver:
     reader: Reader
-    executor: Executor
+    task: Task
     samples: int = 1
     exemplar_search: Callable[[Problem], list[Exemplar]] | None = None
     keep_replies: bool = False
@@ -184,7 +209,7 @@ class Solver:
 
     async def solve(self, problem: Problem) -> Solution:
         shots = self.exemplar_search(problem) if self.exemplar_search else []
-        prompt = messages(problem, shots)
+        prompt = messages(problem, shots, self.task.system_prompt)
         evidence = Evidence.build(
             [*problem.pre_text, *problem.post_text], problem.table, problem.question
         )
@@ -197,7 +222,7 @@ class Solver:
             if reply.error:
                 candidate = Candidate(None, None, "provider")
             else:
-                candidate = judge(reply.text, problem, evidence, self.executor)
+                candidate = self.task.judge(reply.text, problem, evidence)
             candidates.append(candidate)
             samples.append(
                 Sample(

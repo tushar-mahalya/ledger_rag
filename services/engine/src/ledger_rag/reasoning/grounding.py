@@ -5,18 +5,25 @@ or question, either as written (``5,829`` in ``$5,829 million``), in base units
 (``5829000000``) or a percentage as a fraction (``0.05`` for ``5%``), ignoring sign
 (filings show decreases as ``(1,234)`` or in prose).
 A trailing ``%`` on the literal is notation only; the digits must still match.
-Constants (``const_100``) and step references are always grounded; table rows must
-name a row of the evidence table. Ungrounded programs are treated as invalid samples:
-they cannot win a vote, so a reader cannot invent its own inputs.
+Constants (``const_100``, small counts and unit factors in :data:`CONSTANTS`) and
+step references are always grounded; table rows must name a row of the evidence
+table (:func:`repair_rows` first maps case or spelling slips to the unique close row).
+Ungrounded programs are treated as invalid samples: they cannot win a vote, so a
+reader cannot invent its own inputs.
 """
 
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
+from difflib import get_close_matches
 
 from ledger_rag.generation.program import extract_numbers
-from ledger_rag.reasoning.dsl import Program
+from ledger_rag.reasoning.dsl import TABLE_OPS, Program, Step
+
+# Counts and unit factors a program may use without quoting them (FinQA's constants:
+# "average over 3 years", "in thousands"). Any other number must come from evidence.
+CONSTANTS = frozenset(Decimal(v) for v in (*range(1, 13), 100, 1000, 10000, 1000000))
 
 # Spelled-out counts in the evidence or question that annotators use ("over three years").
 _WORDS = {
@@ -56,7 +63,7 @@ class Evidence:
         table: Sequence[Sequence[str]] = (),
         question: str = "",
     ) -> "Evidence":
-        numbers: set[Decimal] = {Decimal(1)}  # Identity operand: "growth - 1", "x * 1".
+        numbers: set[Decimal] = set(CONSTANTS)
         cells = [cell for row in table for cell in row]
         sources = [*texts, *cells, question]
         for text in sources:
@@ -88,3 +95,20 @@ def ungrounded(program: Program, evidence: Evidence) -> list[str]:
     ]
     missing.extend(row for row in program.table_rows() if row not in evidence.rows)
     return missing
+
+
+def repair_rows(program: Program, evidence: Evidence) -> Program:
+    """Map a table row a reader misspelled or re-cased to its unique close match."""
+    rows = sorted(evidence.rows)
+    lowered = {row.lower(): row for row in rows}
+    steps: list[Step] = []
+    for step in program.steps:
+        name = step.args[0]
+        if step.op in TABLE_OPS and name not in evidence.rows:
+            match = lowered.get(name.lower()) or next(
+                iter(get_close_matches(name, rows, n=1, cutoff=0.85)), None
+            )
+            if match is not None:
+                step = Step(step.op, (match, step.args[1]))
+        steps.append(step)
+    return replace(program, steps=tuple(steps))

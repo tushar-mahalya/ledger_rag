@@ -30,9 +30,12 @@ class Exemplar:
     id: str
     question: str
     facts: tuple[str, ...]
-    program: str
+    solution: str
+    """The reply lines after FACTS, e.g. ``PROGRAM: subtract(5829, 5735)``."""
     group: str = ""
     """Problems sharing a group (same report page) are never shown for each other."""
+    query: str = ""
+    """Retrieval text when it differs from ``question`` (e.g. a conversation)."""
 
 
 class ExemplarIndex:
@@ -40,7 +43,7 @@ class ExemplarIndex:
 
     def __init__(self, exemplars: Iterable[Exemplar], *, k1: float = 1.2, b: float = 0.75):
         self.exemplars = list(exemplars)
-        self._docs = [Counter(tokenize(e.question)) for e in self.exemplars]
+        self._docs = [Counter(tokenize(e.query or e.question)) for e in self.exemplars]
         lengths = [sum(doc.values()) for doc in self._docs]
         self._avg = sum(lengths) / len(lengths) if lengths else 0.0
         self._lengths = lengths
@@ -87,11 +90,9 @@ class ExemplarIndex:
 
 
 def render(exemplars: Sequence[Exemplar]) -> str:
-    """Exemplars in the same FACTS / PROGRAM format the reader must produce."""
+    """Exemplars in the same reply format the reader must produce."""
     blocks = []
     for exemplar in exemplars:
-        facts = "\n".join(f"- {fact}" for fact in exemplar.facts) or "- (none)"
-        blocks.append(
-            f"Question: {exemplar.question}\nFACTS:\n{facts}\nPROGRAM: {exemplar.program}"
-        )
+        facts = "\n".join(f"- {fact}" for fact in exemplar.facts) or "- (see the page)"
+        blocks.append(f"Question: {exemplar.question}\nFACTS:\n{facts}\n{exemplar.solution}")
     return "\n\n".join(blocks)
