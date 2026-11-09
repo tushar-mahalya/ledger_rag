@@ -1,0 +1,32 @@
+[project]
+name = "ledger-voice"
+version = "0.1.0"
+description = "Ledger voice channel: Twilio Media Streams over Pipecat, answers from the Ledger engine"
+requires-python = ">=3.11"
+# Exact pins: Pipecat ships weekly with behavioural changes (ADR 0006); upgrade only
+# after the voice test suite passes.
+dependencies = [
+  "pipecat-ai[websocket,tracing]==1.14.0",
+  "twilio==9.12.0",
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "httpx>=0.28,<1",
+  "pydantic-settings>=2.7,<3",
+  "structlog>=25,<27",
+  # Used directly; already required by Pipecat.
+  "loguru~=0.7.3",
+  "numpy>=1.26.4,<3",
+  "soxr~=1.0.0",
+  "websockets>=13.1",
+]
+
+[project.scripts]
+ledger-voice = "ledger_voice.app:main"
+ledger-voice-sim = "ledger_voice.simulate:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ledger_voice"]
