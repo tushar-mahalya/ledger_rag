@@ -9,6 +9,9 @@ Two comparisons are reported, never mixed:
   both values rounded to the smaller of their decimal precisions must be equal
   (https://github.com/TIGER-AI-Lab/Program-of-Thoughts, ``tool.py``, MIT). LLM
   prompting papers (PoT, FINDER) report this looser number.
+- ``lenient``: the same with ``include_percentage=True`` (the gold, x100 or /100),
+  so a free-text "16.4%" matches a ratio of 0.164. Used to give raw-model answers
+  every benefit of the doubt; never the headline for Ledger.
 """
 
 import math
@@ -77,3 +80,10 @@ def tolerant_correct(value: Answer | None, gold: Answer) -> bool:
         return value == gold
     places = min(_precision(value), _precision(gold))
     return round(value, places) == round(gold, places)
+
+
+def lenient_correct(value: Answer | None, gold: Answer) -> bool:
+    """PoT ``finqa_equal(prediction, reference, include_percentage=True)``."""
+    if value is None or isinstance(value, str) or isinstance(gold, str):
+        return tolerant_correct(value, gold)
+    return any(tolerant_correct(value, scaled) for scaled in (gold / 100, gold, gold * 100))

@@ -9,6 +9,12 @@ members = ["services/engine", "services/voice", "tools/ledgerctl"]
 compute = [
     "modal>=1.1,<2",
 ]
+# Official benchmark scorers vendored in ledger_rag.evaluation.official (TAT-QA).
+scoring = [
+    "numpy>=2,<3",
+    "pandas>=2,<4",
+    "scipy>=1.13,<2",
+]
 dev = [
     "pytest>=8,<10",
     "pytest-asyncio>=0.25,<2",
@@ -21,7 +27,7 @@ dev = [
 target-version = "py311"
 line-length = 100
 # Vendored upstream code stays byte-identical to its pinned source.
-extend-exclude = ["services/engine/src/ledger_rag/evaluation/official/_finqa_upstream.py"]
+extend-exclude = ["services/engine/src/ledger_rag/evaluation/official/_*_upstream.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]

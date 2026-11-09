@@ -55,7 +55,7 @@ jobs:
       - run: uv run --frozen mypy --strict tools/ledgerctl/src scripts/clone_qdrant_benchmark.py scripts/dump_contract_fixtures.py scripts/export_requirements.py
       - run: uv run --frozen mypy --strict --ignore-missing-imports services/voice/src
       - run: uv run --frozen --group compute mypy --strict --ignore-missing-imports --exclude compute/tests compute scripts/run_eval_session.py
-      - run: uv run --frozen --group compute pytest -q
+      - run: uv run --frozen --group compute --group scoring pytest -q
       - run: uv run --frozen python -m ledger_rag.evaluation.harness --smoke --repeats 3
       - run: uv run --frozen python scripts/dump_contract_fixtures.py --check
       - run: uv run --frozen python scripts/export_requirements.py --check

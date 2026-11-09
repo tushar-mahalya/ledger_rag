@@ -217,7 +217,7 @@ Run focused tests for the changed component first. The broader service gate is:
 uv run --locked ruff check .
 uv run --locked ruff format --check .
 uv run --locked mypy
-uv run --locked --group compute pytest -q
+uv run --locked --group compute --group scoring pytest -q
 ```
 
 For compute changes, also run
