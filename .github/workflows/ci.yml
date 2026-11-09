@@ -8,7 +8,7 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  chatbot:
+  web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -16,24 +16,24 @@ jobs:
         with:
           node-version: "22.22.1"
           cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci --prefix web --ignore-scripts
-      - run: npm --prefix web run lint
-      - run: npm --prefix web run format:check
-      - run: npm --prefix web test
-      - run: npm --prefix web run build
-      - run: npm --prefix web run check:budget
-      - run: npm --prefix web exec -- playwright install --with-deps chromium
-      - run: npm --prefix web run test:e2e
+          cache-dependency-path: services/web/package-lock.json
+      - run: npm ci --prefix services/web --ignore-scripts
+      - run: npm --prefix services/web run lint
+      - run: npm --prefix services/web run format:check
+      - run: npm --prefix services/web test
+      - run: npm --prefix services/web run build
+      - run: npm --prefix services/web run check:budget
+      - run: npm --prefix services/web exec -- playwright install --with-deps chromium
+      - run: npm --prefix services/web run test:e2e
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
         with:
           version: "0.13.6"
           python-version: "3.11"
           enable-cache: true
       - run: uv sync --locked
-      - run: npm --prefix web run test:live
-      - run: docker build -t ledger-workspace:ci web
-      - run: docker compose -f compose.yaml -f deploy/compose.chat.yaml --profile chat config --quiet
+      - run: npm --prefix services/web run test:live
+      - run: docker build -t ledger-workspace:ci services/web
+      - run: docker compose --profile chat config --quiet
   quality:
     runs-on: ubuntu-latest
     strategy:
@@ -47,15 +47,19 @@ jobs:
           python-version: ${{ matrix.python }}
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run --frozen ruff check src tests compute deploy/wait-for-secrets.py scripts/check_agent_skills.py scripts/clone_qdrant_benchmark.py scripts/dump_contract_fixtures.py scripts/run_eval_session.py
+      - run: uv run --frozen ruff check .
       - run: uv run --frozen ruff format --check .
       - run: uv run --frozen python scripts/check_agent_skills.py
-      - run: uv run --frozen mypy src scripts/clone_qdrant_benchmark.py scripts/dump_contract_fixtures.py
-      - run: uv run --frozen --group compute mypy --strict --ignore-missing-imports compute scripts/run_eval_session.py
+      # One type-check per unit: engine, ledgerctl, voice, Modal jobs and scripts.
+      - run: uv run --frozen mypy
+      - run: uv run --frozen mypy --strict tools/ledgerctl/src scripts/clone_qdrant_benchmark.py scripts/dump_contract_fixtures.py scripts/export_requirements.py
+      - run: uv run --frozen mypy --strict --ignore-missing-imports services/voice/src
+      - run: uv run --frozen --group compute mypy --strict --ignore-missing-imports --exclude compute/tests compute scripts/run_eval_session.py
       - run: uv run --frozen --group compute pytest -q
       - run: uv run --frozen python -m ledger_rag.evaluation.harness --smoke --repeats 3
       - run: uv run --frozen python scripts/dump_contract_fixtures.py --check
-      - run: uv build --no-sources
+      - run: uv run --frozen python scripts/export_requirements.py --check
+      - run: uv build --all-packages --no-sources
   image:
     runs-on: ubuntu-latest
     steps:
@@ -64,8 +68,9 @@ jobs:
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
+          file: services/engine/Dockerfile
           push: false
-          tags: ledger-rag:ci
+          tags: ledger-engine:ci
       - run: docker compose config --quiet
   secrets:
     runs-on: ubuntu-latest

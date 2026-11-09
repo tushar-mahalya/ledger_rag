@@ -1,5 +1,11 @@
 # Colocated Modal ingestion
 
+> **Corpus pipeline (ADR 0007).** New builds should use the spec-driven pipeline:
+> `python -m ledger_rag.corpus plan <corpus>` locally, then
+> `modal run compute/ingestion.py::corpus --name <corpus> [--promote]` on GPU. It adds
+> quality gates, lineage, a build record in Qdrant and alias promotion/rollback. The
+> `ingest` job below is the legacy path, kept until the first live corpus build.
+
 **Implemented, locally tested; cloud GPU execution is not yet validated.**
 The caller submits a small job specification. Dataset loading, production chunking,
 GPU embedding, sparse encoding and direct Qdrant writes happen in one Modal
@@ -8,7 +14,7 @@ container. Only the aggregate report returns to the caller.
 ```mermaid
 flowchart LR
     CLI["CLI / authorized job submitter"] --> Job
-    Vault["Vault database credential"] --> Secret["Modal Secret: ledger-ingestion"]
+    Store["SOPS store: Qdrant URL + key"] -->|ledgerctl push| Secret["Modal Secret: ledger-ingestion"]
     Secret --> Job
     Dataset["Pinned FinQA / JSONL in Modal Volume"] --> Load
     subgraph Job["One Modal GPU container"]
@@ -33,27 +39,24 @@ unauthenticated database or tunnel it publicly as a shortcut.
 
 ## Credentials and prerequisites
 
-1. Authenticate Modal through a local profile or secret-manager injection of
-   `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`. No browser is required; see
-   [headless authentication](AGENT_WORKFLOWS.md#headless-modal-authentication).
+1. Authenticate Modal with the token in the encrypted store: `ledgerctl modal`
+   injects `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` per command. No browser is
+   required; see [headless authentication](AGENT_WORKFLOWS.md#headless-modal-authentication).
 2. Provision Qdrant with TLS, persistence, backups and a least-privilege
    ingestion credential. The deployed server must support collection metadata
    (the reference uses Qdrant 1.20.0). Collection creation needs the corresponding
    permission; query credentials should not have write access.
-3. Store the database key at `secret/ledger/qdrant#api_key` in Vault. Prefer
-   [Modal workload identity](OPERATIONS.md#modal-workload-identity) so the job reads
-   it directly; otherwise, with an authenticated Vault session, project it into the
-   Modal environment:
+3. Store the database URL and key in the encrypted store and deliver them:
 
    ```bash
-   LEDGER_QDRANT_URL=https://YOUR-DATABASE \
-     scripts/sync_modal_secrets.sh ingestion
+   ledgerctl set LEDGER_QDRANT_URL
+   ledgerctl set LEDGER_QDRANT_API_KEY
+   ledgerctl push dev --target modal-database
    ```
 
-   This creates `ledger-ingestion` with `LEDGER_QDRANT_URL` and
-   `LEDGER_QDRANT_API_KEY`. The script uses a mode-0600 temporary JSON file,
-   disables shell tracing and removes the file on exit. The URL must not embed
-   credentials. The existing no-argument script still projects `ledger-tei`.
+   This replaces the `ledger-ingestion` Modal Secret with `LEDGER_QDRANT_URL` and
+   `LEDGER_QDRANT_API_KEY` (plus the non-secret `LEDGER_SECRETS_REVISION`). Values
+   travel in memory only; the URL must not embed credentials.
 
 The ingestion job needs no public TEI endpoint or `ledger-tei` secret. Its model
 server listens only on `127.0.0.1`, uses a random per-job key, and is terminated
@@ -73,7 +76,7 @@ uv run --locked --group compute modal run compute/ingestion.py \
 ```
 
 The GPU job itself fetches and checksum-verifies the pinned FinQA release through
-[the fetch script](../scripts/fetch_finqa.sh). It indexes report pages from all
+the shared [dataset registry](../services/engine/src/ledger_rag/evaluation/datasets/sources.py). It indexes report pages from all
 three splits, not the gold answers/programs. Current corpus expectations are
 2,789 documents and 8,611 chunks; verify the returned report against these.
 This command never starts local model containers or calls a remote embedding
@@ -164,7 +167,7 @@ ADR); documents are embedded without a prefix.
 ## Reuse with application documents
 
 Supply UTF-8 JSONL containing one validated
-[Document](../src/ledger_rag/core/models.py) per line: `id`, `tenant_id`, `title`,
+[Document](../services/engine/src/ledger_rag/core/models.py) per line: `id`, `tenant_id`, `title`,
 `text`, `source`, ISO `published_at`, and `allowed_groups`.
 The job submitter is an authorized operator, **not an untrusted end-user API**.
 Choose the authorized tenant explicitly; every document must match it.
@@ -311,7 +314,7 @@ coordinator or automatic release gate in this implementation.
 ## Validation and sources
 
 ```bash
-uv run --locked --group compute pytest -q tests/unit/test_bulk_ingestion.py tests/unit/test_tei_ingestion.py tests/unit/test_qdrant_store.py tests/unit/test_modal_secret_sync.py
+uv run --locked --group compute pytest -q services/engine/tests/unit/test_bulk_ingestion.py services/engine/tests/unit/test_tei_ingestion.py services/engine/tests/unit/test_qdrant_store.py
 uv run --locked --group compute mypy --strict --ignore-missing-imports compute
 ```
 
@@ -319,5 +322,7 @@ Tests exercise the remote function body locally with fake GPU/Volume dependencie
 and real in-memory Qdrant. They do not prove cloud networking, GPU model loading
 or throughput. Primary references:
 [Modal Functions](https://modal.com/docs/reference/modal.App#function),
-[Modal images](https://modal.com/docs/reference/modal.Image#uv_sync),
+[Modal images](https://modal.com/docs/reference/modal.Image#uv_pip_install) (installed from
+hash-pinned `compute/requirements/*.txt` exports of `uv.lock`; `uv_sync` does not support
+uv workspaces),
 [TEI 1.8 flags](https://github.com/huggingface/text-embeddings-inference/blob/v1.8.0/router/src/main.rs).

@@ -6,8 +6,8 @@ description: "Use when executing or comparing Ledger FinQA benchmarks, retrieval
 # Ledger benchmark workflow
 
 Commands and report interpretation: [evaluation runbook](../../../docs/EVALUATION.md).
-Implementation: [FinQA](../../../src/ledger_rag/evaluation/benchmarks/finqa.py),
-[generic harness](../../../src/ledger_rag/evaluation/harness.py).
+Implementation: [FinQA](../../../services/engine/src/ledger_rag/evaluation/benchmarks/finqa.py),
+[generic harness](../../../services/engine/src/ledger_rag/evaluation/harness.py).
 
 ## Run and compare
 
@@ -62,9 +62,9 @@ uv run --locked --group compute modal volume get ledger-data evaluation/<run_id>
 ## Local checks (no model server needed)
 
 ```bash
-uv run --locked --group compute pytest -q tests/unit/test_evaluation.py \
-  tests/unit/test_finqa_benchmark.py tests/unit/test_evaluation_scoring.py \
-  tests/unit/test_compute_evaluation.py
+uv run --locked --group compute pytest -q services/engine/tests/unit/test_evaluation.py \
+  services/engine/tests/unit/test_finqa_benchmark.py services/engine/tests/unit/test_evaluation_scoring.py \
+  compute/tests/test_compute_evaluation.py
 uv run --locked python -m ledger_rag.evaluation.harness --smoke --repeats 3
 uv run --locked python -m ledger_rag.evaluation.benchmarks.finqa --help
 ```

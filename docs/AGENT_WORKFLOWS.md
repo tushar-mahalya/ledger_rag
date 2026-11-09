@@ -10,8 +10,10 @@ or validate them.
 ```text
 AGENTS.md                  shared always-on working agreement
 CLAUDE.md                  imports @AGENTS.md
-.agents/skills/*/SKILL.md   canonical on-demand skills
+.agents/skills/*/SKILL.md   canonical on-demand skills (ledger-* = project, others vendored)
+.agents/skills/*/SOURCE.md  provenance and file hashes of a vendored skill
 .claude/skills/<name>      per-skill symlink to ../../.agents/skills/<name>
+.mcp.json                  reviewed read-only documentation MCP servers (Claude Code project scope)
 ```
 
 | Client | Instructions | Skill discovery |
@@ -37,16 +39,18 @@ configure that client to load the canonical files. CI checks every alias target.
 Restart/reload a client after adding skills. Clients that scan both locations may
 deduplicate by skill name; confirm the selected source rather than assuming it.
 
-## Three skills, not a component-by-component instruction stack
+## Project workflows and provider skills, not a component instruction stack
 
 Keep `.agents/skills` canonical and `.claude/skills` as discovery aliases, not
 copies. Neither directory improves model reasoning by itself; the useful
 difference is which clients discover it.
 
-The original eight skills are reduced to two project workflows plus the upstream
-Modal reference. Retrieval, generation, voice, operations and research skills
-were retired: they mostly repeated component documentation and general engineering
-advice. Their shared safety invariants remain in [AGENTS.md](../AGENTS.md).
+The original eight skills were reduced to project workflows plus unmodified
+provider skills. Retrieval, generation, operations and research skills were
+retired: they mostly repeated component documentation and general engineering
+advice. `ledger-voice` returns only with what docs and training data lack: the
+pinned Pipecat 1.14 API names, frame-ordering and Media Streams rules the code
+relies on. Shared safety invariants remain in [AGENTS.md](../AGENTS.md).
 This follows the [Agent Skills authoring guidance](https://agentskills.io/skill-creation/best-practices):
 add non-obvious project knowledge, keep coherent task boundaries, and omit what
 the agent already knows. It is not a measured claim of better model performance.
@@ -55,7 +59,10 @@ the agent already knows. It is not a measured claim of better model performance.
 |---|---|
 | [ledger-evaluation](../.agents/skills/ledger-evaluation/SKILL.md) | Executing/comparing benchmarks; corpus, split, cloning and metric pitfalls |
 | [ledger-compute](../.agents/skills/ledger-compute/SKILL.md) | Executing/releasing project compute jobs; auth, placement and promotion gates |
-| [modal](../.agents/skills/modal/SKILL.md) | Unmodified upstream SDK/CLI guidance |
+| [ledger-voice](../.agents/skills/ledger-voice/SKILL.md) | Twilio Media Streams, Pipecat 1.14 pipeline and ElevenLabs service rules in `services/voice` |
+| [modal](../.agents/skills/modal/SKILL.md) | Upstream Modal SDK/CLI guidance |
+| [wrangler](../.agents/skills/wrangler/SKILL.md) | Upstream Cloudflare Wrangler guidance; triggers only once a Wrangler config exists |
+| [qdrant-multitenancy](../.agents/skills/qdrant-multitenancy/SKILL.md) | Upstream Qdrant tenant-isolation guidance (the repo already uses `is_tenant` payload partitioning) |
 
 Ordinary component edits need no project skill. Navigate through
 [architecture](ARCHITECTURE.md), [operations](OPERATIONS.md),
@@ -64,9 +71,35 @@ as needed. Do not load all skills, force delegation or prescribe a universal
 reasoning sequence. Choose relevant evidence and checks for the task.
 
 Descriptions are the discovery surface. "Compare a reranker on frozen dev"
-should select `ledger-evaluation`; "fix a voice cancellation test" should not.
-Ask the client which skill it loaded without executing cloud commands to test
-discovery after upgrades. This manual client check is separate from static CI.
+should select `ledger-evaluation`; "fix a voice cancellation test" should select
+`ledger-voice` and nothing else. Ask the client which skill it loaded without
+executing cloud commands to test discovery after upgrades. This manual client
+check is separate from static CI. Upstream descriptions are kept verbatim, so a
+provider skill is vendored only if its own trigger is already narrow.
+
+## Provider skills, docs MCP servers and plugins
+
+Researched on 2026-11-09 against provider-owned GitHub organizations and docs.
+Vendored skills are byte-identical to the recorded commit; each `SOURCE.md` holds
+the URL, commit or version, license, fetch date and file hashes.
+
+| Platform | Adopted | Source, version, license | Rejected, and why |
+|---|---|---|---|
+| Modal | `modal` skill | [PyPI modal 1.6.3](https://pypi.org/project/modal/1.6.3/) (= `uv.lock`, latest release); body equals modal-client `main` 4791c538; Apache-2.0 | No newer skill; no official docs MCP server or plugin found |
+| Cloudflare | `wrangler` skill; `cloudflare-docs` MCP | [cloudflare/skills](https://github.com/cloudflare/skills) 6eb6c781, Apache-2.0; [docs server](https://github.com/cloudflare/mcp-server-cloudflare/tree/a21972e219289337731a066befb5c66886b9ce7b/apps/docs-ai-search) a21972e2, Apache-2.0, no auth | `cloudflare` plugin bundles the OAuth API server `mcp.cloudflare.com` that can change accounts; the umbrella `cloudflare` skill is ~3,900 words and triggers on any architecture question |
+| Twilio | `twilio-docs` MCP | [twilio/ai](https://github.com/twilio/ai) 803790a2, MIT; [docs](https://www.twilio.com/docs/ai/mcp): public beta, read-only, no auth | `twilio-developer-kit` plugin adds 57 skills, mostly messaging and SendGrid; none covers Media Streams; the webhook skill validates `request.url`, which may not match the signed URL behind this repo's tunnel/proxy |
+| Pipecat | none (`ledger-voice`) | [pipecat-ai/skills](https://github.com/pipecat-ai/skills) cca35d3b, BSD-2-Clause, reviewed | Its skills scaffold projects, deploy to Pipecat Cloud or drive a voice MCP; `pipecat-dev` targets Pipecat contributors; [Context Hub](https://docs.pipecat.ai/api-reference/context-hub/overview.md) needs a tool install and a local ~900 MB embedded index |
+| ElevenLabs | none (links in `ledger-voice`) | [elevenlabs/skills](https://github.com/elevenlabs/skills) 9763c39a, MIT, reviewed | Generic `speech-to-text`/`text-to-speech` triggers and direct-SDK, `ELEVENLABS_API_KEY` setup instead of the Pipecat services; the [hosted MCP](https://elevenlabs.io/docs/eleven-api/resources/mcp-server.md) uses OAuth, spends credits and manages agents; no docs MCP exists |
+| Qdrant | `qdrant-multitenancy` skill; `qdrant-docs` MCP | [qdrant/skills](https://github.com/qdrant/skills) 9f55f6a7, Apache-2.0; [docs server](https://qdrant.tech/documentation/qdrant-mcp/docs/), no auth | Plugin adds 33 skills (14 top-level); `qdrant-search-quality` overlaps `ledger-evaluation` and sets `allowed-tools`; `qdrant-model-migration` suggests in-place vector migration, against isolated rebuilds; `qdrant-advisor` loads unpinned instructions; Cloud MCP (OAuth) and `mcp-server-qdrant` (key, writes) can act |
+
+Claude Code asks each user to approve `.mcp.json` servers; do not commit
+`enableAllProjectMcpServers`. All three servers answered `tools/list` without
+credentials on 2026-11-09 with only read-only-annotated tools. Codex users can
+add the same URLs with `codex mcp add <name> --url <url>`. `scripts/check_agent_skills.py` accepts only
+these reviewed URLs with `{type: http, url}` and rejects headers, commands and
+secret-looking values. Account-scoped servers and provider plugins stay opt-in
+at user scope, never in the repository; re-review a docs server if it adds
+authenticated tools. No `.claude/settings.json` plugin configuration is committed.
 
 ## Official Modal skill
 
@@ -79,17 +112,20 @@ uv run --locked --group compute modal skills install --yes --no-docs
 `--no-docs` intentionally avoids vendoring a large, rapidly stale documentation
 snapshot. The skill links to official docs; use relevant pages/CLI `--help`
 on demand. It is upstream content, not a project-authored workflow.
-Its broad Modal trigger is upstream policy; the two project skills do not repeat
+Its broad Modal trigger is upstream policy; the project skills do not repeat
 SDK guidance or expand that trigger to unrelated tasks.
 The installed text matches `modal skills show` from the locked SDK (apart from
 terminal whitespace). Its Apache-2.0
 [license](../.agents/skills/modal/LICENSE) is retained from that distribution.
 Source: [Modal Python SDK](https://github.com/modal-labs/modal-client).
 
-To update after a deliberate Modal dependency/lockfile upgrade:
+To update after a deliberate Modal dependency/lockfile upgrade (the CLI replaces
+the whole directory, so restore the license and provenance record):
 
 ```bash
 uv run --locked --group compute modal skills update --yes --no-docs
+git restore .agents/skills/modal/LICENSE .agents/skills/modal/SOURCE.md
+# update Version and the SKILL.md hash in SOURCE.md
 uv run --locked python scripts/check_agent_skills.py
 git diff -- .agents/skills/modal pyproject.toml uv.lock
 ```
@@ -105,47 +141,31 @@ No token is needed for this bundled skill installation.
 `modal token new` is optional browser-based token creation, not a prerequisite
 when credentials already exist. Revoke exposed credentials before production use.
 
-For one-time workstation configuration, enter credentials in your own terminal,
-not in command arguments, source files or chat:
+The Modal token for the project workspace lives in the encrypted secret store
+([secrets](SECRETS.md)), not in `~/.modal.toml`. `ledgerctl modal` injects
+`MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` and the mapped `MODAL_ENVIRONMENT` into the
+CLI process only; the SDK reads them directly and they override any local profile.
+No `token set`, profile file or browser is needed. This read-only check verifies
+access without starting compute:
 
 ```bash
-uv run --locked --group compute modal token set --profile ledger --activate --verify
-uv run --locked --group compute modal app list --limit 5
-```
-
-With token arguments omitted, `token set` prompts for them and writes the local
-Modal configuration outside the repository. This requires terminal input, but
-not a browser. Use `modal profile activate ledger` to select an existing
-profile. Profile selection alone does not verify access.
-
-For fully noninteractive CI/deployment, have the secret manager inject
-`MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` into the CLI/SDK process environment.
-The installed SDK reads them directly; no `token set`, profile file or browser
-is needed. Environment values override profile values. Disable shell tracing
-and never dump the environment or print secrets. The repository does not yet
-provision Vault delivery of these two platform credentials.
-
-After injection, this read-only check verifies access without starting compute:
-
-```bash
-uv run --locked --group compute modal app list --limit 5
+ledgerctl modal -- app list
 ```
 
 These are separate credential boundaries:
 
 | Credential | Consumer | Purpose |
 |---|---|---|
-| Modal token ID + secret | CLI/SDK/job submitter | Deploy/manage apps and submit remote jobs |
+| Modal token ID + secret (`operator`) | `ledgerctl` and the Modal CLI/SDK | Deploy/manage apps, submit jobs, deliver Modal Secrets |
 | `TEI_API_KEY` in `ledger-tei` | Modal TEI servers and authorized HTTP clients | Protect embedding/reranking endpoints |
 | Qdrant URL + key in `ledger-ingestion` | Modal ingestion/evaluation jobs | Direct vector database reads/writes |
 | LLM base URL + key in `ledger-llm` | Modal evaluation jobs | OpenAI-compatible answer generation |
-| Vault identity/token | Secret projection process | Read approved Vault paths |
+| `LEDGER_LLM_SERVE_API_KEY` in `ledger-llm-serve` | Self-hosted vLLM endpoint and its clients | Protect the open-weight LLM endpoint |
 
-[Vault projection](../scripts/sync_modal_secrets.sh) provisions `ledger-tei`,
-`ledger-ingestion` and `ledger-llm`;
-it does **not** log the CLI into Modal. HTTP clients of the deployed TEI endpoints
-use the TEI key, not platform credentials or browser login. A backend that also
-submits SDK jobs still needs platform authentication.
+`ledgerctl push <env>` provisions those Modal Secrets from the
+[manifest](../config/secrets.toml); platform tokens are never delivered to a
+runtime. HTTP clients of the deployed TEI endpoints use the TEI key, not platform
+credentials or browser login.
 
 ## Compute placement
 
@@ -165,20 +185,25 @@ submits SDK jobs still needs platform authentication.
 
 ## Maintenance and validation
 
-- Keep project skills around 40-60 lines; 120 is the validator's ceiling, not a target.
-  Add a skill only for a demonstrated, repeatable workflow that docs alone do not cover.
+- Name project skills `ledger-*` and keep them around 40-60 lines; 120 lines and
+  800 words are the validator's ceiling, not a target. Add a skill only for a
+  demonstrated, repeatable workflow that docs alone do not cover.
   Use common `name`/`description` fields; avoid client-specific tool/model bindings.
+- Vendor a provider skill only from the provider's own repository, unmodified, with
+  just the files its `SKILL.md` links to, its upstream `LICENSE` and a `SOURCE.md`.
+  Vendored ceilings follow the Agent Skills spec: 500 lines and 3,500 words.
 - Link to existing source/tests/docs instead of copying implementations.
 - When adding a skill, add its relative directory symlink in `.claude/skills`;
   remove that alias when retiring the skill. CI rejects missing or stale aliases.
 - Update commands when modules or CLI flags change. Keep proposals separate from
   implemented features; carry durable decisions into the research ledger.
-- CI validates frontmatter, naming, descriptions, line budgets, local links,
-  the Claude import/alias and official Modal version against `uv.lock`:
+- CI validates frontmatter, naming, descriptions, budgets, local links in every
+  skill file, vendored provenance and hashes, relative Claude aliases, the Claude
+  import, `.mcp.json` and the official Modal version against `uv.lock`:
 
   ```bash
   uv run --locked python scripts/check_agent_skills.py
-  uv run --locked pytest -q tests/unit/test_agent_skills.py
+  uv run --locked pytest -q scripts/tests/test_agent_skills.py
   ```
 
 These are static repository checks, not proof a client loaded the skill or obeyed
@@ -191,7 +216,7 @@ Run focused tests for the changed component first. The broader service gate is:
 ```bash
 uv run --locked ruff check .
 uv run --locked ruff format --check .
-uv run --locked mypy src/ledger_rag
+uv run --locked mypy
 uv run --locked --group compute pytest -q
 ```
 
@@ -208,5 +233,6 @@ changes need the applicable link/skill checks, not model servers or paid jobs.
 - [Claude Code memory imports](https://code.claude.com/docs/en/memory)
 - [OpenCode skills](https://opencode.ai/docs/skills/)
 - [VS Code Agent Skills](https://code.visualstudio.com/docs/copilot/customization/agent-skills)
+- [Claude Code MCP project scope](https://code.claude.com/docs/en/mcp)
 - [Modal skills CLI](https://modal.com/docs/reference/cli/skills)
 - [Modal authentication/configuration](https://modal.com/docs/sdk/py/latest/config)

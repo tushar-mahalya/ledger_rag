@@ -79,7 +79,7 @@ remain open. No production deployment or trained-model promotion occurred.
 ```bash
 uv run --locked --group compute ruff check .
 uv run --locked --group compute ruff format --check .
-uv run --locked --group compute mypy src/ledger_rag scripts/clone_qdrant_benchmark.py
+uv run --locked --group compute mypy scripts/clone_qdrant_benchmark.py
 uv run --locked --group compute mypy --strict --ignore-missing-imports compute
 uv run --locked --group compute pytest -q
 uv run --locked python scripts/check_agent_skills.py

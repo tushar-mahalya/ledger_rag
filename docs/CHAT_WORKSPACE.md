@@ -9,8 +9,8 @@ supporting evidence in view without conflating them with model reasoning.
 Requires Node 22.12+ and the existing Python backend prerequisites:
 
 ```bash
-npm ci --prefix web --ignore-scripts
-npm --prefix web run dev
+npm ci --prefix services/web --ignore-scripts
+npm --prefix services/web run dev
 ```
 
 Open `http://127.0.0.1:5173`. The initial **design preview** uses curated answers
@@ -103,7 +103,7 @@ payloads without them still parse; the surfaces simply do not render.
 The demo mode includes a verified three-step growth calculation, verified
 comparison and liquidity answers, and an abstained forecast question. The demo
 texts were checked against the backend number checker. Contract fixtures in
-`web/src/fixtures/answers.json` are produced by running the real chat pipeline
+`contracts/answers.json` are produced by running the real chat pipeline
 offline. Regenerate them, with the JSON Schema used by the bound-parity test, via
 `uv run --frozen python scripts/dump_contract_fixtures.py` when the models change
 (`--check` fails when they are stale). The wire contract, including units, activity
@@ -142,12 +142,11 @@ dependency. The client does not invent charts from untyped numeric prose.
 
 ```bash
 # Configure the backend demo token as in README before running.
-docker compose -f compose.yaml -f deploy/compose.chat.yaml \
-  --profile chat up --build -d api web
+docker compose --profile chat up --build -d engine web
 ```
 
 Open `http://127.0.0.1:3001`. A pinned, non-root Nginx image serves the static
-build and proxies `/v1/` to `api:8080` without buffering SSE. CSP disallows inline
+build and proxies `/v1/` to `engine:8080` without buffering SSE. CSP disallows inline
 scripts, raw HTML execution, framing and off-origin connections. The reference
 binds only to localhost. Public hosting still requires TLS, OIDC deployment,
 approved provider configuration and the existing operational release gates.
@@ -160,14 +159,14 @@ logs remain the source of service-wide performance measurements.
 ## Reproducible checks
 
 ```bash
-npm --prefix web run lint
-npm --prefix web test
-npm --prefix web run build
-npm --prefix web run check:budget
-npm --prefix web exec -- playwright install --with-deps chromium
-npm --prefix web run test:e2e
+npm --prefix services/web run lint
+npm --prefix services/web test
+npm --prefix services/web run build
+npm --prefix services/web run check:budget
+npm --prefix services/web exec -- playwright install --with-deps chromium
+npm --prefix services/web run test:e2e
 # Uses the repository .venv; starts and stops isolated local API/UI processes.
-npm --prefix web run test:live
+npm --prefix services/web run test:live
 ```
 
 Unit cases cover event framing/UTF-8, payload bounds, completion/error semantics,

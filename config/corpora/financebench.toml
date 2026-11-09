@@ -1,0 +1,28 @@
+# Corpus spec: python -m ledger_rag.corpus plan|build|status|promote|rollback financebench
+id = "financebench"
+description = "FinanceBench open sample filings (CC-BY-NC-4.0, evaluation only)"
+tenant = "financebench"
+
+[source]
+kind = "dataset"     # pinned, SHA-256-verified dataset registry
+name = "financebench"
+
+[access]
+# Groups for documents without an ACL; empty means visible to every reader of the tenant.
+default_groups = []
+classification = "public"
+
+[processing]
+chunk_profile = "v1"
+metadata = ["dataset", "company", "fiscal_year"]
+
+[embedding]
+model = "Alibaba-NLP/gte-modernbert-base"
+revision = "e7f32e3c00f91d699e8c43b53106206bcc72bb22"
+dimensions = 768
+quantization = "none"
+
+[index]
+# Serving alias; each build is the collection <alias>__<build_id>.
+alias = "financebench_gte_modernbert"
+keep_builds = 2

@@ -8,7 +8,7 @@ description: "Use when executing or releasing Ledger's Modal training and GPU in
 [training app](../../../compute/training.py),
 [inference app](../../../compute/inference.py),
 [colocated ingestion](../../../compute/ingestion.py),
-[registry](../../../src/ledger_rag/training/registry.py).
+[registry](../../../services/engine/src/ledger_rag/training/registry.py).
 SDK details: [upstream Modal skill](../modal/SKILL.md).
 Credentials: [headless authentication](../../../docs/AGENT_WORKFLOWS.md#headless-modal-authentication).
 
@@ -19,13 +19,13 @@ Credentials: [headless authentication](../../../docs/AGENT_WORKFLOWS.md#headless
   The local CLI coordinates remote calls; it need not do model computation.
 - Local unit tests, synthetic smoke and explicit CPU parity checks are valid.
   A warm query-serving tier avoids scale-to-zero cold starts on IVR traffic.
-- Verify platform access with `modal app list --limit 5` under the locked compute
-  environment. A profile selection alone is not proof of access. Missing auth
-  blocks remote work; do not silently substitute local CPU inference.
-- Platform tokens authenticate CLI/SDK calls. `ledger-tei` / `TEI_API_KEY` protects
-  HTTP inference separately. Jobs should fetch data-plane keys through Vault
-  [workload identity](../../../docs/OPERATIONS.md#modal-workload-identity); the
-  [Vault projection](../../../scripts/sync_modal_secrets.sh) is the fallback.
+- Verify platform access with `ledgerctl modal app list` (the Modal token comes
+  from the encrypted store, not a local profile). Missing auth blocks remote work;
+  do not silently substitute local CPU inference.
+- Platform tokens authenticate CLI/SDK calls only. `ledger-tei` / `TEI_API_KEY`
+  protects HTTP inference separately. Data-plane keys reach jobs as Modal Secrets
+  delivered by `ledgerctl push <env>` from the
+  [secret manifest](../../../config/secrets.toml); see [secrets](../../../docs/SECRETS.md).
 
 ## Job and release checks
 
@@ -42,6 +42,6 @@ Credentials: [headless authentication](../../../docs/AGENT_WORKFLOWS.md#headless
 ## Offline validation
 
 ```bash
-uv run --locked pytest -q tests/unit/test_training.py
+uv run --locked pytest -q services/engine/tests/unit/test_training.py
 uv run --locked --group compute mypy --strict --ignore-missing-imports compute
 ```

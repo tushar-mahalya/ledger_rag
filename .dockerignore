@@ -1,10 +1,12 @@
+# Build context for services/engine/Dockerfile (repository root): workspace
+# metadata plus the engine sources only.
 *
-!Dockerfile
 !pyproject.toml
 !uv.lock
-!src/
-!src/**
-!deploy/
-!deploy/wait-for-secrets.py
+!services/engine/pyproject.toml
+!services/engine/src/
+!services/engine/src/**
+!services/voice/pyproject.toml
+!tools/ledgerctl/pyproject.toml
 **/__pycache__/
 **/*.pyc

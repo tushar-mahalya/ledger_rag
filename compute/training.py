@@ -3,6 +3,7 @@
 Stages (each a Modal Function with right-sized hardware):
 
     fetch_finqa      CPU   pinned FinQA download + SHA-256 verification -> ledger-data volume
+                           (the shared registry in ledger_rag.evaluation.datasets)
     build_dataset    CPU   leakage-safe triplets/IR sets (ledger_rag.training.data)
     finetune_*       GPU   baseline eval -> train -> candidate eval (dev) -> promotion gate
                            -> held-out test eval -> ONNX fp32 + INT8 export -> registry
@@ -39,9 +40,12 @@ RERANKER_BASE = "Alibaba-NLP/gte-reranker-modernbert-base"
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("curl", "git")
-    .uv_sync(uv_project_dir=str(ROOT), groups=["train"], extra_options="--no-dev")
+    # Hash-pinned export of uv.lock (scripts/export_requirements.py); uv_sync does not
+    # support uv workspaces.
+    .uv_pip_install(
+        requirements=[str(Path(__file__).with_name("requirements") / "engine-train.txt")]
+    )
     .env({"HF_HOME": str(CACHE / "hf"), "TOKENIZERS_PARALLELISM": "false"})
-    .add_local_file(ROOT / "scripts/fetch_finqa.sh", "/opt/ledger/fetch_finqa.sh")
     .add_local_python_source("ledger_rag")
 )
 
@@ -64,7 +68,9 @@ def _log(event: str, **fields: Any) -> None:
 @app.function(volumes=VOLUMES, timeout=900, retries=RETRIES)
 def fetch_finqa() -> str:
     target = DATA / "finqa"
-    subprocess.run(["bash", "/opt/ledger/fetch_finqa.sh", str(target)], check=True)
+    from ledger_rag.evaluation.datasets.fetch import fetch_verified
+
+    fetch_verified("finqa", target)
     data_volume.commit()
     _log("finqa.fetched", path=str(target))
     return str(target)

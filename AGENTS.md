@@ -9,12 +9,15 @@ not a certified financial-advice system or a proven SOTA result.
 - Use [README](README.md) for setup, [architecture](docs/ARCHITECTURE.md) for
   boundaries, and [research decisions](docs/research/2026-10-31-decisions.md) for
   evidence, alternatives and unimplemented tracks.
-- Python 3.11+ with `uv`; dependency groups are in `pyproject.toml`.
-  Ordinary API work does not need the GPU training group.
-- Shared contracts live in `src/ledger_rag/core`; service packages are under
-  `src/ledger_rag`, Modal jobs under `compute`, deployment assets under `deploy`.
-- [Agent workflows](docs/AGENT_WORKFLOWS.md) lists focused checks and three
-  on-demand skills. Component work does not require a skill or a prescribed
+- Python 3.11+ uv workspace (`services/engine`, `services/voice`, `tools/ledgerctl`)
+  plus the npm project `services/web`. Each unit keeps its code, tests and README
+  together; see README "Repository layout". GPU work lives in `compute` (Modal only),
+  datasets in `python -m ledger_rag.evaluation.datasets`, secrets in `ledgerctl`.
+- Shared contracts are `ledger_rag/core` models and the generated `contracts/`;
+  clients never import engine internals. Ordinary API work needs no GPU group.
+- [Agent workflows](docs/AGENT_WORKFLOWS.md) lists focused checks, on-demand
+  skills (`ledger-*` project workflows plus vendored official provider skills) and
+  the read-only docs MCP servers in `.mcp.json`. Component work does not require a skill or a prescribed
   reasoning sequence.
 
 ## Project invariants
@@ -30,7 +33,9 @@ not a certified financial-advice system or a proven SOTA result.
 - No silent fallback after provider, reranker or index failures. Preserve deadlines,
   cancellation, concurrency release and sanitized errors.
 - Never print credentials, raw financial documents, prompts or audio in logs.
-  Use Vault-rendered files; never source them. Exposed tokens must be rotated.
+  Secrets live only in the SOPS + age store and reach processes through
+  `ledgerctl` ([secrets](docs/SECRETS.md)); never commit, echo or pass them in
+  argv. Exposed tokens must be rotated.
 - Bulk embedding, reranking benchmarks and training belong on Modal. Local tests
   and explicitly scoped CPU parity checks are exceptions, not a bulk-compute
   fallback. Missing cloud authentication is a blocker; report it.

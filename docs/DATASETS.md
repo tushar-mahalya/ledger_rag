@@ -5,7 +5,7 @@ datasets. All of them are **pinned to an exact upstream revision, verified by
 SHA-256 and normalized offline** into one schema. No dataset file is committed:
 `data/convfinqa/`, `data/tatqa/` and `data/financebench/` are git-ignored.
 Every number below was measured from the pinned artifacts with the adapters in
-[`src/ledger_rag/evaluation/datasets/`](../src/ledger_rag/evaluation/datasets/)
+[`src/ledger_rag/evaluation/datasets/`](../services/engine/src/ledger_rag/evaluation/datasets/)
 on 2026-10-31.
 
 | Dataset | License (verified) | Usage | Ledger corpus | Qdrant collection |
@@ -30,9 +30,9 @@ flowchart LR
         FB["FinanceBench HF<br/>PatronusAI/financebench@e04404e"]
         FQ["FinQA GitHub<br/>czyssrs/FinQA@0f16e28"]
     end
-    Sources --> Fetch["scripts/fetch_datasets.py<br/>download + SHA-256 verify"]
+    Sources --> Fetch["datasets fetch<br/>download + SHA-256 verify"]
     Fetch --> Raw["data/&lt;dataset&gt;/ (git-ignored)"]
-    Raw --> Normalize["python -m ledger_rag.evaluation.datasets<br/>re-verify, normalize, stats"]
+    Raw --> Normalize["datasets build<br/>re-verify, normalize, stats"]
     Normalize --> Docs["normalized/documents.jsonl<br/>CorpusDocument"]
     Normalize --> QA["normalized/questions.jsonl<br/>QAItem (gold labels only here)"]
     Docs -->|"modal volume put"| Volume["Modal Volume ledger-data<br/>/datasets/&lt;dataset&gt;/&lt;sha256&gt;/documents.jsonl"]
@@ -102,12 +102,22 @@ The merged file joins the GitHub `financebench_open_source.jsonl` questions with
 
 ## Fetch and normalize
 
+One CLI drives the whole pipeline; every dataset, FinQA included, is registered
+with its pinned revision, license, usage and per-file SHA-256 in
+[`sources.py`](../services/engine/src/ledger_rag/evaluation/datasets/sources.py).
+Modal jobs call the same verified fetcher, so local and cloud builds read identical
+bytes.
+
 ```bash
-uv run --frozen python scripts/fetch_datasets.py            # all, or: tatqa convfinqa financebench
-uv run --frozen python -m ledger_rag.evaluation.datasets convfinqa --finqa-dir data/finqa
-uv run --frozen python -m ledger_rag.evaluation.datasets tatqa
-uv run --frozen python -m ledger_rag.evaluation.datasets financebench
+uv run --frozen python -m ledger_rag.evaluation.datasets fetch    # all, or: finqa tatqa convfinqa financebench
+uv run --frozen python -m ledger_rag.evaluation.datasets build convfinqa --finqa-dir data/finqa
+uv run --frozen python -m ledger_rag.evaluation.datasets build tatqa
+uv run --frozen python -m ledger_rag.evaluation.datasets build financebench
 ```
+
+FinQA has no `build` step: its benchmark reads the raw splits directly. Indexing any of
+these is a corpus build (`config/corpora/{finqa,tatqa,financebench}.toml`,
+[ADR 0007](adr/0007-corpus-pipeline.md)); ConvFinQA is evaluated against the FinQA corpus.
 
 The fetcher uses only the standard library. It writes to a `.partial` file and
 moves it into place only after the SHA-256 check passes, so mismatched downloads
@@ -129,9 +139,9 @@ version 1. A change to an adapter changes them.
 
 ## Normalized schema
 
-The schema is defined in [`schema.py`](../src/ledger_rag/evaluation/datasets/schema.py).
+The schema is defined in [`schema.py`](../services/engine/src/ledger_rag/evaluation/datasets/schema.py).
 
-**`CorpusDocument`** subclasses [`Document`](../src/ledger_rag/core/models.py)
+**`CorpusDocument`** subclasses [`Document`](../services/engine/src/ledger_rag/core/models.py)
 (`id`, `tenant_id`, `title`, `text`, `source`, `published_at`, `allowed_groups`)
 and adds `dataset`, `company`, `fiscal_year` and `units`. The JSONL can be ingested
 as is: `jsonl_documents` ignores the extra fields, so the bytes uploaded to Modal
@@ -317,8 +327,8 @@ extract them page by page on Modal CPU workers with a pinned PDF extractor, and
 emit `<doc_name>/page_<n>` documents with the same id scheme. The current gold
 ids then stay valid, and every non-gold page becomes a distractor. Ingest them
 into a new `financebench_fullfilings_gte_modernbert_v1` collection. The existing
-[`prepare_financebench.py`](../scripts/prepare_financebench.py) document-level
-converter remains the path for independently prepared filing corpora.
+`datasets prepare-financebench` document-level converter
+([`financebench_full.py`](../services/engine/src/ledger_rag/evaluation/datasets/financebench_full.py)) remains the path for independently prepared filing corpora.
 
 ## Modal ingestion runs (2026-10-31)
 

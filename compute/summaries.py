@@ -23,8 +23,9 @@ DATA = Path("/data")
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("curl")
-    .uv_sync(uv_project_dir=str(ROOT), extra_options="--no-dev")
-    .add_local_file(ROOT / "scripts/fetch_finqa.sh", "/opt/ledger/fetch_finqa.sh")
+    # Hash-pinned export of uv.lock (scripts/export_requirements.py); uv_sync does not
+    # support uv workspaces.
+    .uv_pip_install(requirements=[str(Path(__file__).with_name("requirements") / "engine.txt")])
     .add_local_python_source("ledger_rag")
 )
 app = modal.App("ledger-summaries", image=image)
@@ -53,6 +54,7 @@ async def summarize(model: str, limit: int, git_sha: str) -> dict[str, object]:
     import httpx
 
     from ledger_rag.evaluation.benchmarks.finqa import DATASET_COMMIT, load
+    from ledger_rag.evaluation.datasets.fetch import fetch_verified
     from ledger_rag.ingestion.context import (
         SUMMARY_PROMPT_VERSION,
         load_summaries,
@@ -67,11 +69,8 @@ async def summarize(model: str, limit: int, git_sha: str) -> dict[str, object]:
     start = time.monotonic()
     await data_volume.reload.aio()  # type: ignore[no-untyped-call]
     with tempfile.TemporaryDirectory(prefix="ledger-summaries-") as directory:
-        fetch = await asyncio.create_subprocess_exec(
-            "bash", "/opt/ledger/fetch_finqa.sh", directory
-        )
-        if await fetch.wait() != 0:
-            raise RuntimeError("Pinned FinQA fetch or checksum verification failed")
+        # Pinned, SHA-256-verified (the shared dataset registry).
+        await asyncio.to_thread(fetch_verified, "finqa", Path(directory))
         corpus, _ = await asyncio.to_thread(load, Path(directory))
     documents = list(corpus.documents.values())
     if limit > 0:

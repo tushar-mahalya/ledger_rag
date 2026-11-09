@@ -1,8 +1,15 @@
+# Local orchestration for the whole repository. The default starts only the engine on
+# fictional demo data; profiles add optional parts:
+#   --profile chat           web workspace on 127.0.0.1:3001
+#   --profile qdrant         local vector store for development
+#   --profile observability  telemetry stack (deploy/observability)
 name: ledger-rag
 services:
-  api:
-    build: .
-    image: ledger-rag:local
+  engine:
+    build:
+      context: .
+      dockerfile: services/engine/Dockerfile
+    image: ledger-engine:local
     init: true
     restart: unless-stopped
     ports: ["127.0.0.1:8080:8080"]
@@ -27,48 +34,28 @@ services:
       driver: json-file
       options: {max-size: "10m", max-file: "3"}
 
+  # Optional local vector store for development (`--profile qdrant`). Shared and
+  # production indexes live in the managed Qdrant cluster configured via scripts/dx.
   qdrant:
-    profiles: [production]
+    profiles: [qdrant]
     image: qdrant/qdrant:v1.20.0@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
     restart: unless-stopped
     ports: ["127.0.0.1:6333:6333"]
     volumes:
       - qdrant-data:/qdrant/storage
-      - ./deploy/private/qdrant.yaml:/qdrant/config/production.yaml:ro
     mem_limit: 2g
     cpus: 2.0
     security_opt: ["no-new-privileges:true"]
 
-  vault:
-    profiles: [production]
-    image: hashicorp/vault:2.2.1@sha256:962a92876e168d68eaaa24b0b8b49bbce1cb63024060a67bba95cd158a366fc2
-    command: ["server"]
-    restart: unless-stopped
-    ports: ["127.0.0.1:8200:8200"]
-    environment:
-      VAULT_ADDR: https://vault:8200
-      VAULT_CACERT: /vault/tls/ca.crt
-    volumes:
-      - vault-data:/vault/file
-      - ./deploy/vault/server.hcl:/vault/config/server.hcl:ro
-      - ./deploy/private/vault-tls:/vault/tls:ro
-    cap_add: [IPC_LOCK]
-    mem_limit: 512m
-    cpus: 0.5
-    healthcheck:
-      test: ["CMD", "vault", "status"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
+  # Telemetry stack (`--profile observability`); see docs/OPERATIONS.md.
   otel-collector:
-    profiles: [production]
+    profiles: [observability]
     image: otel/opentelemetry-collector-contrib:0.164.0@sha256:340c9ca6a36617084c6661bdc4f0fe92b7cda5a805d61673ec8db375fddc522b
     command: ["--config=/etc/otelcol/config.yaml"]
     restart: unless-stopped
     volumes:
-      - ./deploy/otel-collector.yaml:/etc/otelcol/config.yaml:ro
-      - ./deploy/private/metrics-token:/run/telemetry-secrets/metrics-token:ro
+      - ./deploy/observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - ./deploy/observability/private/metrics-token:/run/telemetry-secrets/metrics-token:ro
     read_only: true
     cap_drop: [ALL]
     mem_limit: 512m
@@ -76,20 +63,20 @@ services:
     depends_on: [tempo, loki]
 
   prometheus:
-    profiles: [production]
+    profiles: [observability]
     image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
     command: ["--config.file=/etc/prometheus/prometheus.yaml", "--storage.tsdb.retention.time=15d"]
     restart: unless-stopped
     ports: ["127.0.0.1:9090:9090"]
     volumes:
-      - ./deploy/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - ./deploy/observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
       - prometheus-data:/prometheus
     mem_limit: 768m
     cpus: 0.5
     depends_on: [otel-collector]
 
   grafana:
-    profiles: [production]
+    profiles: [observability]
     image: grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
     restart: unless-stopped
     ports: ["127.0.0.1:3000:3000"]
@@ -100,37 +87,59 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./deploy/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/ledger.yaml:ro
-      - ./deploy/private/grafana-admin-password:/run/grafana-admin-password:ro
+      - ./deploy/observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/ledger.yaml:ro
+      - ./deploy/observability/private/grafana-admin-password:/run/grafana-admin-password:ro
     mem_limit: 512m
     cpus: 0.5
     depends_on: [prometheus, loki, tempo]
 
   loki:
-    profiles: [production]
+    profiles: [observability]
     image: grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
     command: ["-config.file=/etc/loki/ledger.yaml"]
     restart: unless-stopped
     volumes:
-      - ./deploy/loki.yaml:/etc/loki/ledger.yaml:ro
+      - ./deploy/observability/loki.yaml:/etc/loki/ledger.yaml:ro
       - loki-data:/loki
     mem_limit: 512m
     cpus: 0.5
 
   tempo:
-    profiles: [production]
+    profiles: [observability]
     image: grafana/tempo:2.10.10@sha256:12b0820f13ffa10ce956b6e9acc3b03f3cffded99109be6cc09d106fe56e5d38
     command: ["-config.file=/etc/tempo/ledger.yaml"]
     restart: unless-stopped
     volumes:
-      - ./deploy/tempo.yaml:/etc/tempo/ledger.yaml:ro
+      - ./deploy/observability/tempo.yaml:/etc/tempo/ledger.yaml:ro
       - tempo-data:/var/tempo
     mem_limit: 768m
     cpus: 0.5
 
+  # Research workspace (`--profile chat`), served by nginx and proxying to the engine.
+  web:
+    profiles: [chat]
+    build:
+      context: ./services/web
+    image: ledger-workspace:local
+    init: true
+    restart: unless-stopped
+    ports: ["127.0.0.1:3001:8080"]
+    depends_on:
+      engine:
+        condition: service_healthy
+    read_only: true
+    tmpfs: ["/tmp:size=16m,uid=101,gid=101,mode=0700"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
 volumes:
   qdrant-data:
-  vault-data:
   prometheus-data:
   grafana-data:
   loki-data:

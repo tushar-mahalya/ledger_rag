@@ -1,0 +1,29 @@
+# Corpus spec: python -m ledger_rag.corpus plan|build|status|promote|rollback finqa
+id = "finqa"
+description = "FinQA annual report pages (MIT), the benchmark corpus also used by ConvFinQA"
+tenant = "finqa"
+
+[source]
+kind = "dataset"     # pinned, SHA-256-verified dataset registry
+name = "finqa"
+
+[access]
+# Groups for documents without an ACL; empty means visible to every reader of the tenant.
+default_groups = []
+classification = "public"
+
+[processing]
+chunk_profile = "v1"
+# FinQA builds keep no metadata so their fingerprint matches existing indexes.
+metadata = []
+
+[embedding]
+model = "Alibaba-NLP/gte-modernbert-base"
+revision = "e7f32e3c00f91d699e8c43b53106206bcc72bb22"
+dimensions = 768
+quantization = "none"
+
+[index]
+# Serving alias; each build is the collection <alias>__<build_id>.
+alias = "finqa_gte_modernbert"
+keep_builds = 2
