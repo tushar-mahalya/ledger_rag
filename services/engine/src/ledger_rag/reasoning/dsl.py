@@ -23,7 +23,7 @@ from dataclasses import dataclass
 BINARY_OPS = frozenset({"add", "subtract", "multiply", "divide", "exp", "greater"})
 TABLE_OPS = frozenset({"table_max", "table_min", "table_sum", "table_average"})
 OPS = BINARY_OPS | TABLE_OPS
-MAX_STEPS = 10
+MAX_STEPS = 16
 MAX_PROGRAM_CHARS = 2000
 
 _STEP = re.compile(
@@ -33,6 +33,12 @@ _REF = re.compile(r"#(\d+)")
 _CONST = re.compile(r"const_(?:m1|\d+(?:\.\d+)?)")
 _NUMBER = re.compile(r"-?(?:\d+(?:\.\d+)?|\.\d+)%?")
 _MARKER = re.compile(r"^\s*(?:\*\*)?program(?:\*\*)?\s*[:=]\s*", re.IGNORECASE | re.MULTILINE)
+
+
+def _constant_value(constant: str) -> str:
+    """``const_100`` -> ``100``; ``const_m1`` -> ``-1`` (constants are checked too)."""
+    name = constant.removeprefix("const_")
+    return "-1" if name == "m1" else name
 
 
 class ProgramParseError(ValueError):
@@ -62,15 +68,15 @@ class Program:
         return ", ".join(step.render() for step in self.steps)
 
     def literals(self) -> list[str]:
-        """Numeric operands (not constants, step references or table rows)."""
+        """Numeric operands, constants as the numbers they name (not steps or rows)."""
         if self.value is not None:
             return [self.value]
         return [
-            arg
+            _constant_value(arg) if arg.startswith("const_") else arg
             for step in self.steps
             if step.op in BINARY_OPS
             for arg in step.args
-            if not arg.startswith("#") and not arg.startswith("const_")
+            if not arg.startswith("#")
         ]
 
     def table_rows(self) -> list[str]:
@@ -249,7 +255,7 @@ class _Flattener:
         return len(self.steps) - 1
 
 
-def _candidate(text: str) -> str:
+def candidate_text(text: str) -> str:
     """The paragraph after the last ``PROGRAM:`` marker, else the last one with a step."""
     markers = list(_MARKER.finditer(text))
     if markers:
@@ -262,7 +268,7 @@ def parse(text: str) -> Program:
     """Recover the program from a model reply; raises :class:`ProgramParseError`."""
     if len(text) > 20 * MAX_PROGRAM_CHARS:
         raise ProgramParseError("reply is too long")
-    body = _candidate(text)
+    body = candidate_text(text)
     calls = _Scanner(body).calls()
     if not calls:
         bare = (body if _MARKER.search(text) else text).strip().strip("`*").strip()

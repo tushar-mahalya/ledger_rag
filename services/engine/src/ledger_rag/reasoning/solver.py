@@ -15,31 +15,31 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from ledger_rag.reasoning.consistency import Candidate, Decision, decide
-from ledger_rag.reasoning.dsl import Program, ProgramParseError, parse
+from ledger_rag.reasoning.dsl import Program, ProgramParseError
 from ledger_rag.reasoning.exemplars import Exemplar, render
+from ledger_rag.reasoning.expression import read_program
 from ledger_rag.reasoning.grounding import Evidence, repair_rows, ungrounded
 
-PROMPT_VERSION = "pot-dsl-v3"
+PROMPT_VERSION = "pot-expression-v4"
 SYSTEM_PROMPT = """You answer numerical questions about a page of a company's annual report.
-Do not calculate anything yourself: write a program, and a calculator will execute it.
+Do not calculate anything yourself: write one arithmetic expression, and a calculator
+will evaluate it.
 
-Operations, each with exactly two operands:
-  add(a, b)  subtract(a, b)  multiply(a, b)  divide(a, b)  exp(a, b)
-  greater(a, b)  -> yes if a > b, else no
-  table_sum(ROW, none)  table_average(ROW, none)  table_max(ROW, none)  table_min(ROW, none)
-    ROW is the exact text of a table row's first cell; these aggregate that row's numbers.
-Operands: a number copied exactly from the page or question (no $ or thousands separators;
-keep a trailing % if the page shows one), a constant (const_2, const_3, ... for counts such
-as the number of years averaged, const_100, const_1000, const_1000000, const_m1 for -1)
-or #k, the result of step k (#0 is the first step; never nest operations).
-The result of the last step is the answer. In a conversation, answer only the last question;
-earlier answers are context. Follow the conventions of the solved examples, for example
-whether a percentage is left as a ratio or multiplied by const_100.
+The expression uses numbers copied exactly from the page or question (keep a % sign if
+the page shows one), + - * / and ** with parentheses, and optionally:
+  table_sum("ROW")  table_average("ROW")  table_max("ROW")  table_min("ROW")
+    which aggregate the numbers of the table row whose first cell is exactly ROW;
+  a > b  for yes/no comparisons.
+Counts such as the number of years averaged and unit factors (100, 1000) may be
+written directly. If the answer is a single figure on the page, write just that number.
+In a conversation, answer only the last question; earlier answers can be reused.
+Follow the conventions of the solved examples, for example whether a percentage is
+left as a ratio or multiplied by 100.
 
 Reply in exactly this format and nothing after it:
 FACTS:
 - <each figure you use and what it measures>
-PROGRAM: <steps separated by ", ">"""
+PROGRAM: <one expression, e.g. (5829 - 5735) / 5735>"""
 
 
 @dataclass(frozen=True)
@@ -178,7 +178,7 @@ class Solution:
 def run_program(text: str, problem: Problem, evidence: Evidence, executor: Executor) -> Candidate:
     """Parse, ground and execute a program reply into a voting candidate."""
     try:
-        program = repair_rows(parse(text), evidence)
+        program = repair_rows(read_program(text), evidence)
     except ProgramParseError:
         return Candidate(None, None, "parse")
     if ungrounded(program, evidence):
@@ -278,8 +278,9 @@ class Solver:
     async def solve(self, problem: Problem) -> Solution:
         shots = self.exemplar_search(problem) if self.exemplar_search else []
         prompt = messages(problem, shots, self.task.system_prompt)
+        earlier = [f"{question} {answer}" for question, answer in problem.history]
         evidence = Evidence.build(
-            [*problem.pre_text, *problem.post_text], problem.table, problem.question
+            [*problem.pre_text, *problem.post_text, *earlier], problem.table, problem.question
         )
         first = await self._round(prompt, self.samples, problem, evidence)
         candidates = [candidate for candidate, _ in first]

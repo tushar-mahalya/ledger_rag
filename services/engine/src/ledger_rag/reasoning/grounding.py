@@ -5,9 +5,10 @@ or question, either as written (``5,829`` in ``$5,829 million``), in base units
 (``5829000000``) or a percentage as a fraction (``0.05`` for ``5%``), ignoring sign
 (filings show decreases as ``(1,234)`` or in prose).
 A trailing ``%`` on the literal is notation only; the digits must still match.
-Constants (``const_100``, small counts and unit factors in :data:`CONSTANTS`) and
-step references are always grounded; table rows must name a row of the evidence
-table (:func:`repair_rows` first maps case or spelling slips to the unique close row).
+Constants are checked as the numbers they name: counts and unit factors in
+:data:`CONSTANTS` are allowed, ``const_30200`` is not. Step references are grounded;
+table rows must name a row of the evidence table (:func:`repair_rows` first maps case
+or spelling slips to the unique close row).
 Ungrounded programs are treated as invalid samples: they cannot win a vote, so a
 reader cannot invent its own inputs.
 """
@@ -23,7 +24,9 @@ from ledger_rag.reasoning.dsl import TABLE_OPS, Program, Step
 
 # Counts and unit factors a program may use without quoting them (FinQA's constants:
 # "average over 3 years", "in thousands"). Any other number must come from evidence.
-CONSTANTS = frozenset(Decimal(v) for v in (*range(1, 13), 100, 1000, 10000, 1000000))
+CONSTANTS = frozenset(
+    Decimal(v) for v in (*range(1, 13), 100, 1000, 10000, 100000, 1000000, 10000000, 10**9)
+)
 
 # Spelled-out counts in the evidence or question that annotators use ("over three years").
 _WORDS = {

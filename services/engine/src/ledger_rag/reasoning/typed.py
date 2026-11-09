@@ -30,26 +30,23 @@ First decide the answer type, then answer in the matching way:
 - span: one piece of text copied exactly from the table or paragraphs -> ANSWER
 - multi-span: several pieces copied exactly, separated by " | " -> ANSWER
 - count: how many items -> ANSWER (an integer)
-- arithmetic: a calculation -> PROGRAM. Never calculate yourself; a calculator executes it.
+- arithmetic: a calculation -> PROGRAM. Never calculate yourself; a calculator evaluates it.
 
-Program operations, each with exactly two operands:
-  add(a, b)  subtract(a, b)  multiply(a, b)  divide(a, b)  exp(a, b)  greater(a, b)
-Operands: a number copied exactly from the table or paragraphs (no $, % or thousands
-separators; write (1,234) as -1234), a constant (const_2, const_100, const_1000,
-const_m1 for -1) or #k, the result of step k (#0 is the first step). The last step is
-the answer.
+PROGRAM is one arithmetic expression over numbers copied exactly from the table or
+paragraphs (no $ or % signs; write (1,234) as -1234) with + - * / and parentheses,
+for example (16284 - 6509) / 6509 * 100.
 
 SCALE is the unit of the answer: none, thousand, million, billion or percent.
 Amounts keep the unit the table or text states (a table "in millions" -> million).
-A percentage answer is in percent: multiply a ratio by const_100 and use SCALE: percent.
+A percentage answer is in percent: multiply a ratio by 100 and use SCALE: percent.
 
 Reply in exactly this format and nothing after it:
 FACTS:
 - <each figure or text you use>
 TYPE: <span|multi-span|count|arithmetic>
 SCALE: <none|thousand|million|billion|percent>
-PROGRAM: <steps separated by ", ">   (arithmetic only)
-ANSWER: <answer>                     (span, multi-span or count only)"""
+PROGRAM: <one expression>   (arithmetic only)
+ANSWER: <answer>            (span, multi-span or count only)"""
 
 _FIELD = re.compile(r"^\s*(?:\*\*)?(TYPE|SCALE|ANSWER)(?:\*\*)?\s*:\s*(.*)$", re.I | re.M)
 _PUNCT = re.compile(f"[{re.escape(string.punctuation)}]")

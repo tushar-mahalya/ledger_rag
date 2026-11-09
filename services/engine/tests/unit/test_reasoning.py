@@ -10,6 +10,7 @@ from ledger_rag.evaluation.official import finqa as official
 from ledger_rag.reasoning.consistency import Candidate, decide, vote_key
 from ledger_rag.reasoning.dsl import ProgramParseError, parse
 from ledger_rag.reasoning.exemplars import Exemplar, ExemplarIndex
+from ledger_rag.reasoning.expression import compile_expression, read_program, render
 from ledger_rag.reasoning.grounding import Evidence, ungrounded
 from ledger_rag.reasoning.solver import Execution, Problem, ProgramTask, Reply, Solver, messages
 
@@ -52,7 +53,7 @@ def test_parse_recovers_canonical_programs(reply: str, program: str) -> None:
         "PROGRAM: subtract(1, 2, 3)",
         "PROGRAM: add(revenue, 2)",
         "PROGRAM: table_sum(#0, none)",
-        "PROGRAM: " + ", ".join("add(1, 2)" for _ in range(11)),
+        "PROGRAM: " + ", ".join("add(1, 2)" for _ in range(17)),
     ],
 )
 def test_parse_rejects_malformed_programs(reply: str) -> None:
@@ -89,7 +90,8 @@ def test_grounding_accepts_evidence_numbers_and_rejects_invented_ones() -> None:
         "what is the change in net revenue?",
     )
     assert ungrounded(parse("subtract(5829, 5735), divide(#0, 5735)"), evidence) == []
-    assert ungrounded(parse("multiply(1.2, 1000000000)"), evidence) == ["1000000000"]
+    assert ungrounded(parse("multiply(1.2, 1000000000)"), evidence) == []  # Unit factor.
+    assert ungrounded(parse("multiply(1.2, 7777)"), evidence) == ["7777"]
     assert ungrounded(parse("divide(1200000000, 3)"), evidence) == []
     assert ungrounded(parse("multiply(12.5%, 120)"), evidence) == []
     assert ungrounded(parse("subtract(5829, 5000)"), evidence) == ["5000"]
@@ -231,3 +233,60 @@ def test_refinement_runs_only_without_a_majority_and_joins_the_vote() -> None:
         refine_samples=2,
     )
     assert asyncio.run(agreed.solve(problem)).refined == ()
+
+
+@pytest.mark.parametrize(
+    ("reply", "program"),
+    [
+        (
+            "PROGRAM: (201 - 128) / 128 * 100",
+            "subtract(201, 128), divide(#0, 128), multiply(#1, 100)",
+        ),
+        ("PROGRAM: $5,829 - $5,735 = $94", "subtract(5829, 5735)"),
+        (
+            'PROGRAM: table_average("net revenue") > 1,000',
+            "table_average(net revenue, none), greater(#0, 1000)",
+        ),
+        ("PROGRAM: 12 < 5", "greater(5, 12)"),
+        ("PROGRAM: (1.02 ^ 3) - 1", "exp(1.02, 3), subtract(#0, 1)"),
+        ("PROGRAM: -(5 - 7)", "subtract(5, 7), multiply(#0, const_m1)"),
+        ("PROGRAM: 325", "325"),
+        ("PROGRAM: const_2012", "2012"),
+        ("PROGRAM: subtract(1, 2), divide(#0, 2)", "subtract(1, 2), divide(#0, 2)"),
+    ],
+)
+def test_expressions_compile_to_the_official_dsl(reply: str, program: str) -> None:
+    assert read_program(reply).text == program
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ["PROGRAM: __import__('os')", "PROGRAM: open('x')", "PROGRAM: a + 1", "PROGRAM: 5 % 2 + (", ""],
+)
+def test_expressions_reject_anything_but_arithmetic(reply: str) -> None:
+    with pytest.raises(ProgramParseError):
+        read_program(reply)
+
+
+def test_render_round_trips_gold_style_programs() -> None:
+    gold = parse("subtract(5829, 5735), divide(#0, 5735), multiply(#1, const_100)")
+    assert render(gold) == "((5829 - 5735) / 5735) * const_100"
+    assert compile_expression(render(gold)).text == gold.text
+    assert render(parse("table_sum(net revenue, none)")) == 'table_sum("net revenue")'
+
+
+def test_constants_are_grounded_as_numbers_and_history_counts_as_evidence() -> None:
+    evidence = Evidence.build(["Revenue was 5,829."], [], "what changed?")
+    assert ungrounded(parse("divide(5829, const_1000)"), evidence) == []
+    assert ungrounded(parse("multiply(5829, const_30200)"), evidence) == ["30200"]
+    problem = Problem(
+        "c/turn_1",
+        "and the change?",
+        ["Revenue was 5,829."],
+        [],
+        [],
+        history=(("what was the ratio?", "0.10826"),),
+    )
+    reader = _Scripted([Reply("PROGRAM: 0.10826 * 100")])
+    solution = asyncio.run(Solver(reader=reader, task=ProgramTask(_execute)).solve(problem))
+    assert solution.samples[0].reason == "ok" and solution.decision.value == 10.826

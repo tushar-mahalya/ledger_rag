@@ -54,8 +54,10 @@ from ledger_rag.evaluation.uncertainty import (
 )
 from ledger_rag.reasoning import direct, typed
 from ledger_rag.reasoning.consistency import Candidate, decide
-from ledger_rag.reasoning.dsl import Program
+from ledger_rag.reasoning.dsl import Program, ProgramParseError
+from ledger_rag.reasoning.dsl import parse as parse_dsl
 from ledger_rag.reasoning.exemplars import Exemplar, ExemplarIndex
+from ledger_rag.reasoning.expression import render as render_expression
 from ledger_rag.reasoning.solver import (
     PAGE_MARKER,
     PROMPT_VERSION,
@@ -110,6 +112,11 @@ def report_cluster(filename: str) -> str:
     return "/".join(filename.split("/")[:2])
 
 
+def program_line(dsl: str) -> str:
+    """A gold DSL program as the expression line a reader writes."""
+    return f"PROGRAM: {render_expression(parse_dsl(dsl))}"
+
+
 def official_executor(program: Program, item: Problem) -> Execution:
     result = official.execute(program.text, item.table)
     return Execution(result.value, result.valid)
@@ -133,7 +140,7 @@ def finqa_items(directory: Path, split: str) -> list[Item]:
         Item(
             _page(record, id=str(record["id"]), question=str(record["qa"]["question"])),
             record["qa"]["exe_ans"],
-            f"PROGRAM: {record['qa']['program']}",
+            program_line(str(record["qa"]["program"])),
             report_cluster(str(record["filename"])),
             f"ANSWER: {record['qa']['exe_ans']}",
         )
@@ -147,7 +154,7 @@ def finqa_exemplars(directory: Path) -> list[Exemplar]:
             id=str(record["id"]),
             question=str(record["qa"]["question"]),
             facts=tuple(str(t).strip() for t in record["qa"].get("gold_inds", {}).values()),
-            solution=f"PROGRAM: {record['qa']['program']}",
+            solution=program_line(str(record["qa"]["program"])),
             group=str(record["filename"]),
         )
         for record in load_split(directory, "train")
@@ -183,7 +190,7 @@ def convfinqa_items(directory: Path, split: str) -> list[Item]:
                 Item(
                     problem,
                     answers[turn],
-                    f"PROGRAM: {programs[turn]}",
+                    program_line(str(programs[turn])),
                     report_cluster(str(record["filename"])),
                     f"ANSWER: {answers[turn]}",
                 )
@@ -251,7 +258,10 @@ def tatqa_solution(question: dict[str, Any]) -> str | None:
     for candidate in (program, f"{program}, multiply(#{program.count('(') - 1}, const_100)"):
         result = official.execute(candidate, [])
         if isinstance(result.value, float) and round(result.value, 2) == round(float(answer), 2):
-            return f"{head}\nPROGRAM: {candidate}"
+            try:
+                return f"{head}\n{program_line(candidate)}"
+            except ProgramParseError:
+                return None  # Longer than the reader's program bound.
     return None
 
 
