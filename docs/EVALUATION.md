@@ -6,6 +6,41 @@ deterministic lexical retriever and extractive provider. It exists to exercise
 contracts without keys, network traffic, model downloads, or benchmark redistribution.
 Do not relabel its scores as FinanceBench, FinQA, or TAT-QA results.
 
+## Raw model vs Ledger backend (program-of-thought reasoning, 2026-11-09)
+
+Design and evidence: [ADR 0008](adr/0008-program-of-thought-reasoning.md). Every run
+answers the **same questions with the same model and generation settings** in two
+or more arms, in the standard gold-evidence setting of each benchmark:
+
+| Arm | What the model gets and does |
+|---|---|
+| `raw` | The evidence and question; free reasoning; one `ANSWER:` line (plus `SCALE:` for TAT-QA). Parsed leniently. |
+| `ledger` | The same evidence plus 4 BM25-retrieved solved *training* problems; writes a program (or a typed answer with scale); literals must be grounded; a deterministic executor computes; 5 samples vote on the executed result. |
+| `ledger-refine` | `ledger`, plus execution-feedback refinement when no answer wins a strict majority. |
+| `ledger-zero-shot` | `ledger` without exemplars (ablation). |
+
+Metrics are the official ones: FinQA/ConvFinQA execution accuracy with the
+vendored official executor (`official`, exact), the Program-of-Thoughts tolerant
+comparison (`tolerant`) and its percentage-tolerant variant (`lenient`, which
+gives free-text raw answers every benefit of the doubt); TAT-QA exact match and F1
+with the vendored official metric. Intervals are 95% report-cluster bootstraps;
+`ledger-minus-raw` is a paired difference on identical questions. Offline gold
+replay scores 100% (FinQA), 99.9% (ConvFinQA) and 99.7% raw / 99.1% Ledger (TAT-QA)
+on dev, which bounds parser and scorer losses.
+
+```bash
+# Offline pipeline check (no model, no spend):
+uv run --group scoring python -m ledger_rag.evaluation.benchmarks.reasoning \
+  --benchmark tatqa --reader replay-gold
+# Any registered models, in parallel on Modal (config/models/<id>.toml):
+ledgerctl modal -- run compute/reasoning.py --models qwen3.5-4b,phi-4-mini \
+  --benchmarks finqa,convfinqa,tatqa --limit 300 --output matrix.json
+uv run python -m ledger_rag.evaluation.benchmarks.reasoning_table matrix.json
+```
+
+Results are dev selections until a configuration is frozen; held-out test runs
+need `--split test --unseal-test`. Results are recorded below as they are measured.
+
 ## Verified prior full-dev retrieval measurement
 
 Verified read-only from `ledger-data:/evaluation/c17d398f34f24efd874e29bb641d9738.json`
