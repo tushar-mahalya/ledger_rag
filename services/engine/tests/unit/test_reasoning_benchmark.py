@@ -151,3 +151,23 @@ def test_typed_contract_grounds_spans_and_runs_programs() -> None:
 )
 def test_derivations_become_programs(derivation: str, program: str | None) -> None:
     assert typed.expression_program(derivation) == program
+
+
+def test_merge_replaces_an_arm_and_recomputes_paired_deltas(
+    finqa_dir: Path, tmp_path: Path
+) -> None:
+    from ledger_rag.evaluation.benchmarks import reasoning_merge
+
+    base, rerun = tmp_path / "base.json", tmp_path / "rerun.json"
+    common = ["--data-dir", str(finqa_dir), "--samples", "1"]
+    assert reasoning.main([*common, "--output", str(base)]) == 0
+    assert reasoning.main([*common, "--pipelines", "raw", "--output", str(rerun)]) == 0
+    report, again = json.loads(base.read_text()), json.loads(rerun.read_text())
+    for row in again["results"]:  # Pretend the rerun raw arm missed every answer.
+        row["arms"]["raw"]["metrics"] = {k: 0.0 for k in row["arms"]["raw"]["metrics"]}
+    merged = reasoning_merge.merge(report, again)
+    assert merged["paired"]["ledger-minus-raw"]["official_accuracy"]["delta"] == 1.0
+    assert merged["merged"]["replaced_arms"] == ["raw"]
+    again["results"] = again["results"][:-1]
+    with pytest.raises(ValueError):
+        reasoning_merge.merge(report, again)
