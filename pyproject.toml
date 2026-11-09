@@ -20,6 +20,8 @@ dev = [
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# Vendored upstream code stays byte-identical to its pinned source.
+extend-exclude = ["services/engine/src/ledger_rag/evaluation/official/_finqa_upstream.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
