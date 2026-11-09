@@ -11,7 +11,7 @@ from ledger_rag.reasoning.consistency import Candidate, decide, vote_key
 from ledger_rag.reasoning.dsl import ProgramParseError, parse
 from ledger_rag.reasoning.exemplars import Exemplar, ExemplarIndex
 from ledger_rag.reasoning.grounding import Evidence, ungrounded
-from ledger_rag.reasoning.solver import Execution, Problem, Reply, Solver, messages
+from ledger_rag.reasoning.solver import Execution, Problem, ProgramTask, Reply, Solver, messages
 
 TABLE = [
     ["", "2009", "2008"],
@@ -49,7 +49,7 @@ def test_parse_recovers_canonical_programs(reply: str, program: str) -> None:
     [
         "the answer is 12",
         "PROGRAM: divide(#1, 5)",
-        "PROGRAM: add(1, 2, 3)",
+        "PROGRAM: subtract(1, 2, 3)",
         "PROGRAM: add(revenue, 2)",
         "PROGRAM: table_sum(#0, none)",
         "PROGRAM: " + ", ".join("add(1, 2)" for _ in range(11)),
@@ -165,7 +165,9 @@ def test_solver_votes_over_grounded_executed_samples() -> None:
             Reply("no program here"),
         ]
     )
-    solution = asyncio.run(Solver(reader=reader, executor=_execute, samples=5).solve(problem))
+    solution = asyncio.run(
+        Solver(reader=reader, task=ProgramTask(_execute), samples=5).solve(problem)
+    )
     assert solution.decision.value == 94.0 and solution.decision.votes == 2
     assert [s.reason for s in solution.samples] == [
         "ungrounded",
@@ -188,4 +190,4 @@ def test_prompt_contains_exemplars_page_and_question_only_as_data() -> None:
     assert user.index("Solved examples") < user.index("Page:") < user.rindex("Question: what")
     assert "| net revenue | $ 5829 | $ 5735 |" in user
     with pytest.raises(ValueError):
-        Solver(reader=_Scripted([]), executor=_execute, samples=0)
+        Solver(reader=_Scripted([]), task=ProgramTask(_execute), samples=0)
