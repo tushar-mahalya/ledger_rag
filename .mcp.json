@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "cloudflare-docs": {
+      "type": "http",
+      "url": "https://docs.mcp.cloudflare.com/mcp"
+    },
+    "qdrant-docs": {
+      "type": "http",
+      "url": "https://search.qdrant.tech/mcp"
+    },
+    "twilio-docs": {
+      "type": "http",
+      "url": "https://mcp.twilio.com/docs"
+    }
+  }
+}
