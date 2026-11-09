@@ -28,7 +28,7 @@ SCALE: <none|thousand|million|billion|percent>"""
 _ANSWER = re.compile(r"^\s*(?:\*\*)?ANSWER(?:\*\*)?\s*:\s*(.+?)\s*$", re.I | re.M)
 _SCALE = re.compile(r"^\s*(?:\*\*)?SCALE(?:\*\*)?\s*:\s*(.*?)\s*$", re.I | re.M)
 _BARE = re.compile(r"\(?-?\$?\s*-?(?:\d[\d,]*(?:\.\d+)?|\.\d+)\)?")
-_NUMERIC = re.compile(r"^\(?-?\$?\s*-?\d[\d,]*(?:\.\d+)?\s*%?\)?$|^\(?-?\$?\s*-?\.\d+\s*%?\)?$")
+_NUMERIC = re.compile(r"^\(?-?\$?\s*-?(?:\d[\d,]*(?:\.\d+)?|\.\d+)(?:e[-+]?\d+)?\s*%?\)?$", re.I)
 
 
 def _last(pattern: re.Pattern[str], text: str) -> str | None:
@@ -43,7 +43,7 @@ def read_number(text: str) -> float | None:
     if not _NUMERIC.match(raw):
         return None
     negative = raw.startswith("(") and raw.endswith(")") or raw.lstrip("($ ").startswith("-")
-    digits = re.sub(r"[^\d.]", "", raw)
+    digits = re.sub(r"[^\d.eE+-]", "", raw).lstrip("+-")
     try:
         value = float(digits)
     except ValueError:
