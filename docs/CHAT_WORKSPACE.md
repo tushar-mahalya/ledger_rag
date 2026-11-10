@@ -15,8 +15,10 @@ npm --prefix services/web run dev
 
 Open `http://127.0.0.1:5173`. The initial **design preview** uses curated answers
 over the original fictional Aurora disclosures. It makes no LLM calls, shows no
-invented execution timings and does not search the web. Only its three explicit
-example questions are supported; other preview questions explain this limit.
+invented execution timings and does not search the web. Only its five explicit
+[example questions](../services/web/src/demo.ts#L38-L45) are supported; the fifth
+replays recorded SEC and FRED payloads, not a live provider call. Other preview
+questions explain this limit.
 
 For live queries, start the API with the [README instructions](../README.md#start-locally).
 The development server proxies `/v1/` to `http://127.0.0.1:8080`. Set the
@@ -69,17 +71,20 @@ flowchart LR
 | Surface | Behavior |
 |---|---|
 | Answer | Markdown, headings, lists, tables and fenced code. No raw HTML, executable code, iframe or remote image loading. |
-| References | Numbered inline citations open an exact excerpt with title, document ID, source identifier and publication date. Only credential-free HTTP(S) URLs become outbound links. |
+| References | Numbered inline citations open an exact excerpt with title, document ID, source identifier and publication date. External SEC XBRL and FRED/ALFRED citations add a source badge and a [provenance panel](../services/web/src/components/Inspector.tsx#L170-L243) (including provider, entity, concept, form, period, value, unit, scale, as-of, vintage, retrieval time, freshness and revisions). Only credential-free HTTP(S) URLs become outbound links. |
 | Artifacts | Tables and code extracted from the Markdown AST, inspectable independently and downloadable. CSV export neutralizes formula-like cells. Code is always inert text. |
-| Activity | Actual server retrieval/model/tool/validation events. No private chain-of-thought, simulated typing, fake progress percentages or fabricated tool traces. |
+| Activity | Actual server planning/retrieval/model/tool/validation events. No private chain-of-thought, simulated typing, fake progress percentages or fabricated tool traces. |
 | Run details | Request ID, model, retrieval and generation/tool time, browser elapsed time, tool count and abstention status. Missing values stay missing; previews never masquerade as measurements. |
 | Conversations | At most 20 per tab, 40 turns per conversation. Up to 12 bounded user/assistant messages are sent as untrusted history, never authorization or evidence. |
 | Failures | Authentication, rate/capacity, malformed/truncated streams and deadlines have explicit errors. `answer` without `done` is not accepted. Stop cancels fetch; late results cannot populate another conversation. |
 | Access | Tenant/group permissions come from the server identity. The UI cannot choose an arbitrary upstream URL or supply tenant claims. Provider/database/platform keys remain server-side. |
 
-Publication cutoff means disclosure publication date, not fiscal year. Initial
-retrieval remains latest-question driven; the UI does not claim a history-aware
-query-rewriting system. Citation validity is not semantic entailment. Artifact
+Publication cutoff means disclosure publication date, not fiscal year. The
+backend planner, not the UI, may rewrite a chat follow-up into a standalone
+retrieval query from screened history; history stays untrusted context
+([query planning](ARCHITECTURE.md#query-planning)). The UI only sends
+[bounded history](../services/web/src/contracts.ts#L49-L65) and shows the plan
+digest. Citation validity is not semantic entailment. Artifact
 extraction does not independently verify financial calculations or units.
 
 There is no upload UI, persistent artifact version store, executable HTML/
@@ -101,7 +106,9 @@ payloads without them still parse; the surfaces simply do not render.
 | Timeline | Started/completed pairs fold into one row per operation, keyed and iconed by activity `kind` (so "Verifying grounding" is distinct from citation validation). The completed planning row expands into the plan digest: intent, route, sub-questions, companies and periods. |
 
 The demo mode includes a verified three-step growth calculation, verified
-comparison and liquidity answers, and an abstained forecast question. The demo
+comparison and liquidity answers, an abstained forecast question, and a labeled
+offline replay of recorded SEC XBRL and FRED point-in-time evidence
+([external test](../services/web/src/external.test.ts)). The demo
 texts were checked against the backend number checker. Contract fixtures in
 `contracts/answers.json` are produced by running the real chat pipeline
 offline. Regenerate them, with the JSON Schema used by the bound-parity test, via

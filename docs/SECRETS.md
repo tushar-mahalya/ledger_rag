@@ -39,7 +39,7 @@ secret managers, registries) and what this design does not provide are recorded 
 | `ledgerctl unset NAME` | Removes a value |
 | `ledgerctl rotate [NAME ...]` | Regenerates internal credentials (all generated ones by default) |
 | `ledgerctl run [--env dev] -- CMD` | **Inject**: runs one command with that environment's settings and secrets |
-| `ledgerctl push ENV [--dry-run]` | **Push**: replaces each runtime secret store (Modal Secrets) with its routed payload |
+| `ledgerctl push ENV [--target NAME] [--dry-run]` | **Push**: replaces each runtime secret store (Modal Secrets) with its routed payload; repeat `--target` (e.g. `modal-tei`) to push only those manifest targets ([push](../tools/ledgerctl/src/ledgerctl/cli.py#L236-L268)) |
 | `ledgerctl modal -- ARGS` | Modal CLI with the project token and environment, for that command only |
 | `ledgerctl key public \| backup PATH` | Shows the public key, or writes the identity once to offline storage |
 | `ledgerctl install` | Puts `ledgerctl` on PATH (`~/.local/bin`) bound to this checkout and its lockfile |

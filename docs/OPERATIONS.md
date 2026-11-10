@@ -26,7 +26,10 @@ the synthetic `demo` tenant only.
 `POST /v1/query` returns a citation-validated answer.
 `POST /v1/query/stream` sends SSE evidence followed by the validated final answer;
 it is **not model-token streaming**. `POST /v1/documents` ingests documents as
-admin; `/metrics` also requires an admin bearer identity. Health endpoints are
+admin. The admin-only `PATCH /v1/documents/{id}/acl` and `DELETE /v1/documents/{id}`
+change or erase one tenant document without re-embedding
+([routes](../services/engine/src/ledger_rag/api/app.py#L257-L292)).
+`/metrics` also requires an admin bearer identity. Health endpoints are
 unauthenticated and must not be exposed beyond a trusted ingress.
 
 Optional Compose profiles: `--profile qdrant` adds a local, unauthenticated Qdrant
@@ -186,8 +189,10 @@ Application structlog JSON goes to **process/container output** with request/tra
 IDs and no request body. It is not automatically shipped to Loki: install a reviewed
 host log forwarder (e.g. Alloy/Fluent Bit), parse JSON, redact at source, and send OTLP
 logs to Collector. No Docker socket or unrestricted host-log mount is supplied.
-Collector retains HTTP metadata plus fixed graph stage/tool/profile enums and
-numeric/boolean retrieval/citation/outcome fields. Model strings, prompts, tool
+Collector retains HTTP metadata plus fixed graph stage/tool/profile enums,
+numeric/boolean retrieval/citation/outcome fields and `rag.plan.*` planner enums,
+counts, confidences and timing
+([allowlist](../deploy/observability/otel-collector.yaml#L21-L26)). Model strings, prompts, tool
 arguments and outputs are not allowlisted. It drops other span attributes and
 log bodies as defense in depth;
 this is not proof of complete PII redaction. Review resource attributes, span
@@ -204,7 +209,10 @@ dropped as `invalid_payload` (schema corruption), `filter_violation` (tenant/ACL
 as-of mismatch despite the server filter) or `invalid_score`; search refills
 `top_k` from the remaining fused candidates and logs `qdrant_points_rejected`
 with counts only, never payloads or point IDs. Any non-zero rate signals index
-corruption or a filter bug and should page.
+corruption or a filter bug and should page. When the in-process voice gateway is
+enabled, the same registry adds `ledger_voice_*` session, turn, STT, TTS
+first-byte, first-audio and barge-in metrics
+([voice metrics](../services/engine/src/ledger_rag/voice/metrics.py)).
 Alert on HTTP 5xx/429, p95/p99 latency, scrape failures,
 Qdrant disk exhaustion, rising abstentions, and provider timeouts. Prometheus
 retains 15 days; Loki/Tempo retain seven days with local storage in this reference.
@@ -230,8 +238,9 @@ flowchart LR
 
 Solid paths reflect shipped configuration, not a verified cloud deployment.
 The dashed log path is missing infrastructure, not automatic log delivery.
-The Collector currently retains only a narrow HTTP/error attribute allowlist;
-custom RAG/voice attributes are not all retained by the default export pipeline.
+The Collector retains HTTP/error metadata plus the allowlisted RAG and planner
+attributes; voice, reranker and verifier span attributes are dropped by the
+default export pipeline.
 Direct Langfuse export is an explicit alternative configuration, not a second
 simultaneous sink shown here. Prompt capture remains disabled.
 
@@ -262,7 +271,8 @@ run inference/storage/telemetry in separate trust zones.
 
 OIDC accepts RS256/ES256 and requires issuer, audience, expiration, issued-at,
 subject, and `tenant_id`; `roles` and `groups` are lists of strings.
-Readers query; admins ingest and scrape metrics. Authorization derives tenant and
+Readers query; admins ingest, change document ACLs, delete documents and scrape
+metrics. Authorization derives tenant and
 groups from verified claims, not user input. Review IdP role/group mapping and
 test cross-tenant isolation before onboarding customers. Enforce access and
 revocation at ingestion and retrieval; retrieval filters do not replace data

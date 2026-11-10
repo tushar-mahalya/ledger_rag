@@ -66,12 +66,18 @@ nonempty history and retains its direct fast path.
 **Important exception:** `POST /v1/documents` remains a synchronous, authorized
 small-write path sharing the API's admission capacity and in-process retriever
 lock. It can block queries during replacement. It is not a durable asynchronous
-ingestion API; use [Modal ingestion](INGESTION.md) for bulk builds.
+ingestion API; use [Modal ingestion](INGESTION.md) for bulk builds. The admin-only
+`PATCH /v1/documents/{id}/acl` and `DELETE /v1/documents/{id}` share the same
+admission slot and write lock; they change or erase one tenant document without
+re-embedding ([ingest](../services/engine/src/ledger_rag/api/app.py#L230-L251),
+[ACL update](../services/engine/src/ledger_rag/api/app.py#L257-L276),
+[delete](../services/engine/src/ledger_rag/api/app.py#L278-L292)).
 
 ## 2. Query execution and evidence boundary
 
 ```mermaid
 sequenceDiagram
+    autonumber
     actor Client
     participant API
     participant RAG
@@ -136,7 +142,10 @@ Sources: [API](../services/engine/src/ledger_rag/api/app.py),
 `RagService.retrieve` plans each request before searching
 ([planning package](../services/engine/src/ledger_rag/planning/)). The chat graph's `plan` node
 at `START` reuses that plan (it is matched to the request by a hash, so it never
-re-runs remote calls) and records only enum/count attributes. Set
+re-runs remote calls) and records only enum, boolean, count, confidence and
+elapsed-time span attributes, never query text, history or rewrites
+([plan node](../services/engine/src/ledger_rag/orchestration/chat.py#L80-L105),
+[attributes](../services/engine/src/ledger_rag/planning/planner.py#L56-L73)). Set
 `LEDGER_PLANNER_ENABLED=false` to restore single-query retrieval exactly.
 
 ```mermaid
@@ -335,8 +344,9 @@ different consumers; platform tokens never reach a runtime.
 
 The application emits JSON logs, metrics, and HTTP/RAG/rerank/voice spans plus
 safe LangGraph model/tool/validation spans. The Collector retains fixed stage,
-tool and profile enums, booleans and counts, while excluding configured model
-strings and free-text input/output. Its OTLP logs receiver is configured,
+tool and profile enums, booleans and counts, plus planner confidence scores and
+planning time, while excluding configured model strings and free-text input/output
+([allowlist](../deploy/observability/otel-collector.yaml#L21-L26)). Its OTLP logs receiver is configured,
 but an application-to-Collector log shipper is **not** wired. Grafana, Prometheus,
 Tempo and Loki have reference configuration; dashboards, alert rules and
 validated GenAI/Langfuse semantics remain gaps. See the

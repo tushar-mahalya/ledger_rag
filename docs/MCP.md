@@ -85,6 +85,11 @@ rejection, corpus tenant/group/publication filtering, external vintage cutoffs
 and concurrent principal isolation. No live tokens, deployments or external
 requests are needed.
 
+Implementation: [tool allowlist](../services/engine/src/ledger_rag/mcp_adapter/server.py#L58-L81),
+[transport limits](../services/engine/src/ledger_rag/mcp_adapter/server.py#L173-L193),
+[request guard](../services/engine/src/ledger_rag/mcp_adapter/server.py#L205-L257),
+[settings](../services/engine/src/ledger_rag/core/config.py#L194-L199).
+
 Sources: [MCP Python SDK v2.3.0 ASGI lifecycle](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/docs/run/asgi.md),
 [MCP authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization),
 [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728.html).

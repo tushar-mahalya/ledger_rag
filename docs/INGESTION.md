@@ -84,7 +84,8 @@ endpoint from the local CLI.
 
 Defaults are one L4 (L40S capacity fallback), 4 CPU, 16 GiB RAM, 128-item embedding
 and upload batches, no vector quantization, a one-hour job timeout, no automatic
-function retries, and single-use containers. These are bounded starting
+function retries, and single-use containers
+([function settings](../compute/ingestion.py#L62-L73)). These are bounded starting
 configurations, **not measured cost/throughput optima or dollar spending caps**.
 The GPU is allocated for loading and uploading too; colocating saves embedding
 network hops but slow database writes can leave GPU time idle. Measure before

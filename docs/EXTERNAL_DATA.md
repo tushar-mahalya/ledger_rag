@@ -82,7 +82,7 @@ provenance are tested separately from benchmark correctness.
 ```sh
 uv run --locked pytest -q services/engine/tests/unit/test_external_*.py services/engine/tests/unit/test_mcp_adapter.py
 uv run --locked python scripts/dump_contract_fixtures.py --check
-cd web && npm test -- src/external.test.ts src/contract.test.ts
+npm --prefix services/web test -- src/external.test.ts src/contract.test.ts
 ```
 
 Recorded provider fixtures are verified locally; a regression rejects any
@@ -105,6 +105,10 @@ logging. Both FRED requests returned **HTTP 200**:
 This verifies one tightly bounded historical observation, not every series,
 ongoing availability or real voice latency. Live SEC verification and broader
 provider coverage remain release checks. No paid jobs or deployments ran.
+
+Implementation: [default limits](../services/engine/src/ledger_rag/core/config.py#L175-L192),
+[tool schemas](../services/engine/src/ledger_rag/external/tools.py#L29-L47),
+[evidence identity limit](../services/engine/src/ledger_rag/core/provenance.py#L21-L25).
 
 Sources: [SEC APIs and fair access](https://www.sec.gov/search-filings/edgar-application-programming-interfaces),
 [FRED observations and real-time periods](https://fred.stlouisfed.org/docs/api/fred/series_observations.html).
