@@ -2,7 +2,7 @@
 
 - Status: accepted; implemented and measured 2026-11-09 (8-model dev matrix,
   frozen-config FinQA and TAT-QA test runs, retrieved-evidence FinQA). Results:
-  [Evaluation](../EVALUATION.md#raw-model-vs-ledger-backend-program-of-thought-reasoning-2026-11-09) (see [Evaluation](../EVALUATION.md#program-of-thought-reasoning-2026-11-09))
+  [Evaluation](../EVALUATION.md#raw-model-vs-ledger-backend-program-of-thought-reasoning-2026-11-09)
 - Date: 2026-11-09
 
 ## Context

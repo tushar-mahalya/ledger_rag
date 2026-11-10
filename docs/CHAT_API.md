@@ -385,7 +385,8 @@ been measured on Ledger data.
 failed verification, top retrieval score below `LEDGER_ABSTAIN_MIN_TOP_SCORE`
 (default unset, because memory, RRF and reranker scores use different scales),
 citation coverage below `LEDGER_ABSTAIN_MIN_CITATION_COVERAGE` (default 0), and
-tool errors above `LEDGER_ABSTAIN_MAX_TOOL_ERRORS` (default unset). **These
+tool errors above `LEDGER_ABSTAIN_MAX_TOOL_ERRORS` (default unset;
+[source](../services/engine/src/ledger_rag/generation/abstention.py#L80-L81)). **These
 thresholds are not calibrated.** `calibrated` is always `false` until they are
 fitted on FinQA dev data (never the test split); the exposed `features` exist
 for that fit.
@@ -423,12 +424,13 @@ sequenceDiagram
 Chat uses a typed LangGraph `StateGraph`:
 
 ```text
-START -> model -> tools -> model -> ... -> validation -> END
-            \----------------------------^
+START -> plan -> model -> tools -> model -> ... -> validation -> END
+                    \----------------------------^
 ```
 
-The conditional entry can skip the model for an evidence-free, search-disabled
-direct call. Model, tool execution, and citation validation are separate nodes,
+After the `plan` node, a conditional edge can skip the model for a confident
+out-of-scope refusal or an evidence-free, search-disabled direct call
+([graph](../services/engine/src/ledger_rag/orchestration/chat.py#L243-L251)). Model, tool execution, and citation validation are separate nodes,
 not a graph wrapper around a manual agent loop. `max_tool_rounds` retains its
 existing meaning: a **total tool-call budget** (default 3, configured range 1–5),
 including rejected requests, not unlimited calls per round. An oversized batch
