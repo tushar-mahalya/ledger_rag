@@ -178,7 +178,8 @@ of concurrency capacity.
 
 - [Coding-agent workflows and portable skills](docs/AGENT_WORKFLOWS.md)
 - [Current decisions, tradeoffs and open experiments](docs/research/2026-10-31-decisions.md)
-- [Architecture and execution paths](docs/ARCHITECTURE.md)
+- [Architecture and execution paths](docs/ARCHITECTURE.md), with the
+  [architecture handbook](docs/architecture/index.md) for traced journeys, coverage and glossary
 - [Chat workspace, design research and browser validation](docs/CHAT_WORKSPACE.md)
 - [Primary-source research and dataset decisions](docs/RESEARCH.md)
 - [Deployment, secrets, observability and recovery](docs/OPERATIONS.md)

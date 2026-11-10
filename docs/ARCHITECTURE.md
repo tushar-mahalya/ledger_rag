@@ -8,6 +8,8 @@ not the number of frameworks.
 validated. [Validation](VALIDATION.md) records measured evidence.
 [Architecture choices](research/2026-10-31-decisions.md#architecture-choice-review)
 compare alternatives and define when to revisit them.
+The [architecture handbook](architecture/index.md) traces priority journeys step by step
+with source and test links, and lists coverage gaps.
 
 ## 1. Current system boundaries
 

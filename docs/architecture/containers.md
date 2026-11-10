@@ -35,19 +35,20 @@ Modal batch jobs reuse engine code and write new Qdrant collections.
 
 ## Units
 
-| Unit | Responsibility | Technology | Owner | Interface | Source |
-|---|---|---|---|---|---|
-| Engine API (`ledger-rag`) | Authorize, retrieve, generate, validate and abstain for every channel | Python 3.11+, FastAPI, LangGraph, qdrant-client | unknown | `/v1/query`, `/v1/query/stream`, `/v1/documents`, `/health/*`, `/metrics`, `/mcp`; [CHAT_API.md](../CHAT_API.md) | [app.py](../../services/engine/src/ledger_rag/api/app.py) |
-| In-process voice gateway | Transitional PCM and Twilio WebSocket gateway inside the engine, off by default | Engine code, `LEDGER_VOICE_ENABLED` | unknown | `/v1/voice/twilio`, `/v1/voice/stream` | [transport.py](../../services/engine/src/ledger_rag/voice/transport.py) |
-| Web workspace | Show answers, sources, artifacts and live activity | React 19, TypeScript, Vite, zod, Nginx | unknown | Calls `/v1/query/stream`; Nginx proxies `/v1/` | [api.ts](../../services/web/src/api.ts), [nginx.conf](../../services/web/nginx.conf) |
-| `ledger-voice` | Take Twilio calls and speak only validated answers or fixed phrases | Python, FastAPI, Pipecat 1.14.0, ElevenLabs | unknown | `/twilio/voice`, media WebSocket; calls `/v1/query` | [app.py](../../services/voice/src/ledger_voice/app.py), [ADR 0006](../adr/0006-voice-channel-service.md) |
-| Modal serving apps | Host embeddings, rerankers, a Qwen LLM, Laya decisions and a groundedness verifier | Modal, TEI, vLLM | unknown | Bearer-authenticated HTTPS endpoints | [compute README](../../compute/README.md) |
-| Modal batch jobs | Build indexes, run evaluations, cache summaries and train embeddings | Modal GPU functions | unknown | `modal run` through `ledgerctl modal` | [ingestion.py](../../compute/ingestion.py), [INGESTION.md](../INGESTION.md) |
-| `ledgerctl` | Store, inject and push secrets by a routing manifest | Python standard library, SOPS, age | unknown | CLI | [cli.py](../../tools/ledgerctl/src/ledgerctl/cli.py), [secrets.toml](../../config/secrets.toml), [SECRETS.md](../SECRETS.md) |
-| Qdrant | Persist chunks with dense and sparse vectors and access payloads | Qdrant 1.20.0 in Compose; managed cluster otherwise | unknown | Qdrant HTTP API | [qdrant.py](../../services/engine/src/ledger_rag/retrieval/qdrant.py), [compose.yaml](../../compose.yaml) |
-| Observability stack | Receive traces and serve metrics, logs and dashboards | OpenTelemetry Collector, Prometheus, Tempo, Loki, Grafana | unknown | OTLP; Prometheus scrapes the Collector | [deploy/observability](../../deploy/observability/), [OPERATIONS.md](../OPERATIONS.md#observability-data-flow) |
+| Unit | Responsibility | Technology | Interface | Source |
+|---|---|---|---|---|
+| Engine API (`ledger-rag`) | Authorize, retrieve, generate, validate and abstain for every channel | Python 3.11+, FastAPI, LangGraph, qdrant-client | `/v1/query`, `/v1/query/stream`, `/v1/documents`, `/health/*`, `/metrics`, `/mcp`; [CHAT_API.md](../CHAT_API.md) | [app.py](../../services/engine/src/ledger_rag/api/app.py) |
+| In-process voice gateway | Transitional PCM and Twilio WebSocket gateway inside the engine, off by default | Engine code, `LEDGER_VOICE_ENABLED` | `/v1/voice/twilio`, `/v1/voice/stream` | [transport.py](../../services/engine/src/ledger_rag/voice/transport.py) |
+| Web workspace | Show answers, sources, artifacts and live activity | React 19, TypeScript, Vite, zod, Nginx | Calls `/v1/query/stream`; Nginx proxies `/v1/` | [api.ts](../../services/web/src/api.ts), [nginx.conf](../../services/web/nginx.conf) |
+| `ledger-voice` | Take Twilio calls and speak only validated answers or fixed phrases | Python, FastAPI, Pipecat 1.14.0, ElevenLabs | `/twilio/voice`, media WebSocket; calls `/v1/query` | [app.py](../../services/voice/src/ledger_voice/app.py), [ADR 0006](../adr/0006-voice-channel-service.md) |
+| Modal serving apps | Host embeddings, rerankers, a Qwen LLM, Laya decisions and a groundedness verifier | Modal, TEI, vLLM | Bearer-authenticated HTTPS endpoints | [compute README](../../compute/README.md) |
+| Modal batch jobs | Build indexes, run evaluations, cache summaries and train embeddings | Modal GPU functions | `modal run` through `ledgerctl modal` | [ingestion.py](../../compute/ingestion.py), [INGESTION.md](../INGESTION.md) |
+| `ledgerctl` | Store, inject and push secrets by a routing manifest | Python standard library, SOPS, age | CLI | [cli.py](../../tools/ledgerctl/src/ledgerctl/cli.py), [secrets.toml](../../config/secrets.toml), [SECRETS.md](../SECRETS.md) |
+| Qdrant | Persist chunks with dense and sparse vectors and access payloads | Qdrant 1.20.0 in Compose; managed cluster otherwise | Qdrant HTTP API | [qdrant.py](../../services/engine/src/ledger_rag/retrieval/qdrant.py), [compose.yaml](../../compose.yaml) |
+| Observability stack | Receive traces and serve metrics, logs and dashboards | OpenTelemetry Collector, Prometheus, Tempo, Loki, Grafana | OTLP; Prometheus scrapes the Collector | [deploy/observability](../../deploy/observability/), [OPERATIONS.md](../OPERATIONS.md#observability-data-flow) |
 
 `contracts/` is a generated artifact, not a running unit ([contracts README](../../contracts/README.md)).
+No owner is recorded for any unit.
 
 ## Dependency rules
 
@@ -73,7 +74,7 @@ Modal batch jobs reuse engine code and write new Qdrant collections.
 
 ## Evidence and gaps
 
-- **Implementation observed** at commit `c640576` from manifests, entry points and READMEs.
+- **Implementation observed** in the linked manifests, entry points and READMEs.
 - **Unknown:** unit owners, production hosting for the engine and web, and Qdrant hosting details.
 
 ## Related pages

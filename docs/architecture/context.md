@@ -62,7 +62,7 @@ It searches Qdrant and calls speech and public-data services when those features
 
 ## Evidence and gaps
 
-- **Implementation observed** at commit `c640576`. The diagram shows code paths, not a deployed topology.
+- **Implementation observed** in the linked source. The diagram shows code paths, not a deployed topology.
 - **Unknown:** production regions, the chosen identity provider and system owners.
 
 ## Related pages
