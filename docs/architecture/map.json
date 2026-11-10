@@ -1,0 +1,317 @@
+{
+  "version": 1,
+  "pages": [
+    {
+      "path": "index.md",
+      "id": "INDEX-001",
+      "kind": "index",
+      "owner": "unknown",
+      "reviewState": "draft",
+      "verifiedCommit": "c640576aaf12e52008b19581d344d1880bb14672",
+      "covers": [
+        "README.md",
+        "AGENTS.md"
+      ]
+    },
+    {
+      "path": "context.md",
+      "id": "CTX-001",
+      "kind": "context",
+      "owner": "unknown",
+      "reviewState": "draft",
+      "verifiedCommit": "c640576aaf12e52008b19581d344d1880bb14672",
+      "covers": [
+        "services/engine/src/ledger_rag/security/**",
+        "services/engine/src/ledger_rag/generation/providers.py",
+        "services/engine/src/ledger_rag/external/**",
+        "services/engine/src/ledger_rag/mcp_adapter/**",
+        "services/voice/README.md",
+        "compute/README.md"
+      ]
+    },
+    {
+      "path": "containers.md",
+      "id": "CNT-001",
+      "kind": "containers",
+      "owner": "unknown",
+      "reviewState": "draft",
+      "verifiedCommit": "c640576aaf12e52008b19581d344d1880bb14672",
+      "covers": [
+        "services/*/README.md",
+        "services/*/pyproject.toml",
+        "services/engine/Dockerfile",
+        "services/voice/modal_app.py",
+        "services/web/package.json",
+        "services/web/nginx.conf",
+        "services/web/Dockerfile",
+        "services/engine/src/ledger_rag/voice/transport.py",
+        "compute/*.py",
+        "tools/ledgerctl/**",
+        "deploy/**",
+        "config/secrets.toml",
+        "compose.yaml",
+        "pyproject.toml"
+      ]
+    },
+    {
+      "path": "runtime/chat-query-stream.md",
+      "id": "FLOW-001",
+      "kind": "runtime",
+      "owner": "unknown",
+      "reviewState": "draft",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/api/**",
+        "services/engine/src/ledger_rag/orchestration/**",
+        "services/engine/src/ledger_rag/security/**",
+        "services/engine/src/ledger_rag/retrieval/**",
+        "services/engine/src/ledger_rag/planning/planner.py",
+        "services/engine/src/ledger_rag/generation/abstention.py",
+        "services/engine/src/ledger_rag/generation/chat_tools.py",
+        "services/engine/src/ledger_rag/generation/evidence.py",
+        "services/engine/src/ledger_rag/generation/verification.py",
+        "services/engine/src/ledger_rag/core/config.py",
+        "services/engine/src/ledger_rag/core/models.py",
+        "services/engine/src/ledger_rag/core/retry.py",
+        "services/engine/src/ledger_rag/observability/telemetry.py",
+        "services/engine/tests/integration/**",
+        "services/engine/tests/unit/test_chat_graph.py",
+        "services/web/src/api.ts"
+      ]
+    },
+    {
+      "path": "decisions/DEC-001-validated-answer-streaming.md",
+      "id": "DEC-001",
+      "kind": "decision",
+      "decisionStatus": "accepted",
+      "owner": "unknown",
+      "reviewState": "draft",
+      "verifiedCommit": "c640576aaf12e52008b19581d344d1880bb14672",
+      "covers": [
+        "services/engine/src/ledger_rag/api/app.py",
+        "services/engine/src/ledger_rag/api/streaming.py",
+        "services/web/src/api.ts"
+      ]
+    },
+    {
+      "path": "glossary.md",
+      "id": "GLOSS-001",
+      "kind": "glossary",
+      "owner": "unknown",
+      "reviewState": "draft",
+      "verifiedCommit": "c640576aaf12e52008b19581d344d1880bb14672",
+      "covers": [
+        "services/engine/src/ledger_rag/core/models.py"
+      ]
+    },
+    {
+      "path": "../ARCHITECTURE.md",
+      "id": "ARCH-001",
+      "kind": "containers",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/api/app.py",
+        "services/engine/src/ledger_rag/orchestration/service.py",
+        "services/engine/src/ledger_rag/planning/**",
+        "services/engine/src/ledger_rag/retrieval/**",
+        "services/engine/src/ledger_rag/voice/**"
+      ]
+    },
+    {
+      "path": "../CHAT_API.md",
+      "id": "API-001",
+      "kind": "component",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/api/app.py",
+        "services/engine/src/ledger_rag/api/streaming.py",
+        "services/engine/src/ledger_rag/core/models.py",
+        "services/engine/src/ledger_rag/orchestration/chat.py",
+        "services/engine/src/ledger_rag/generation/abstention.py",
+        "services/engine/src/ledger_rag/generation/verification.py",
+        "services/engine/src/ledger_rag/generation/program.py",
+        "contracts/**"
+      ]
+    },
+    {
+      "path": "../CHAT_WORKSPACE.md",
+      "id": "WEB-001",
+      "kind": "component",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/web/src/**"
+      ]
+    },
+    {
+      "path": "../INGESTION.md",
+      "id": "DATA-001",
+      "kind": "data",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/ingestion/**",
+        "services/engine/src/ledger_rag/corpus/**",
+        "compute/ingestion.py",
+        "compute/inference.py"
+      ]
+    },
+    {
+      "path": "../OPERATIONS.md",
+      "id": "OPS-001",
+      "kind": "quality",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/observability/**",
+        "deploy/**",
+        "compose.yaml"
+      ]
+    },
+    {
+      "path": "../SECRETS.md",
+      "id": "SEC-001",
+      "kind": "deployment",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "tools/ledgerctl/**",
+        "config/secrets.toml"
+      ]
+    },
+    {
+      "path": "../MCP.md",
+      "id": "MCP-001",
+      "kind": "component",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/mcp_adapter/**"
+      ]
+    },
+    {
+      "path": "../EXTERNAL_DATA.md",
+      "id": "EXT-001",
+      "kind": "component",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/external/**"
+      ]
+    },
+    {
+      "path": "../adr/0001-native-bm25.md",
+      "id": "ADR-0001",
+      "kind": "decision",
+      "decisionStatus": "accepted",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/retrieval/qdrant.py"
+      ]
+    },
+    {
+      "path": "../adr/0002-chunk-profiles-and-qwen3-rerankers.md",
+      "id": "ADR-0002",
+      "kind": "decision",
+      "decisionStatus": "accepted",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/ingestion/chunking.py",
+        "services/engine/src/ledger_rag/ingestion/context.py",
+        "services/engine/src/ledger_rag/retrieval/vllm_reranker.py",
+        "compute/reranker.py",
+        "compute/summaries.py"
+      ]
+    },
+    {
+      "path": "../adr/0003-external-evidence.md",
+      "id": "ADR-0003",
+      "kind": "decision",
+      "decisionStatus": "accepted",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/external/**"
+      ]
+    },
+    {
+      "path": "../adr/0004-mcp-adapter.md",
+      "id": "ADR-0004",
+      "kind": "decision",
+      "decisionStatus": "accepted",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/mcp_adapter/**"
+      ]
+    },
+    {
+      "path": "../adr/0005-sops-age-secrets.md",
+      "id": "ADR-0005",
+      "kind": "decision",
+      "decisionStatus": "accepted",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "tools/ledgerctl/**",
+        "config/secrets.toml"
+      ]
+    },
+    {
+      "path": "../adr/0006-voice-channel-service.md",
+      "id": "ADR-0006",
+      "kind": "decision",
+      "decisionStatus": "accepted",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/voice/**",
+        "services/engine/src/ledger_rag/voice/**"
+      ]
+    },
+    {
+      "path": "../adr/0007-corpus-pipeline.md",
+      "id": "ADR-0007",
+      "kind": "decision",
+      "decisionStatus": "accepted",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/corpus/**",
+        "compute/ingestion.py"
+      ]
+    },
+    {
+      "path": "../adr/0008-program-of-thought-reasoning.md",
+      "id": "ADR-0008",
+      "kind": "decision",
+      "decisionStatus": "accepted",
+      "owner": "unknown",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
+      "covers": [
+        "services/engine/src/ledger_rag/reasoning/**",
+        "compute/reasoning.py"
+      ]
+    }
+  ]
+}
