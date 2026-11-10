@@ -94,7 +94,7 @@ Default: the validated content becomes the answer.
 
 The thresholds are not calibrated ([abstention.py](../../../services/engine/src/ledger_rag/generation/abstention.py#L1-L12)).
 
-**Inferred:** rule 6 uses a strict comparison, so `LEDGER_ABSTAIN_MAX_TOOL_ERRORS=1` tolerates one tool error and abstains on the second.
+Rule 6 uses a strict comparison, so `LEDGER_ABSTAIN_MAX_TOOL_ERRORS=1` tolerates one tool error and abstains on the second.
 The setting accepts 0 ([config.py](../../../services/engine/src/ledger_rag/core/config.py#L150)). A value of 0 abstains on the first tool error ([test](../../../services/engine/tests/unit/test_verification.py#L331-L349)).
 No test covers a count equal to a non-zero threshold.
 
@@ -142,12 +142,12 @@ The planner skips LLM rewrite and decomposition. The deadline allows at most one
 
 ## Evidence and gaps
 
-- **Implementation observed** at commit `c640576`. Engine source in the working tree matches that commit.
-- **Test evidence:** the four linked test modules and `test_verification.py` ran locally on 2026-11-10 (151 passed) with fake providers and the memory retriever.
+- **Implementation observed** in the linked source.
+- **Test evidence:** the four linked test modules and `test_verification.py` pass locally with fake providers and the memory retriever.
 - **Not exercised:** a real IdP, Qdrant, embedding endpoint, reranker or LLM on this path.
 - **Unknown:** production latency, the deployed topology and the owner of this path.
 
 ## Related pages
 
-- Next: [deployable units](../containers.md) and the [streaming decision](../decisions/DEC-001-validated-answer-streaming.md).
+- Next: [deployable units](../containers.md) and the [streaming decision](../../adr/0009-validated-answer-streaming.md).
 - Contract: [SSE wire contract](../../CHAT_API.md#sse-wire-contract).

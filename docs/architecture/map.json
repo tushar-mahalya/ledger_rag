@@ -80,13 +80,13 @@
       ]
     },
     {
-      "path": "decisions/DEC-001-validated-answer-streaming.md",
-      "id": "DEC-001",
+      "path": "../adr/0009-validated-answer-streaming.md",
+      "id": "ADR-0009",
       "kind": "decision",
       "decisionStatus": "accepted",
       "owner": "unknown",
-      "reviewState": "draft",
-      "verifiedCommit": "c640576aaf12e52008b19581d344d1880bb14672",
+      "reviewState": "needs-review",
+      "verifiedCommit": null,
       "covers": [
         "services/engine/src/ledger_rag/api/app.py",
         "services/engine/src/ledger_rag/api/streaming.py",
